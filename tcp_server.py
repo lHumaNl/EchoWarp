@@ -1,37 +1,28 @@
-import socket
-import threading
 import logging
+from logging_config import setup_logging
+
+setup_logging()
 
 
-def handle_client(conn, addr, stop_event):
-    logging.info(f"Новое подключение: {addr}")
+def client_handler(conn, addr, stop_event):
+    logging.info(f"Установлено соединение с {addr}")
     try:
+        # Начальная аутентификация
+        conn.sendall(b"EchoWarpServer")
+        if conn.recv(1024) == b"EchoWarpClient":
+            logging.info(f"Клиент {addr} аутентифицирован")
+        else:
+            raise ValueError("Ошибка аутентификации")
+
+        # Переходим к "heartbeat"
         while not stop_event.is_set():
-            data = conn.recv(1024)
-            if not data:
+            if conn.recv(1024) == b"heartbeat":
+                conn.sendall(b"heartbeat")
+                time.sleep(5)  # Пауза перед следующим "heartbeat"
+            else:
+                logging.warning(f"Отсутствие 'heartbeat' от {addr}")
                 break
-            logging.info(f"Получено от {addr}: {data}")
-    except socket.timeout:
-        logging.info(f"Timeout соединения с {addr}")
+    except Exception as e:
+        logging.error(f"Ошибка при работе с клиентом {addr}: {e}")
     finally:
-        logging.info(f"Закрытие соединения с {addr}")
         conn.close()
-
-
-def tcp_server(stop_event):
-    host = ''
-    port = 12346
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((host, port))
-    server_socket.listen()
-    logging.info(f"TCP сервер запущен на порту {port}...")
-
-    try:
-        while not stop_event.is_set():
-            conn, addr = server_socket.accept()
-            conn.settimeout(10)
-            client_thread = threading.Thread(target=handle_client, args=(conn, addr, stop_event))
-            client_thread.start()
-    finally:
-        server_socket.close()
-        logging.info("TCP сервер остановлен.")
