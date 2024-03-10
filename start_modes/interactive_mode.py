@@ -2,7 +2,7 @@ import logging
 import os
 from typing import List
 
-from settings import Settings
+from settings.settings import Settings
 
 
 def get_settings_interactive() -> Settings:

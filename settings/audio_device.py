@@ -4,8 +4,6 @@ from typing import List
 
 import pyaudio
 
-from utils import decode_string
-
 
 class AudioDevice:
     py_audio: pyaudio.PyAudio
@@ -36,12 +34,12 @@ class AudioDevice:
         for i in range(self.py_audio.get_device_count()):
             dev = self.py_audio.get_device_info_by_index(i)
 
-            device_name = decode_string(dev['name'], self.__encoding)
+            device_name = self.decode_string(dev['name'])
 
             if dev[f'max{device_type}Channels'] > 0 and device_name in result_from_powershell:
                 id_list.append(i)
                 logging.info(
-                    f"{i}: {device_name} - Channels: {dev[f'max{device_type}Channels']}, Sample rate: {int(dev['defaultSampleRate'])}Hz")
+                    f"{i}: {device_name}, Channels: {dev[f'max{device_type}Channels']}, Sample rate: {int(dev['defaultSampleRate'])}Hz")
 
         while device_index not in id_list:
             if device_index is not None:
@@ -55,7 +53,7 @@ class AudioDevice:
 
         self.device_index = device_index
         dev = self.py_audio.get_device_info_by_index(self.device_index)
-        self.device_name = decode_string(dev['name'], self.__encoding)
+        self.device_name = self.decode_string(dev['name'])
         self.channels = dev[f'max{device_type}Channels']
         self.sample_rate = int(dev['defaultSampleRate'])
 
@@ -74,7 +72,7 @@ class AudioDevice:
         return device_names
 
     def parse_powershell_stdout(self, stdout: str) -> List[str]:
-        decoded_stdout = decode_string(stdout, self.__encoding)
+        decoded_stdout = self.decode_string(stdout)
 
         lines = decoded_stdout.split('\n')
         device_names = []
@@ -88,3 +86,11 @@ class AudioDevice:
                 device_names.append(line.strip())
 
         return device_names
+
+    def decode_string(self, string: str) -> str:
+        try:
+            device_name = string.encode(self.__encoding).decode('utf-8')
+        except UnicodeEncodeError:
+            device_name = string
+
+        return device_name

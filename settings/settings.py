@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Optional, List
 
-from audio_device import AudioDevice
+from settings.audio_device import AudioDevice
 from logging_config import setup_logging
 
 setup_logging()

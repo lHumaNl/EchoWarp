@@ -1,6 +1,6 @@
 import argparse
 
-from settings import Settings
+from settings.settings import Settings
 
 
 def get_settings_by_args() -> Settings:

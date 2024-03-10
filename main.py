@@ -2,14 +2,13 @@ import sys
 import threading
 import logging
 
-import args_mode
-import interactive_mode
+from start_modes import args_mode, interactive_mode
 from logging_config import setup_logging
 
-from audio_server import start_server
-from audio_client import start_client
-from tcp_client import TCPClient
-from tcp_server import TCPServer
+from streamer.audio_client import UDPClientStreamReceiver
+from auth_and_heartbeat.tcp_client import TCPClient
+from auth_and_heartbeat.tcp_server import TCPServer
+from streamer.audio_server import UDPServerStreamer
 
 setup_logging()
 
@@ -25,13 +24,19 @@ def main():
     if settings.is_server:
         logging.info("Start EchoWarp in server mode")
         tcp_server = TCPServer(settings.udp_port, settings.heartbeat_attempt, stop_event)
+        tcp_server.start_tcp_server()
 
-        start_server(settings.udp_port, stop_event)
+        udp_server_streamer = UDPServerStreamer(tcp_server.client_addr, settings.udp_port, settings.audio_device,
+                                                stop_event)
+        udp_server_streamer.start_upd_server_streamer()
     else:
         logging.info("Start EchoWarp in client mode")
         tcp_client = TCPClient(settings.server_addr, settings.udp_port, settings.heartbeat_attempt, stop_event)
+        tcp_client.start_tcp_client()
 
-        start_client(settings.server_addr, settings.udp_port, stop_event)
+        start_udp_client_stream_receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port,
+                                                                   settings.audio_device, stop_event)
+        start_udp_client_stream_receiver.start_udp_client_stream_receiver()
 
     try:
         input("Press Enter to exit...\n")
