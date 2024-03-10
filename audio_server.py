@@ -1,22 +1,10 @@
 import socket
 import pyaudio
 import logging
+
 from logging_config import setup_logging
 
 setup_logging()
-
-
-def select_audio_input_device():
-    p = pyaudio.PyAudio()
-    logging.info("Доступные устройства ввода:")
-    for i in range(p.get_device_count()):
-        dev = p.get_device_info_by_index(i)
-        if dev['maxInputChannels'] > 0:
-            logging.info(
-                f"{i}: {dev['name']} - Каналы: {dev['maxInputChannels']}, Частота: {int(dev['defaultSampleRate'])}Hz")
-    device_index = int(input("Выберите устройство ввода по индексу: "))
-    dev = p.get_device_info_by_index(device_index)
-    return device_index, dev['maxInputChannels'], int(dev['defaultSampleRate']), p
 
 
 def audio_streaming(udp_port, chosen_device_index, channels, rate, p, stop_event):
@@ -43,5 +31,5 @@ def audio_streaming(udp_port, chosen_device_index, channels, rate, p, stop_event
 
 
 def start_server(udp_port, stop_event):
-    chosen_device_index, channels, rate, p = select_audio_input_device()
+    chosen_device_index, channels, rate, p = select_audio_device(True)
     audio_streaming(udp_port, chosen_device_index, channels, rate, p, stop_event)
