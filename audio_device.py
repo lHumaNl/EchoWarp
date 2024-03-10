@@ -31,6 +31,8 @@ class AudioDevice:
 
         result_from_powershell = self.get_data_from_powershell()
 
+        logging.info(f"Select id of {device_type} audio device:")
+
         for i in range(self.py_audio.get_device_count()):
             dev = self.py_audio.get_device_info_by_index(i)
 
@@ -43,7 +45,7 @@ class AudioDevice:
 
         while device_index not in id_list:
             if device_index is not None:
-                logging.error(f'Selected invalid id of device: {device_index}')
+                logging.error(f'Selected invalid device id: {device_index}')
 
             try:
                 device_index = input("Select device by id:")

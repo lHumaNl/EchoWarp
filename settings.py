@@ -12,8 +12,9 @@ class Settings:
     is_server: bool
     is_input_device: bool
     udp_port: int
-    server_addr: Optional[int]
+    server_addr: Optional[str]
     encoding: str
+    heartbeat_attempt: int
     audio_device: AudioDevice
 
     __CLIENT_MODE = [1, 'client']
@@ -26,20 +27,19 @@ class Settings:
 
     __DEFAULT_PORT = 6532
     __DEFAULT_ENCODING = 'cp1251'
+    __DEFAULT_HEARTBEAT_ATTEMPT = 5
 
-    def __init__(self, is_server_mode: bool, is_input_device: bool, udp_port: int, server_addr: Optional[int],
-                 encoding: str):
+    def __init__(self, is_server_mode: bool, is_input_device: bool, udp_port: int, server_addr: Optional[str],
+                 encoding: str, heartbeat_attempt: int):
         self.is_server = is_server_mode
         self.is_input_device = is_input_device
         self.udp_port = udp_port
         self.server_addr = server_addr
         self.encoding = encoding
+        self.heartbeat_attempt = heartbeat_attempt
         self.audio_device = AudioDevice(self.is_input_device, self.encoding)
 
         self.__print_setting()
-
-    def use_audio_device(self):
-        pass
 
     def __print_setting(self):
         if self.is_server:
@@ -57,7 +57,9 @@ class Settings:
 
         if self.server_addr is not None:
             settings_print_string += f'Selected server host: {self.server_addr}{os.linesep}'
+
         settings_print_string += f'Selected encoding: {self.encoding + os.linesep}'
+        settings_print_string += f'Selected heartbeat attempt: {self.heartbeat_attempt}{os.linesep}'
         settings_print_string += (f'Selected audio device: {self.audio_device.device_name}, '
                                   f'Channels: {self.audio_device.channels}, '
                                   f'Sample rate: {self.audio_device.sample_rate}Hz{os.linesep}')
@@ -79,3 +81,7 @@ class Settings:
     @staticmethod
     def get_default_encoding():
         return Settings.__DEFAULT_ENCODING
+
+    @staticmethod
+    def get_default_heartbeat_attempt():
+        return Settings.__DEFAULT_HEARTBEAT_ATTEMPT
