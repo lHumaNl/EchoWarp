@@ -6,6 +6,15 @@ import pyaudio
 
 
 class AudioDevice:
+    """
+        Represents an audio device for recording or playback.
+
+        Attributes:
+            device_name (str): The name of the device.
+            device_index (int): The index of the device used by PyAudio.
+            channels (int): Number of audio channels.
+            sample_rate (int): The sample rate of the device.
+    """
     py_audio: pyaudio.PyAudio
     device_name: str
     device_index: int
@@ -13,12 +22,22 @@ class AudioDevice:
     sample_rate: int
 
     def __init__(self, is_input_device: bool, encoding: str):
+        """
+                Initializes the audio device with the given parameters.
+
+                Args:
+                    is_input_device (bool): True if the device is an input device, False otherwise.
+                    encoding (str): The encoding used for device names.
+        """
         self.__is_input_device = is_input_device
         self.__encoding = encoding
         self.py_audio = pyaudio.PyAudio()
         self.__select_audio_device()
 
     def __select_audio_device(self):
+        """
+                Prompts the user to select an audio device from the list of available devices.
+        """
         id_list = []
         device_index = None
 

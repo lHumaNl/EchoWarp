@@ -21,16 +21,24 @@ class TCPClient:
         self.__heartbeat_attempt = heartbeat_attempt
         self.__stop_event = stop_event
 
-
     def start_tcp_client(self):
+        """
+            Initiates a TCP client connection to the server and handles server authentication.
+
+            Raises:
+                ConnectionError: If the connection to the server cannot be established or lost.
+                ValueError: If authentication with the server fails.
+        """
         self.__client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
         try:
             self.__client_socket.connect((self.__server_address, self.__udp_port))
-        except Exception as e:
+            self.__server_handler()
+        except socket.error as e:
+            logging.error(f"Failed to establish connection to {self.__server_address}:{self.__udp_port}: {e}")
+            raise ConnectionError(f"Failed to establish connection to {self.__server_address}:{self.__udp_port}")
+        finally:
             self.__client_socket.close()
-            logging.error(f"Failed to established connect to {self.__server_address}:{self.__udp_port}: {e}")
-            raise Exception
 
         try:
             self.__server_handler()
@@ -51,23 +59,27 @@ class TCPClient:
         threading.Thread(target=self.__heartbeat).start()
 
     def __heartbeat(self):
-        heartbeat_fails = 0
+        """
+            Continuously sends heartbeat messages to the server to maintain the connection alive.
 
-        while not self.__stop_event.is_set():
-            if heartbeat_fails < 0:
-                heartbeat_fails = 0
+            Raises:
+                RuntimeError: If too many heartbeat messages are missed, indicating a possible connection issue.
+        """
+        missed_heartbeats = 0
 
-            if heartbeat_fails > self.__heartbeat_attempt:
-                raise ValueError(f"Heartbeat fails is too many: {heartbeat_fails}")
-
-            self.__client_socket.sendall(b"heartbeat")
-            if self.__client_socket.recv(1024) == b"heartbeat":
-                if heartbeat_fails >= 1:
-                    heartbeat_fails -= 1
-
+        while not self.__stop_event.is_set() and missed_heartbeats <= self.__heartbeat_attempt:
+            try:
+                self.__client_socket.sendall(b"heartbeat")
+                if self.__client_socket.recv(1024) != b"heartbeat":
+                    missed_heartbeats += 1
+                    logging.warning(f"Heartbeat miss detected. Miss count: {missed_heartbeats}")
+                else:
+                    missed_heartbeats = max(0, missed_heartbeats - 1)
                 time.sleep(5)
-            else:
-                heartbeat_fails += 1
-                logging.warning(
-                    f"Missed 'heartbeat' from {self.__server_address}:{self.__udp_port}. "
-                    f"Missed 'heartbeat': {heartbeat_fails}")
+            except socket.error as e:
+                logging.error(f"Heartbeat failed due to network error: {e}")
+                break
+
+        if missed_heartbeats > self.__heartbeat_attempt:
+            logging.error("Too many heartbeat misses, terminating connection.")
+            self.__stop_event.set()
