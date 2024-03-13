@@ -14,7 +14,12 @@ ensure a stable connection.
 - **Interactive and Argument Modes**: Configure settings interactively or via command-line arguments for flexibility in
   different use cases.
 
-## Installation
+## Windows Compatibility
+
+EchoWarp is designed to be compatible with Windows operating systems. Please ensure you are running this utility on a
+Windows machine.
+
+## Installation in Virtual Environment
 
 Before running EchoWarp, ensure you have Python 3.6+ installed on your system. Clone this repository and install the
 required dependencies:
@@ -22,6 +27,8 @@ required dependencies:
 ```bash
 git clone https://github.com/lHumaNl/EchoWarp.git
 cd EchoWarp
+python -m venv venv
+.\venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -45,6 +52,7 @@ Follow the on-screen prompts to configure the utility.
 EchoWarp supports configuration via command-line arguments for easy integration into scripts and automation workflows.
 
 #### Arguments Table
+
 | Argument              | Description                                     | Required | Default Value |
 |-----------------------|-------------------------------------------------|----------|---------------|
 | `-s`, `--server`      | Launch EchoWarp in server mode.                 | No       | Client mode   |
