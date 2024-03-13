@@ -1,3 +1,5 @@
+from typing import Tuple
+
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
@@ -16,7 +18,7 @@ class CryptoManager:
         self.__private_key, self.__public_key = self.__generate_keys()
 
     @staticmethod
-    def __generate_keys():
+    def __generate_keys() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
         """
         Generates a pair of RSA keys.
 

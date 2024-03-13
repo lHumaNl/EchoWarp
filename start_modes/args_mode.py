@@ -17,10 +17,12 @@ def get_settings_by_args() -> Settings:
                         help=f"Device names encoding (default={Settings.get_default_encoding()}).")
     parser.add_argument("-b", "--heartbeat", type=int, default=Settings.get_default_heartbeat_attempt(),
                         help=f"Heartbeat attempt (default={Settings.get_default_heartbeat_attempt()}).")
+    parser.add_argument("--ssl", action='store_true',
+                        help=f"Use ssl mode (default=Don't use ssl connection).")
 
     args = parser.parse_args()
 
     if args.server and args.server_addr:
         parser.error("-a/--server_addr is not allowed when -s/--server is specified.")
 
-    return Settings(args.server, args.output, args.udp_port, args.server_addr, args.encoding, args.heartbeat)
+    return Settings(args.server, args.output, args.udp_port, args.server_addr, args.encoding, args.heartbeat, args.ssl)

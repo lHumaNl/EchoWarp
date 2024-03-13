@@ -10,6 +10,7 @@ def get_settings_interactive() -> Settings:
 
     is_server_mode = select_in_interactive_from_values('util mode', Settings.get_util_mods_list())
     is_input_device = select_in_interactive_from_values('audio device', Settings.get_device_list())
+    is_ssl = select_in_interactive_from_values('ssl mode', Settings.get_ssl_list())
 
     port = input_in_interactive_int_value(Settings.get_default_port(), 'port')
 
@@ -22,7 +23,7 @@ def get_settings_interactive() -> Settings:
 
     heartbeat_attempt = input_in_interactive_int_value(Settings.get_default_heartbeat_attempt(), 'heartbeat attempt')
 
-    return Settings(is_server_mode, is_input_device, port, address, encoding, heartbeat_attempt)
+    return Settings(is_server_mode, is_input_device, port, address, encoding, heartbeat_attempt, is_ssl)
 
 
 def input_in_interactive_int_value(default_value: int, descr: str) -> int:
