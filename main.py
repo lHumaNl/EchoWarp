@@ -29,7 +29,7 @@ def main():
 
     if settings.is_server:
         logging.info("Start EchoWarp in server mode")
-        tcp_server = TCPServer(settings.udp_port, settings.heartbeat_attempt, stop_event)
+        tcp_server = TCPServer(settings.udp_port, settings.heartbeat_attempt, stop_event, settings.crypto_manager)
         tcp_server.start_tcp_server()
 
         udp_server_streamer = UDPServerStreamer(tcp_server.client_addr, settings.udp_port, settings.audio_device,
@@ -37,7 +37,8 @@ def main():
         udp_server_streamer.start_upd_server_streamer()
     else:
         logging.info("Start EchoWarp in client mode")
-        tcp_client = TCPClient(settings.server_addr, settings.udp_port, settings.heartbeat_attempt, stop_event)
+        tcp_client = TCPClient(settings.server_addr, settings.udp_port, settings.heartbeat_attempt, stop_event,
+                               settings.crypto_manager)
         tcp_client.start_tcp_client()
 
         start_udp_client_stream_receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port,

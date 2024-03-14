@@ -1,4 +1,6 @@
+import logging
 import os
+import hashlib
 from typing import Tuple, Optional
 
 from cryptography.hazmat.backends import default_backend
@@ -10,17 +12,42 @@ from cryptography.hazmat.primitives import padding as sym_padding
 
 class CryptoManager:
     """
-    Manages cryptographic operations for EchoWarp including RSA and AES encryption/decryption.
+    Manages cryptographic operations for EchoWarp, including RSA and AES encryption/decryption.
+
+    This class is designed to handle the cryptographic aspects of the EchoWarp application,
+    providing tools for secure communication between the server and the client. It supports
+    RSA encryption for initial handshake and key exchange, followed by AES encryption for
+    the secure transmission of audio data and heartbeat messages.
+
+    Attributes:
+        __is_server (bool): Flag indicating if this instance is used by a server.
+        __is_hash_control (bool): Flag indicating if this util used integrity control.
+        __private_key (rsa.RSAPrivateKey): The RSA private key for decryption.
+        __public_key (rsa.RSAPublicKey): The RSA public key for encryption.
+        __aes_key (bytes): The AES key for symmetric encryption of audio data.
+        __aes_iv (bytes): The AES initialization vector for symmetric encryption.
+        __peer_public_key (Optional[rsa.RSAPublicKey]): The public key of the communication peer.
     """
+    __is_server: bool
+    __is_hash_control: bool
     __private_key: rsa.RSAPrivateKey
     __public_key: rsa.RSAPublicKey
-    peer_public_key: Optional[rsa.RSAPublicKey]
+    __aes_key: Optional[bytes]
+    __aes_iv: Optional[bytes]
+    __peer_public_key: Optional[rsa.RSAPublicKey]
 
-    def __init__(self):
+    def __init__(self, is_server: bool, is_hash_control: bool):
+        self.__is_server = is_server
+        self.__is_hash_control = is_hash_control
+
+        if self.__is_server:
+            self.__generate_aes_key_and_iv()
+        else:
+            self.__aes_key = None
+            self.__aes_iv = None
+
         self.__private_key, self.__public_key = self.__generate_keys()
-        self.peer_public_key = None
-        self.__aes_key = None
-        self.__aes_iv = None
+        self.__peer_public_key = None
 
     @staticmethod
     def __generate_keys() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
@@ -52,7 +79,7 @@ class CryptoManager:
         Args:
             pem_public_key: The peer's public key in PEM format.
         """
-        self.peer_public_key = serialization.load_pem_public_key(
+        self.__peer_public_key = serialization.load_pem_public_key(
             pem_public_key,
             backend=default_backend()
         )
@@ -67,7 +94,7 @@ class CryptoManager:
         Returns:
             The encrypted message.
         """
-        return self.peer_public_key.encrypt(
+        return self.__peer_public_key.encrypt(
             message,
             padding.OAEP(
                 mgf=padding.MGF1(algorithm=hashes.SHA256()),
@@ -95,7 +122,7 @@ class CryptoManager:
                                           )
                                           )
 
-    def generate_aes_key_and_iv(self):
+    def __generate_aes_key_and_iv(self):
         """
         Generates a new AES key and IV for symmetric encryption.
         """
@@ -154,3 +181,25 @@ class CryptoManager:
         unpadder = sym_padding.PKCS7(128).unpadder()
 
         return unpadder.update(padded_data) + unpadder.finalize()
+
+    @staticmethod
+    def __calculate_hash_to_data(data: bytes) -> bytes:
+        hasher = hashlib.sha256()
+        hasher.update(data)
+        data_hash = hasher.digest()
+        message = data_hash + data
+
+        return message
+
+    @staticmethod
+    def __compare_hash_and_get_data(message: bytes) -> bytes:
+        received_hash = message[:32]
+        data = message[32:]
+        hasher = hashlib.sha256()
+        hasher.update(data)
+        calculated_hash = hasher.digest()
+
+        if received_hash != calculated_hash:
+            raise ValueError("Data integrity check failed")
+        else:
+            return data

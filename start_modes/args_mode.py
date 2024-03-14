@@ -19,10 +19,13 @@ def get_settings_by_args() -> Settings:
                         help=f"Heartbeat attempt (default={Settings.get_default_heartbeat_attempt()}).")
     parser.add_argument("--ssl", action='store_true',
                         help=f"Use ssl mode (default=Don't use ssl connection).")
+    parser.add_argument("-c", "--integrity_control", action='store_true',
+                        help="Use integrity control by hash. (default=Don't use integrity control")
 
     args = parser.parse_args()
 
     if args.server and args.server_addr:
         parser.error("-a/--server_addr is not allowed when -s/--server is specified.")
 
-    return Settings(args.server, args.output, args.udp_port, args.server_addr, args.encoding, args.heartbeat, args.ssl)
+    return Settings(args.server, args.output, args.udp_port, args.server_addr, args.encoding, args.heartbeat, args.ssl,
+                    args.integrity_control)

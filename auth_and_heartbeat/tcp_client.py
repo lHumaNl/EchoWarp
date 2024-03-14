@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 
-from crypto_utils import CryptoManager
+from crypto_manager import CryptoManager
 from logging_config import setup_logging
 
 setup_logging()
@@ -15,7 +15,7 @@ class TCPClient:
     __udp_port: int
     __heartbeat_attempt: int
     __stop_event: threading.Event
-    crypto_manager: CryptoManager
+    __crypto_manager: CryptoManager
 
     def __init__(self, server_address: str, udp_port: int, heartbeat_attempt: int, stop_event: threading.Event,
                  crypto_manager: CryptoManager):
@@ -23,7 +23,7 @@ class TCPClient:
         self.__udp_port = udp_port
         self.__heartbeat_attempt = heartbeat_attempt
         self.__stop_event = stop_event
-        self.crypto_manager = crypto_manager
+        self.__crypto_manager = crypto_manager
 
     def start_tcp_client(self):
         """
@@ -58,8 +58,7 @@ class TCPClient:
             self.__client_socket.sendall(b"EchoWarpClient")
             logging.info("Server authenticated")
 
-            encrypted_aes_key_iv = self.__client_socket.recv(1024)
-            self.crypto_manager.load_aes_key_and_iv(encrypted_aes_key_iv)
+            self.__crypto_manager.load_aes_key_and_iv(self.__client_socket.recv(1024))
 
             threading.Thread(target=self.__heartbeat).start()
         else:
