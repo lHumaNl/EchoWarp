@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 
+from crypto_utils import CryptoManager
 from logging_config import setup_logging
 
 setup_logging()
@@ -15,11 +16,13 @@ class TCPServer:
     __server_socket: socket
     __heartbeat_attempt: int
     __stop_event: threading.Event
+    crypto_manager: CryptoManager
 
-    def __init__(self, udp_port, heartbeat_attempt: int, stop_event: threading.Event):
+    def __init__(self, udp_port, heartbeat_attempt: int, stop_event: threading.Event, crypto_manager: CryptoManager):
         self.__udp_port = udp_port
         self.__heartbeat_attempt = heartbeat_attempt
         self.__stop_event = stop_event
+        self.crypto_manager = crypto_manager
 
     def start_tcp_server(self):
         self.__server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -68,7 +71,11 @@ class TCPServer:
 
         if self.__client_connect.recv(1024) == b"EchoWarpClient":
             logging.info(f"Client {self.client_addr} authenticated")
+
+            self.crypto_manager.generate_aes_key_and_iv()
+            aes_key_iv_package = self.crypto_manager.get_aes_key_and_iv()
+            self.__client_connect.sendall(aes_key_iv_package)
+
+            threading.Thread(target=self.__heartbeat).start()
         else:
             raise ValueError("Authentication error")
-
-        threading.Thread(target=self.__heartbeat).start()
