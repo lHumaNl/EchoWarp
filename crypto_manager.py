@@ -1,4 +1,3 @@
-import logging
 import os
 import hashlib
 from typing import Tuple, Optional
@@ -48,6 +47,16 @@ class CryptoManager:
 
         self.__private_key, self.__public_key = self.__generate_keys()
         self.__peer_public_key = None
+
+    def encrypt_and_sign_data(self, data: bytes) -> bytes:
+        """Encrypts and optionally signs data with a hash for integrity."""
+        encrypted_data = self.encrypt_data_aes(data)
+        return self.__calculate_hash_to_data(encrypted_data) if self.__is_hash_control else encrypted_data
+
+    def decrypt_and_verify_data(self, encrypted_data: bytes) -> bytes:
+        """Decrypts and optionally verifies data integrity with a hash."""
+        data = self.__compare_hash_and_get_data(encrypted_data) if self.__is_hash_control else encrypted_data
+        return self.decrypt_data_aes(data)
 
     @staticmethod
     def __generate_keys() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:

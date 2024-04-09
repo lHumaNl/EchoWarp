@@ -24,6 +24,7 @@ class TCPClient:
         self.__heartbeat_attempt = heartbeat_attempt
         self.__stop_event = stop_event
         self.__crypto_manager = crypto_manager
+        self.__client_socket = None
 
     def start_tcp_client(self):
         """
@@ -37,32 +38,47 @@ class TCPClient:
 
         try:
             self.__client_socket.connect((self.__server_address, self.__udp_port))
-            self.__server_handler()
+            logging.info(f"TCP connection to {self.__server_address}:{self.__udp_port} established.")
+
+            self.__authenticate_with_server()
         except socket.error as e:
             logging.error(f"Failed to establish connection to {self.__server_address}:{self.__udp_port}: {e}")
             raise ConnectionError(f"Failed to establish connection to {self.__server_address}:{self.__udp_port}")
+        except Exception as e:
+            logging.error(f"Authentication or encryption setup failed: {e}")
         finally:
             self.__client_socket.close()
 
-        try:
-            self.__server_handler()
-        except Exception as e:
-            self.__client_socket.close()
-            logging.error(f"Connection error: {e}")
-            raise Exception
+    def __authenticate_with_server(self):
+        """
+        Authenticates with the server by exchanging encrypted messages to verify each other's identity.
+        Establishes encryption by exchanging public keys and receiving AES keys.
+        """
+        # Send client's public key
+        self.__client_socket.sendall(self.__crypto_manager.get_serialized_public_key())
 
-    def __server_handler(self):
-        logging.info(f"TCP connection to {self.__server_address}:{self.__udp_port} established.")
+        # Receive and load server's public key
+        server_public_key_pem = self.__client_socket.recv(1024)
+        self.__crypto_manager.load_peer_public_key(server_public_key_pem)
 
-        if self.__client_socket.recv(1024) == b"EchoWarpServer":
-            self.__client_socket.sendall(b"EchoWarpClient")
+        # Authenticate with server by exchanging specific messages
+        encrypted_message_to_server = self.__crypto_manager.encrypt_rsa_message(b"EchoWarpClient")
+        self.__client_socket.sendall(encrypted_message_to_server)
+
+        # Receive and decrypt server's authentication message
+        encrypted_message_from_server = self.__client_socket.recv(1024)
+        message_from_server = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_server)
+
+        if message_from_server == b"EchoWarpServer":
             logging.info("Server authenticated")
-
-            self.__crypto_manager.load_aes_key_and_iv(self.__client_socket.recv(1024))
-
-            threading.Thread(target=self.__heartbeat).start()
         else:
-            raise ValueError("Authentication error")
+            raise ValueError("Failed to authenticate server.")
+
+        # Receive encrypted AES key and IV
+        encrypted_aes_key_iv = self.__client_socket.recv(1024)
+        self.__crypto_manager.load_aes_key_and_iv(encrypted_aes_key_iv)
+
+        logging.info("Authentication and encryption setup completed successfully.")
 
     def __heartbeat(self):
         """
