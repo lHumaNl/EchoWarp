@@ -11,14 +11,14 @@ setup_logging()
 
 class Settings:
     is_server: bool
-    is_input_device: bool
+    __is_input_device: bool
     udp_port: int
     server_addr: Optional[str]
-    encoding: str
+    __encoding: str
     heartbeat_attempt: int
     audio_device: AudioDevice
-    is_ssl: bool
-    is_hash_control: bool
+    __is_ssl: bool
+    __is_hash_control: bool
     crypto_manager: Optional[CryptoManager]
 
     __CLIENT_MODE = [1, 'client']
@@ -44,15 +44,15 @@ class Settings:
     def __init__(self, is_server_mode: bool, is_input_device: bool, udp_port: int, server_addr: Optional[str],
                  encoding: str, heartbeat_attempt: int, is_ssl: bool, is_hash_control: bool):
         self.is_server = is_server_mode
-        self.is_input_device = is_input_device
+        self.__is_input_device = is_input_device
         self.udp_port = udp_port
         self.server_addr = server_addr
-        self.encoding = encoding
+        self.__encoding = encoding
         self.heartbeat_attempt = heartbeat_attempt
-        self.audio_device = AudioDevice(self.is_input_device, self.encoding)
-        self.is_ssl = is_ssl
-        self.is_hash_control = is_hash_control
-        self.crypto_manager = CryptoManager(self.is_server, self.is_hash_control)
+        self.audio_device = AudioDevice(self.__is_input_device, self.__encoding)
+        self.__is_ssl = is_ssl
+        self.__is_hash_control = is_hash_control
+        self.crypto_manager = CryptoManager(self.is_server, self.__is_hash_control, self.__is_ssl)
 
         self.__print_setting()
 
@@ -63,7 +63,7 @@ class Settings:
         else:
             settings_print_string = f'Selected util mode: {self.__CLIENT_MODE[1] + os.linesep}'
 
-        if self.is_input_device:
+        if self.__is_input_device:
             settings_print_string += f'Selected audio device type: {self.__INPUT_DEVICE[1] + os.linesep}'
         else:
             settings_print_string += f'Selected audio device type: {self.__OUTPUT_DEVICE[1] + os.linesep}'
@@ -73,10 +73,10 @@ class Settings:
         if self.server_addr is not None:
             settings_print_string += f'Selected server host: {self.server_addr}{os.linesep}'
 
-        settings_print_string += f'Selected encoding: {self.encoding + os.linesep}'
+        settings_print_string += f'Selected encoding: {self.__encoding + os.linesep}'
         settings_print_string += f'Selected heartbeat attempt: {self.heartbeat_attempt}{os.linesep}'
-        settings_print_string += f'Selected ssl mode: {self.is_ssl}{os.linesep}'
-        settings_print_string += f'Selected integrity control: {self.is_hash_control}{os.linesep}'
+        settings_print_string += f'Selected ssl mode: {self.__is_ssl}{os.linesep}'
+        settings_print_string += f'Selected integrity control: {self.__is_hash_control}{os.linesep}'
         settings_print_string += (f'Selected audio device: {self.audio_device.device_name}, '
                                   f'Channels: {self.audio_device.channels}, '
                                   f'Sample rate: {self.audio_device.sample_rate}Hz{os.linesep}')
