@@ -32,18 +32,16 @@ def main():
         tcp_server = TCPServer(settings.udp_port, settings.heartbeat_attempt, stop_event, settings.crypto_manager)
         tcp_server.start_tcp_server()
 
-        udp_server_streamer = UDPServerStreamer(tcp_server.client_addr, settings.udp_port, settings.audio_device,
-                                                stop_event)
-        udp_server_streamer.start_upd_server_streamer()
+        streamer = UDPServerStreamer(tcp_server.client_addr, settings.udp_port, settings.audio_device, stop_event)
+        streamer.encode_audio_and_send_to_client()
     else:
         logging.info("Start EchoWarp in client mode")
         tcp_client = TCPClient(settings.server_addr, settings.udp_port, settings.heartbeat_attempt, stop_event,
                                settings.crypto_manager)
         tcp_client.start_tcp_client()
 
-        start_udp_client_stream_receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port,
-                                                                   settings.audio_device, stop_event)
-        start_udp_client_stream_receiver.start_udp_client_stream_receiver()
+        receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port, settings.audio_device, stop_event)
+        receiver.receive_audio_and_decode()
 
     try:
         input("Press Enter to exit...\n")

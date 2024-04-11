@@ -1,5 +1,6 @@
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pyaudio
 import opuslib
@@ -25,6 +26,7 @@ class UDPServerStreamer:
     __udp_port: int
     __audio_device: AudioDevice
     __stop_event: threading.Event
+    __executor: ThreadPoolExecutor
 
     def __init__(self, client_addr: str, udp_port: int, audio_device: AudioDevice, stop_event: threading.Event):
         """
@@ -40,8 +42,9 @@ class UDPServerStreamer:
         self.__udp_port = udp_port
         self.__audio_device = audio_device
         self.__stop_event = stop_event
+        self.__executor = ThreadPoolExecutor(max_workers=2)
 
-    def start_upd_server_streamer(self):
+    def encode_audio_and_send_to_client(self):
         """
                 Starts the UDP server for audio streaming. Captures audio from the specified
                 audio device and sends it to the client.
@@ -63,8 +66,8 @@ class UDPServerStreamer:
         try:
             while not self.__stop_event.is_set():
                 data = stream.read(1024, exception_on_overflow=False)
-                encoded_data = encoder.encode(data, 1024)
-                server_socket.sendto(encoded_data, (self.__client_addr, self.__udp_port))
+
+                self.__executor.submit(self.__send_stream_to_client, server_socket, encoder, data)
         except Exception as e:
             logging.error(f"Error in streaming audio: {e}")
         finally:
@@ -73,3 +76,7 @@ class UDPServerStreamer:
             server_socket.close()
             self.__audio_device.py_audio.terminate()
             logging.info("Streaming audio stopped.")
+
+    def __send_stream_to_client(self, server_socket, encoder, data):
+        encoded_data = encoder.encode(data, 1024)
+        server_socket.sendto(encoded_data, (self.__client_addr, self.__udp_port))
