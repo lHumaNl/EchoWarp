@@ -62,8 +62,7 @@ class TCPClient:
         self.__crypto_manager.load_peer_public_key(server_public_key_pem)
 
         # Authenticate with server by exchanging specific messages
-        encrypted_message_to_server = self.__crypto_manager.encrypt_rsa_message(b"EchoWarpClient")
-        self.__client_socket.sendall(encrypted_message_to_server)
+        self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpClient"))
 
         # Receive and decrypt server's authentication message
         encrypted_message_from_server = self.__client_socket.recv(1024)

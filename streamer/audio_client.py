@@ -6,6 +6,7 @@ import pyaudio
 import opuslib
 import logging
 
+from crypto_manager import CryptoManager
 from logging_config import setup_logging
 from settings.audio_device import AudioDevice
 
@@ -17,13 +18,16 @@ class UDPClientStreamReceiver:
     __udp_port: int
     __audio_device: AudioDevice
     __stop_event: threading.Event
+    __crypto_manager: CryptoManager
     __executor: ThreadPoolExecutor
 
-    def __init__(self, server_address: str, udp_port: int, audio_device: AudioDevice, stop_event: threading.Event):
+    def __init__(self, server_address: str, udp_port: int, audio_device: AudioDevice, stop_event: threading.Event,
+                 crypto_manager: CryptoManager):
         self.__server_address = server_address
         self.__udp_port = udp_port
         self.__audio_device = audio_device
         self.__stop_event = stop_event
+        self.__crypto_manager = crypto_manager
         self.__executor = ThreadPoolExecutor(max_workers=2)
 
     def receive_audio_and_decode(self):
@@ -50,7 +54,8 @@ class UDPClientStreamReceiver:
                 stream.close()
                 logging.info("UDP listening stopped")
 
-    @staticmethod
-    def __decode_and_play(decoder, data, stream):
+    def __decode_and_play(self, decoder, data, stream):
+        data = self.__crypto_manager.decrypt_and_verify_data(data)
+
         decoded_data = decoder.decode(data, len(data))
         stream.write(decoded_data)

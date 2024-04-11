@@ -32,7 +32,8 @@ def main():
         tcp_server = TCPServer(settings.udp_port, settings.heartbeat_attempt, stop_event, settings.crypto_manager)
         tcp_server.start_tcp_server()
 
-        streamer = UDPServerStreamer(tcp_server.client_addr, settings.udp_port, settings.audio_device, stop_event)
+        streamer = UDPServerStreamer(tcp_server.client_addr, settings.udp_port, settings.audio_device, stop_event,
+                                     settings.crypto_manager)
         streamer.encode_audio_and_send_to_client()
     else:
         logging.info("Start EchoWarp in client mode")
@@ -40,7 +41,8 @@ def main():
                                settings.crypto_manager)
         tcp_client.start_tcp_client()
 
-        receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port, settings.audio_device, stop_event)
+        receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port, settings.audio_device, stop_event,
+                                           settings.crypto_manager)
         receiver.receive_audio_and_decode()
 
     try:

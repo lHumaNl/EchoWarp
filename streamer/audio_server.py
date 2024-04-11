@@ -6,6 +6,7 @@ import pyaudio
 import opuslib
 import logging
 
+from crypto_manager import CryptoManager
 from logging_config import setup_logging
 from settings.audio_device import AudioDevice
 
@@ -26,9 +27,11 @@ class UDPServerStreamer:
     __udp_port: int
     __audio_device: AudioDevice
     __stop_event: threading.Event
+    __crypto_manager: CryptoManager
     __executor: ThreadPoolExecutor
 
-    def __init__(self, client_addr: str, udp_port: int, audio_device: AudioDevice, stop_event: threading.Event):
+    def __init__(self, client_addr: str, udp_port: int, audio_device: AudioDevice, stop_event: threading.Event,
+                 crypto_manager: CryptoManager):
         """
                 Initializes the UDPServerStreamer.
 
@@ -42,6 +45,7 @@ class UDPServerStreamer:
         self.__udp_port = udp_port
         self.__audio_device = audio_device
         self.__stop_event = stop_event
+        self.__crypto_manager = crypto_manager
         self.__executor = ThreadPoolExecutor(max_workers=2)
 
     def encode_audio_and_send_to_client(self):
@@ -78,5 +82,5 @@ class UDPServerStreamer:
             logging.info("Streaming audio stopped.")
 
     def __send_stream_to_client(self, server_socket, encoder, data):
-        encoded_data = encoder.encode(data, 1024)
+        encoded_data = self.__crypto_manager.encrypt_and_sign_data(encoder.encode(data, 1024))
         server_socket.sendto(encoded_data, (self.__client_addr, self.__udp_port))

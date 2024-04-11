@@ -1,3 +1,4 @@
+import logging
 import os
 import hashlib
 from typing import Tuple, Optional
@@ -7,6 +8,10 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding as sym_padding
+
+from logging_config import setup_logging
+
+setup_logging()
 
 
 class CryptoManager:
@@ -28,6 +33,7 @@ class CryptoManager:
         __peer_public_key (Optional[rsa.RSAPublicKey]): The public key of the communication peer.
     """
     __is_server: bool
+    __is_encrypt: bool
     __is_hash_control: bool
     __private_key: rsa.RSAPrivateKey
     __public_key: rsa.RSAPublicKey
@@ -35,8 +41,9 @@ class CryptoManager:
     __aes_iv: Optional[bytes]
     __peer_public_key: Optional[rsa.RSAPublicKey]
 
-    def __init__(self, is_server: bool, is_hash_control: bool):
+    def __init__(self, is_server: bool, is_hash_control: bool, is_encrypt: bool):
         self.__is_server = is_server
+        self.__is_encrypt = is_encrypt
         self.__is_hash_control = is_hash_control
 
         if self.__is_server:
@@ -50,13 +57,37 @@ class CryptoManager:
 
     def encrypt_and_sign_data(self, data: bytes) -> bytes:
         """Encrypts and optionally signs data with a hash for integrity."""
-        encrypted_data = self.encrypt_data_aes(data)
-        return self.__calculate_hash_to_data(encrypted_data) if self.__is_hash_control else encrypted_data
+        if data is None:
+            raise ValueError("Data to encrypt and sign cannot be None")
 
-    def decrypt_and_verify_data(self, encrypted_data: bytes) -> bytes:
+        if self.__is_hash_control:
+            data = self.__calculate_hash_to_data(data)
+
+        if self.__is_encrypt:
+            try:
+                data = self.__encrypt_data_aes(data)
+            except Exception as e:
+                logging.error(f"Failed to encrypt data: {e}")
+                raise
+
+        return data
+
+    def decrypt_and_verify_data(self, data: bytes) -> bytes:
         """Decrypts and optionally verifies data integrity with a hash."""
-        data = self.__compare_hash_and_get_data(encrypted_data) if self.__is_hash_control else encrypted_data
-        return self.decrypt_data_aes(data)
+        if data is None:
+            raise ValueError("Data to decrypt and verify cannot be None")
+
+        if self.__is_encrypt:
+            try:
+                data = self.__decrypt_data_aes(data)
+            except Exception as e:
+                logging.error(f"Failed to decrypt data: {e}")
+                raise
+
+        if self.__is_hash_control:
+            data = self.__compare_hash_and_get_data(data)
+
+        return data
 
     @staticmethod
     def __generate_keys() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
@@ -155,7 +186,7 @@ class CryptoManager:
         self.__aes_key = decrypted_aes_key_iv[:32]
         self.__aes_iv = decrypted_aes_key_iv[32:]
 
-    def encrypt_data_aes(self, data):
+    def __encrypt_data_aes(self, data):
         """
         Encrypts data using AES.
 
@@ -173,7 +204,7 @@ class CryptoManager:
 
         return encryptor.update(padded_data) + encryptor.finalize()
 
-    def decrypt_data_aes(self, encrypted_data):
+    def __decrypt_data_aes(self, encrypted_data):
         """
         Decrypts data using AES.
 

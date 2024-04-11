@@ -69,12 +69,10 @@ class TCPServer:
             logging.info("Client authenticated")
 
             # Respond with encrypted server authentication message
-            encrypted_message_to_client = self.__crypto_manager.encrypt_rsa_message(b"EchoWarpServer")
-            self.__client_connect.sendall(encrypted_message_to_client)
+            self.__client_connect.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpServer"))
 
             # Send encrypted AES key and IV
-            encrypted_aes_key_iv = self.__crypto_manager.get_aes_key_and_iv()
-            self.__client_connect.sendall(encrypted_aes_key_iv)
+            self.__client_connect.sendall(self.__crypto_manager.get_aes_key_and_iv())
 
             logging.info("Encryption setup completed successfully.")
 
