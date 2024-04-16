@@ -3,8 +3,9 @@ import threading
 import logging
 import signal
 
-from start_modes import args_mode, interactive_mode
+from start_modes import args_mode
 from logging_config import setup_logging
+from start_modes.interactive_mode import InteractiveSettings
 
 from streamer.audio_client import UDPClientStreamReceiver
 from auth_and_heartbeat.tcp_client import TCPClient
@@ -23,7 +24,7 @@ def graceful_shutdown(signum, frame):
 
 def main():
     if len(sys.argv) == 1:
-        settings = interactive_mode.get_settings_interactive()
+        settings = InteractiveSettings.get_settings_interactive()
     else:
         settings = args_mode.get_settings_by_args()
 
@@ -33,7 +34,7 @@ def main():
         tcp_server.start_tcp_server()
 
         streamer = UDPServerStreamer(tcp_server.client_addr, settings.udp_port, settings.audio_device, stop_event,
-                                     settings.crypto_manager)
+                                     settings.crypto_manager, settings.executor)
         streamer.encode_audio_and_send_to_client()
     else:
         logging.info("Start EchoWarp in client mode")
@@ -42,7 +43,7 @@ def main():
         tcp_client.start_tcp_client()
 
         receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port, settings.audio_device, stop_event,
-                                           settings.crypto_manager)
+                                           settings.crypto_manager, settings.executor)
         receiver.receive_audio_and_decode()
 
     try:

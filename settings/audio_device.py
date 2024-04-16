@@ -1,6 +1,7 @@
+import locale
 import logging
 import subprocess
-from typing import List
+from typing import List, Optional
 
 import pyaudio
 
@@ -21,18 +22,29 @@ class AudioDevice:
     channels: int
     sample_rate: int
 
-    def __init__(self, is_input_device: bool, encoding: str):
+    def __init__(self, is_input_device: bool, device_id: Optional[int]):
         """
                 Initializes the audio device with the given parameters.
-
-                Args:
-                    is_input_device (bool): True if the device is an input device, False otherwise.
-                    encoding (str): The encoding used for device names.
         """
         self.__is_input_device = is_input_device
-        self.__encoding = encoding
+        self.__device_id = device_id
         self.py_audio = pyaudio.PyAudio()
-        self.__select_audio_device()
+
+        if self.__device_id is None:
+            self.__select_audio_device()
+        else:
+            self.__select_audio_device_by_device_id()
+
+    def __select_audio_device_by_device_id(self):
+        self.device_index = self.__device_id
+        dev = self.py_audio.get_device_info_by_index(self.device_index)
+        self.device_name = self.decode_string(dev['name'])
+        self.sample_rate = int(dev['defaultSampleRate'])
+
+        if dev['maxInputChannels'] > 0:
+            self.channels = dev['maxInputChannels']
+        else:
+            self.channels = dev['maxOutputChannels']
 
     def __select_audio_device(self):
         """
@@ -58,7 +70,9 @@ class AudioDevice:
             if dev[f'max{device_type}Channels'] > 0 and device_name in result_from_powershell:
                 id_list.append(i)
                 logging.info(
-                    f"{i}: {device_name}, Channels: {dev[f'max{device_type}Channels']}, Sample rate: {int(dev['defaultSampleRate'])}Hz")
+                    f"{i}: {device_name}, "
+                    f"Channels: {dev[f'max{device_type}Channels']}, "
+                    f"Sample rate: {int(dev['defaultSampleRate'])}Hz")
 
         while device_index not in id_list:
             if device_index is not None:
@@ -84,7 +98,8 @@ class AudioDevice:
             Select-Object Name | 
             Out-String
             """
-        result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True)
+
+        result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True, encoding='utf-8')
 
         device_names = self.parse_powershell_stdout(result.stdout)
 
@@ -106,9 +121,10 @@ class AudioDevice:
 
         return device_names
 
-    def decode_string(self, string: str) -> str:
+    @staticmethod
+    def decode_string(string: str) -> str:
         try:
-            device_name = string.encode(self.__encoding).decode('utf-8')
+            device_name = string.encode(locale.getpreferredencoding()).decode('utf-8')
         except UnicodeEncodeError:
             device_name = string
 

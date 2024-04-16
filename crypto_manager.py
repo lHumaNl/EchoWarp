@@ -16,21 +16,17 @@ setup_logging()
 
 class CryptoManager:
     """
-    Manages cryptographic operations for EchoWarp, including RSA and AES encryption/decryption.
-
-    This class is designed to handle the cryptographic aspects of the EchoWarp application,
-    providing tools for secure communication between the server and the client. It supports
-    RSA encryption for initial handshake and key exchange, followed by AES encryption for
-    the secure transmission of audio data and heartbeat messages.
+    Manages cryptographic operations within EchoWarp, such as RSA and AES encryption/decryption.
 
     Attributes:
-        __is_server (bool): Flag indicating if this instance is used by a server.
-        __is_hash_control (bool): Flag indicating if this util used integrity control.
-        __private_key (rsa.RSAPrivateKey): The RSA private key for decryption.
-        __public_key (rsa.RSAPublicKey): The RSA public key for encryption.
-        __aes_key (bytes): The AES key for symmetric encryption of audio data.
-        __aes_iv (bytes): The AES initialization vector for symmetric encryption.
-        __peer_public_key (Optional[rsa.RSAPublicKey]): The public key of the communication peer.
+        __is_server (bool): True if this instance is for server use, False for client.
+        __is_encrypt (bool): True to enable encryption, False otherwise.
+        __is_hash_control (bool): True to enable integrity checks, False otherwise.
+        __private_key (rsa.RSAPrivateKey): RSA private key for decryption purposes.
+        __public_key (rsa.RSAPublicKey): RSA public key for encryption purposes.
+        __aes_key (Optional[bytes]): AES key for symmetric encryption of audio data.
+        __aes_iv (Optional[bytes]): AES initialization vector for symmetric encryption.
+        __peer_public_key (Optional[rsa.RSAPublicKey]): Public key of the communication peer.
     """
     __is_server: bool
     __is_encrypt: bool
@@ -42,6 +38,14 @@ class CryptoManager:
     __peer_public_key: Optional[rsa.RSAPublicKey]
 
     def __init__(self, is_server: bool, is_hash_control: bool, is_encrypt: bool):
+        """
+        Initializes a new CryptoManager instance with the specified settings.
+
+        Args:
+            is_server (bool): Indicates if this instance is used by a server.
+            is_hash_control (bool): Enable or disable integrity control via hashing.
+            is_encrypt (bool): Enable or disable encryption.
+        """
         self.__is_server = is_server
         self.__is_encrypt = is_encrypt
         self.__is_hash_control = is_hash_control
@@ -56,7 +60,19 @@ class CryptoManager:
         self.__peer_public_key = None
 
     def encrypt_and_sign_data(self, data: bytes) -> bytes:
-        """Encrypts and optionally signs data with a hash for integrity."""
+        """
+        Encrypts and optionally signs data with a hash for integrity.
+
+        Args:
+            data (bytes): Data to encrypt and sign.
+
+        Returns:
+            bytes: Encrypted (and optionally signed) data.
+
+        Raises:
+            ValueError: If data is None.
+            Exception: General exceptions during encryption, logged as an error.
+        """
         if data is None:
             raise ValueError("Data to encrypt and sign cannot be None")
 
@@ -73,7 +89,19 @@ class CryptoManager:
         return data
 
     def decrypt_and_verify_data(self, data: bytes) -> bytes:
-        """Decrypts and optionally verifies data integrity with a hash."""
+        """
+        Decrypts and optionally verifies data integrity using a hash.
+
+        Args:
+            data (bytes): Data to decrypt and verify.
+
+        Returns:
+            bytes: Decrypted data, with integrity optionally verified.
+
+        Raises:
+            ValueError: If data is None.
+            Exception: General exceptions during decryption, logged as an error.
+        """
         if data is None:
             raise ValueError("Data to decrypt and verify cannot be None")
 

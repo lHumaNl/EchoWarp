@@ -10,6 +10,18 @@ setup_logging()
 
 
 class TCPServer:
+    """
+        Handles the server-side TCP operations for EchoWarp, including client authentication and secure communication setup.
+
+        Attributes:
+            client_addr (str): IP address of the connected client.
+            __client_connect (socket.socket): Socket object for the connected client.
+            __udp_port (int): TCP port on which the server listens (used for initial TCP handshake).
+            __server_socket (socket.socket): Server socket to accept connections.
+            __heartbeat_attempt (int): Number of heartbeat misses allowed before disconnecting.
+            __stop_event (threading.Event): Event to signal when to stop the server.
+            __crypto_manager (CryptoManager): Manager for cryptographic operations.
+    """
     client_addr: str
     __client_connect: socket
     __udp_port: int
@@ -19,6 +31,15 @@ class TCPServer:
     __crypto_manager: CryptoManager
 
     def __init__(self, udp_port, heartbeat_attempt: int, stop_event: threading.Event, crypto_manager: CryptoManager):
+        """
+                Initializes the TCPServer with the specified port and cryptographic manager.
+
+                Args:
+                    udp_port (int): The TCP port to listen on for incoming connections.
+                    heartbeat_attempt (int): Number of allowed missed heartbeats before considering the connection lost.
+                    stop_event (threading.Event): Event that signals the server to stop operations.
+                    crypto_manager (CryptoManager): Manager handling all cryptographic functions.
+        """
         self.__udp_port = udp_port
         self.__heartbeat_attempt = heartbeat_attempt
         self.__stop_event = stop_event
@@ -29,7 +50,7 @@ class TCPServer:
 
     def start_tcp_server(self):
         """
-        Starts the TCP server and waits for a client to connect for authentication and secure communication setup.
+        Starts the TCP server, listens for incoming connections, and handles client authentication and setup.
         """
         self.__server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.__server_socket.bind(('0.0.0.0', self.__udp_port))
@@ -51,39 +72,35 @@ class TCPServer:
 
     def __authenticate_client(self):
         """
-        Authenticates the client by exchanging encrypted messages to verify each other's identity.
-        Establishes encryption by exchanging public keys and setting up AES keys.
+        Handles the authentication sequence with the client by exchanging encrypted messages.
+        Establishes encryption settings by exchanging public keys and AES keys.
         """
-        # Send server's public key to client
-        self.__client_connect.sendall(self.__crypto_manager.get_serialized_public_key())
+        try:
+            self.__client_connect.sendall(self.__crypto_manager.get_serialized_public_key())
 
-        # Receive client's public key
-        client_public_key_pem = self.__client_connect.recv(1024)
-        self.__crypto_manager.load_peer_public_key(client_public_key_pem)
+            client_public_key_pem = self.__client_connect.recv(1024)
+            self.__crypto_manager.load_peer_public_key(client_public_key_pem)
 
-        # Authenticate client by exchanging specific messages
-        encrypted_message_from_client = self.__client_connect.recv(1024)
-        message_from_client = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_client)
+            encrypted_message_from_client = self.__client_connect.recv(1024)
+            message_from_client = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_client)
+            if message_from_client == b"EchoWarpClient":
+                logging.info("Client authenticated")
 
-        if message_from_client == b"EchoWarpClient":
-            logging.info("Client authenticated")
+                self.__client_connect.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpServer"))
+                self.__client_connect.sendall(self.__crypto_manager.get_aes_key_and_iv())
 
-            # Respond with encrypted server authentication message
-            self.__client_connect.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpServer"))
+                logging.info("Encryption setup completed successfully.")
 
-            # Send encrypted AES key and IV
-            self.__client_connect.sendall(self.__crypto_manager.get_aes_key_and_iv())
-
-            logging.info("Encryption setup completed successfully.")
-
-            # Start heartbeat thread
-            threading.Thread(target=self.__heartbeat, daemon=True).start()
-        else:
-            raise ValueError("Failed to authenticate client.")
+                threading.Thread(target=self.__heartbeat, daemon=True).start()
+            else:
+                raise ValueError("Failed to authenticate client.")
+        except Exception as e:
+            logging.error(f"Authentication error: {e}")
+            raise
 
     def __heartbeat(self):
         """
-        Continuously receives encrypted and signed heartbeat messages to maintain the connection alive.
+        Handles the heartbeat mechanism to ensure the connection remains alive and stable.
         """
         while not self.__stop_event.is_set():
             try:

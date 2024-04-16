@@ -10,6 +10,16 @@ setup_logging()
 
 
 class TCPClient:
+    """
+        Handles TCP client operations for EchoWarp, including server authentication and communication.
+
+        Attributes:
+            __server_address (str): IP address or hostname of the server.
+            __udp_port (int): Port number for the TCP connection (not UDP).
+            __heartbeat_attempt (int): Number of allowed missed heartbeats before disconnecting.
+            __stop_event (threading.Event): Event to signal when to stop the client.
+            __crypto_manager (CryptoManager): Instance to manage cryptographic operations.
+    """
     __client_socket: socket
     __server_address: str
     __udp_port: int
@@ -19,6 +29,16 @@ class TCPClient:
 
     def __init__(self, server_address: str, udp_port: int, heartbeat_attempt: int, stop_event: threading.Event,
                  crypto_manager: CryptoManager):
+        """
+                Initializes the TCPClient with the specified server details and cryptographic manager.
+
+                Args:
+                    server_address (str): The server's IP address or hostname.
+                    udp_port (int): The TCP port to connect on (despite the name).
+                    heartbeat_attempt (int): Max number of missed heartbeats before considering the connection dead.
+                    stop_event (threading.Event): Event that signals the client to stop operations.
+                    crypto_manager (CryptoManager): Manager handling all cryptographic functions.
+        """
         self.__server_address = server_address
         self.__udp_port = udp_port
         self.__heartbeat_attempt = heartbeat_attempt
@@ -28,11 +48,11 @@ class TCPClient:
 
     def start_tcp_client(self):
         """
-            Initiates a TCP client connection to the server and handles server authentication.
+        Establishes the TCP connection to the server and performs authentication using cryptographic methods.
 
-            Raises:
-                ConnectionError: If the connection to the server cannot be established or lost.
-                ValueError: If authentication with the server fails.
+        Raises:
+            ConnectionError: If the connection to the server cannot be established or lost unexpectedly.
+            ValueError: If the server fails authentication checks.
         """
         self.__client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -51,33 +71,27 @@ class TCPClient:
 
     def __authenticate_with_server(self):
         """
-        Authenticates with the server by exchanging encrypted messages to verify each other's identity.
-        Establishes encryption by exchanging public keys and receiving AES keys.
+        Performs the authentication sequence with the server by exchanging and verifying encrypted data.
         """
-        # Send client's public key
-        self.__client_socket.sendall(self.__crypto_manager.get_serialized_public_key())
+        try:
+            self.__client_socket.sendall(self.__crypto_manager.get_serialized_public_key())
+            server_public_key_pem = self.__client_socket.recv(1024)
+            self.__crypto_manager.load_peer_public_key(server_public_key_pem)
 
-        # Receive and load server's public key
-        server_public_key_pem = self.__client_socket.recv(1024)
-        self.__crypto_manager.load_peer_public_key(server_public_key_pem)
+            self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpClient"))
 
-        # Authenticate with server by exchanging specific messages
-        self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpClient"))
+            encrypted_message_from_server = self.__client_socket.recv(1024)
+            message_from_server = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_server)
+            if message_from_server != b"EchoWarpServer":
+                raise ValueError("Failed to authenticate server.")
 
-        # Receive and decrypt server's authentication message
-        encrypted_message_from_server = self.__client_socket.recv(1024)
-        message_from_server = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_server)
+            encrypted_aes_key_iv = self.__client_socket.recv(1024)
+            self.__crypto_manager.load_aes_key_and_iv(encrypted_aes_key_iv)
 
-        if message_from_server == b"EchoWarpServer":
-            logging.info("Server authenticated")
-        else:
-            raise ValueError("Failed to authenticate server.")
-
-        # Receive encrypted AES key and IV
-        encrypted_aes_key_iv = self.__client_socket.recv(1024)
-        self.__crypto_manager.load_aes_key_and_iv(encrypted_aes_key_iv)
-
-        logging.info("Authentication and encryption setup completed successfully.")
+            logging.info("Authentication and encryption setup completed successfully.")
+        except Exception as e:
+            logging.error(f"Error during authentication: {e}")
+            raise
 
     def __heartbeat(self):
         """
