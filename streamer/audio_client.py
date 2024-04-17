@@ -88,7 +88,7 @@ class UDPClientStreamReceiver:
             data (bytes): Encrypted audio data.
             stream (pyaudio.Stream): PyAudio stream for audio playback.
         """
-        data = self.__crypto_manager.decrypt_and_verify_data(data)
+        data = self.__crypto_manager.decrypt_aes_and_verify_data(data)
 
         decoded_data = decoder.decode(data, len(data))
         stream.write(decoded_data)

@@ -20,8 +20,8 @@ class CryptoManager:
 
     Attributes:
         __is_server (bool): True if this instance is for server use, False for client.
-        __is_encrypt (bool): True to enable encryption, False otherwise.
-        __is_hash_control (bool): True to enable integrity checks, False otherwise.
+        is_encrypt (bool): True to enable encryption, False otherwise.
+        is_hash_control (bool): True to enable integrity checks, False otherwise.
         __private_key (rsa.RSAPrivateKey): RSA private key for decryption purposes.
         __public_key (rsa.RSAPublicKey): RSA public key for encryption purposes.
         __aes_key (Optional[bytes]): AES key for symmetric encryption of audio data.
@@ -29,8 +29,8 @@ class CryptoManager:
         __peer_public_key (Optional[rsa.RSAPublicKey]): Public key of the communication peer.
     """
     __is_server: bool
-    __is_encrypt: bool
-    __is_hash_control: bool
+    is_encrypt: Optional[bool]
+    is_hash_control: Optional[bool]
     __private_key: rsa.RSAPrivateKey
     __public_key: rsa.RSAPublicKey
     __aes_key: Optional[bytes]
@@ -39,27 +39,31 @@ class CryptoManager:
 
     def __init__(self, is_server: bool, is_hash_control: bool, is_encrypt: bool):
         """
-        Initializes a new CryptoManager instance with the specified settings.
+                Initializes a new CryptoManager instance with the specified settings.
 
-        Args:
-            is_server (bool): Indicates if this instance is used by a server.
-            is_hash_control (bool): Enable or disable integrity control via hashing.
-            is_encrypt (bool): Enable or disable encryption.
+                Args:
+                    is_server (bool): Indicates if this instance is used by a server.
+                    is_hash_control (bool): Enable or disable integrity control via hashing.
+                    is_encrypt (bool): Enable or disable encryption.
         """
         self.__is_server = is_server
-        self.__is_encrypt = is_encrypt
-        self.__is_hash_control = is_hash_control
-
-        if self.__is_server:
-            self.__generate_aes_key_and_iv()
-        else:
-            self.__aes_key = None
-            self.__aes_iv = None
+        self.is_encrypt = is_encrypt
+        self.is_hash_control = is_hash_control
 
         self.__private_key, self.__public_key = self.__generate_keys()
-        self.__peer_public_key = None
+        self.__aes_key = self.__aes_iv = self.__peer_public_key = None
 
-    def encrypt_and_sign_data(self, data: bytes) -> bytes:
+        if self.__is_server and self.is_encrypt:
+            self.__generate_aes_key_and_iv()
+
+    def load_encryption_config_for_client(self, is_encrypt: bool, is_hash_control: bool):
+        if self.__is_server:
+            raise ValueError("Load encryption config applied only for client")
+
+        self.is_encrypt = is_encrypt
+        self.is_hash_control = is_hash_control
+
+    def encrypt_aes_and_sign_data(self, data: bytes) -> bytes:
         """
         Encrypts and optionally signs data with a hash for integrity.
 
@@ -76,10 +80,10 @@ class CryptoManager:
         if data is None:
             raise ValueError("Data to encrypt and sign cannot be None")
 
-        if self.__is_hash_control:
+        if self.is_hash_control:
             data = self.__calculate_hash_to_data(data)
 
-        if self.__is_encrypt:
+        if self.is_encrypt:
             try:
                 data = self.__encrypt_data_aes(data)
             except Exception as e:
@@ -88,7 +92,7 @@ class CryptoManager:
 
         return data
 
-    def decrypt_and_verify_data(self, data: bytes) -> bytes:
+    def decrypt_aes_and_verify_data(self, data: bytes) -> bytes:
         """
         Decrypts and optionally verifies data integrity using a hash.
 
@@ -105,14 +109,14 @@ class CryptoManager:
         if data is None:
             raise ValueError("Data to decrypt and verify cannot be None")
 
-        if self.__is_encrypt:
+        if self.is_encrypt:
             try:
                 data = self.__decrypt_data_aes(data)
             except Exception as e:
                 logging.error(f"Failed to decrypt data: {e}")
                 raise
 
-        if self.__is_hash_control:
+        if self.is_hash_control:
             data = self.__compare_hash_and_get_data(data)
 
         return data
@@ -182,13 +186,14 @@ class CryptoManager:
             The decrypted plaintext message.
         """
 
-        return self.__private_key.decrypt(encrypted_message,
-                                          padding.OAEP(
-                                              mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                                              algorithm=hashes.SHA256(),
-                                              label=None
-                                          )
-                                          )
+        return self.__private_key.decrypt(
+            encrypted_message,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
 
     def __generate_aes_key_and_iv(self):
         """
@@ -197,22 +202,30 @@ class CryptoManager:
         self.__aes_key = os.urandom(32)
         self.__aes_iv = os.urandom(16)
 
-    def get_aes_key_and_iv(self):
+    def get_aes_key(self) -> bytes:
         """
-        Returns the AES key and IV encoded with the peer's public RSA key.
-        This method is intended to be used by the server to transmit the AES key and IV securely to the client.
+        Returns the AES key in bytes.
         """
 
-        return self.encrypt_rsa_message(self.__aes_key + self.__aes_iv)
+        return self.__aes_key
 
-    def load_aes_key_and_iv(self, encrypted_aes_key_iv):
+    def get_aes_iv(self) -> bytes:
         """
-        Loads the AES key and IV by decrypting the message with the private RSA key.
-        This method is intended for use by the client to securely receive the AES key and IV from the server.
+        Returns the AES IV in bytes.
         """
-        decrypted_aes_key_iv = self.decrypt_rsa_message(encrypted_aes_key_iv)
-        self.__aes_key = decrypted_aes_key_iv[:32]
-        self.__aes_iv = decrypted_aes_key_iv[32:]
+
+        return self.__aes_iv
+
+    def load_aes_key_and_iv(self, aes_key, aes_iv):
+        """
+        Loads the AES key and IV from peer.
+        """
+        if self.__is_server:
+            logging.error("Only client can load AES key and IV")
+            raise ValueError
+
+        self.__aes_key = aes_key
+        self.__aes_iv = aes_iv
 
     def __encrypt_data_aes(self, data):
         """
@@ -268,6 +281,7 @@ class CryptoManager:
         calculated_hash = hasher.digest()
 
         if received_hash != calculated_hash:
-            raise ValueError("Data integrity check failed")
+            logging.error("Data integrity check failed")
+            raise ValueError
         else:
             return data

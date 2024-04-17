@@ -38,8 +38,7 @@ def main():
         streamer.encode_audio_and_send_to_client()
     else:
         logging.info("Start EchoWarp in client mode")
-        tcp_client = TCPClient(settings.server_addr, settings.udp_port, settings.heartbeat_attempt, stop_event,
-                               settings.crypto_manager)
+        tcp_client = TCPClient(settings.server_addr, settings.udp_port, stop_event, settings.crypto_manager)
         tcp_client.start_tcp_client()
 
         receiver = UDPClientStreamReceiver(settings.server_addr, settings.udp_port, settings.audio_device, stop_event,

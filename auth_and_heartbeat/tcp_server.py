@@ -1,52 +1,43 @@
 import logging
 import socket
 import threading
-import time
+from typing import Optional
 
+from auth_and_heartbeat.tcp_base import TCPBase
 from crypto_manager import CryptoManager
 from logging_config import setup_logging
+from settings.json_message import JSONMessageServer, JSONMessage
+from start_modes.default_values_and_options import DefaultValuesAndOptions
 
 setup_logging()
 
 
-class TCPServer:
+class TCPServer(TCPBase):
     """
-        Handles the server-side TCP operations for EchoWarp, including client authentication and secure communication setup.
+    Manages TCP server operations for EchoWarp, including handling client connections,
+    authentication, and setting up a secure communication channel.
 
-        Attributes:
-            client_addr (str): IP address of the connected client.
-            __client_connect (socket.socket): Socket object for the connected client.
-            __udp_port (int): TCP port on which the server listens (used for initial TCP handshake).
-            __server_socket (socket.socket): Server socket to accept connections.
-            __heartbeat_attempt (int): Number of heartbeat misses allowed before disconnecting.
-            __stop_event (threading.Event): Event to signal when to stop the server.
-            __crypto_manager (CryptoManager): Manager for cryptographic operations.
+    Attributes:
+        client_addr (Optional[str]): IP address of the connected client.
+        __server_socket (Optional[socket.socket]): Server socket for accepting client connections.
     """
-    client_addr: str
-    __client_connect: socket
-    __udp_port: int
-    __server_socket: socket
-    __heartbeat_attempt: int
-    __stop_event: threading.Event
-    __crypto_manager: CryptoManager
+    client_addr: Optional[str]
+    __server_socket: Optional[socket.socket]
 
     def __init__(self, udp_port, heartbeat_attempt: int, stop_event: threading.Event, crypto_manager: CryptoManager):
         """
-                Initializes the TCPServer with the specified port and cryptographic manager.
+        Initializes the TCPServer with specified configuration parameters.
 
-                Args:
-                    udp_port (int): The TCP port to listen on for incoming connections.
-                    heartbeat_attempt (int): Number of allowed missed heartbeats before considering the connection lost.
-                    stop_event (threading.Event): Event that signals the server to stop operations.
-                    crypto_manager (CryptoManager): Manager handling all cryptographic functions.
+        Args:
+            udp_port (int): The port number on which the server listens for incoming TCP connections.
+            heartbeat_attempt (int): The number of allowed missed heartbeats before considering the connection lost.
+            stop_event (threading.Event): An event to signal the server to stop operations.
+            crypto_manager (CryptoManager): An instance to manage cryptographic operations.
         """
-        self.__udp_port = udp_port
-        self.__heartbeat_attempt = heartbeat_attempt
-        self.__stop_event = stop_event
-        self.__crypto_manager = crypto_manager
+        super().__init__(udp_port, stop_event, heartbeat_attempt, crypto_manager)
 
+        self.client_addr = None
         self.__server_socket = None
-        self.__client_connect = None
 
     def start_tcp_server(self):
         """
@@ -58,7 +49,7 @@ class TCPServer:
         logging.info(f'TCP server started on port "{self.__udp_port}" awaiting client connection')
 
         try:
-            self.__client_connect, client_addr = self.__server_socket.accept()
+            self.__client_socket, client_addr = self.__server_socket.accept()
             self.client_addr = client_addr[0]
             logging.info(f"Client connected from {self.client_addr}")
 
@@ -66,53 +57,68 @@ class TCPServer:
         except Exception as e:
             logging.error(f"Server encountered an error: {e}")
         finally:
-            if self.__client_connect:
-                self.__client_connect.close()
+            if self.__client_socket:
+                self.__client_socket.close()
             self.__server_socket.close()
 
     def __authenticate_client(self):
         """
-        Handles the authentication sequence with the client by exchanging encrypted messages.
-        Establishes encryption settings by exchanging public keys and AES keys.
+        Handles the authentication sequence with the client by exchanging encrypted messages and establishing encryption settings.
+
+        Raises:
+            ValueError: If client authentication fails or there is a version mismatch.
         """
         try:
-            self.__client_connect.sendall(self.__crypto_manager.get_serialized_public_key())
+            self.__client_socket.sendall(self.__crypto_manager.get_serialized_public_key())
 
-            client_public_key_pem = self.__client_connect.recv(1024)
+            client_public_key_pem = self.__client_socket.recv(1024)
             self.__crypto_manager.load_peer_public_key(client_public_key_pem)
 
-            encrypted_message_from_client = self.__client_connect.recv(1024)
+            encrypted_message_from_client = self.__client_socket.recv(1024)
             message_from_client = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_client)
-            if message_from_client == b"EchoWarpClient":
-                logging.info("Client authenticated")
 
-                self.__client_connect.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpServer"))
-                self.__client_connect.sendall(self.__crypto_manager.get_aes_key_and_iv())
+            client_auth_message = JSONMessage(message_from_client)
 
-                logging.info("Encryption setup completed successfully.")
+            if (client_auth_message.message != JSONMessage.AUTH_CLIENT_MESSAGE
+                    or client_auth_message.response_code != 200):
+                error_message = "Forbidden"
+                error_message_bytes = JSONMessage.encode_message_to_json_bytes(error_message, 403)
 
-                threading.Thread(target=self.__heartbeat, daemon=True).start()
-            else:
-                raise ValueError("Failed to authenticate client.")
+                self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(error_message_bytes))
+
+                logging.error(f"Failed to authenticate client. Client sent message: {client_auth_message.message}")
+                raise ValueError("Client authentication failed.")
+
+            logging.info("Client authenticated")
+
+            if client_auth_message.version != DefaultValuesAndOptions.get_util_version():
+                error_message = (f"Client version not equal server version: "
+                                 f"{client_auth_message.version} - Client, "
+                                 f"{DefaultValuesAndOptions.get_util_version()} - Server")
+                error_message_bytes = JSONMessage.encode_message_to_json_bytes(error_message, 500)
+
+                self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(error_message_bytes))
+
+                logging.error(error_message)
+                raise ValueError("Version mismatch between client and server.")
+
+            self.__send_configuration()
+
+            threading.Thread(target=self.__heartbeat, daemon=True).start()
         except Exception as e:
             logging.error(f"Authentication error: {e}")
             raise
 
-    def __heartbeat(self):
+    def __send_configuration(self):
         """
-        Handles the heartbeat mechanism to ensure the connection remains alive and stable.
-        """
-        while not self.__stop_event.is_set():
-            try:
-                encrypted_message = self.__client_connect.recv(1024)
-                message = self.__crypto_manager.decrypt_and_verify_data(encrypted_message)
+        Sends the configuration settings to the connected client, including security settings and AES keys.
 
-                if message == b"heartbeat":
-                    response = self.__crypto_manager.encrypt_and_sign_data(message)
-                    self.__client_connect.sendall(response)
-                else:
-                    logging.warning("Heartbeat verification failed.")
-                time.sleep(5)
-            except Exception as e:
-                logging.error(f"Heartbeat failed: {e}")
-                break
+        The configuration is sent as an encrypted JSON string.
+        """
+        config_json = JSONMessageServer.encode_server_config_to_json_bytes(
+            self.__heartbeat_attempt, self.__crypto_manager.is_encrypt, self.__crypto_manager.is_hash_control,
+            self.__crypto_manager.get_aes_key(), self.__crypto_manager.get_aes_iv()
+        )
+
+        self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(config_json))
+        logging.info("Configuration sent to client.")

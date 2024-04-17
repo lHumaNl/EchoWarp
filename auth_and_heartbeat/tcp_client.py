@@ -1,58 +1,46 @@
 import socket
 import logging
 import threading
-import time
 
+from auth_and_heartbeat.tcp_base import TCPBase
 from crypto_manager import CryptoManager
 from logging_config import setup_logging
+from settings.json_message import JSONMessage, JSONMessageServer
+from start_modes.default_values_and_options import DefaultValuesAndOptions
 
 setup_logging()
 
 
-class TCPClient:
+class TCPClient(TCPBase):
     """
-        Handles TCP client operations for EchoWarp, including server authentication and communication.
+    Manages TCP client operations for EchoWarp, including connection establishment,
+    server authentication, and secure data exchange.
 
-        Attributes:
-            __server_address (str): IP address or hostname of the server.
-            __udp_port (int): Port number for the TCP connection (not UDP).
-            __heartbeat_attempt (int): Number of allowed missed heartbeats before disconnecting.
-            __stop_event (threading.Event): Event to signal when to stop the client.
-            __crypto_manager (CryptoManager): Instance to manage cryptographic operations.
+    Attributes:
+        __server_address (str): The IP address or hostname of the server.
     """
-    __client_socket: socket
     __server_address: str
-    __udp_port: int
-    __heartbeat_attempt: int
-    __stop_event: threading.Event
-    __crypto_manager: CryptoManager
 
-    def __init__(self, server_address: str, udp_port: int, heartbeat_attempt: int, stop_event: threading.Event,
-                 crypto_manager: CryptoManager):
+    def __init__(self, server_address: str, udp_port: int, stop_event: threading.Event, crypto_manager: CryptoManager):
         """
-                Initializes the TCPClient with the specified server details and cryptographic manager.
+        Initializes the TCP client with the necessary configuration to establish a connection.
 
-                Args:
-                    server_address (str): The server's IP address or hostname.
-                    udp_port (int): The TCP port to connect on (despite the name).
-                    heartbeat_attempt (int): Max number of missed heartbeats before considering the connection dead.
-                    stop_event (threading.Event): Event that signals the client to stop operations.
-                    crypto_manager (CryptoManager): Manager handling all cryptographic functions.
+        Args:
+            server_address (str): The server's IP address or hostname.
+            udp_port (int): The TCP port on the server to connect to.
+            stop_event (threading.Event): An event to signal the thread to stop operations.
+            crypto_manager (CryptoManager): An instance to manage cryptographic operations.
         """
+        super().__init__(udp_port, stop_event, None, crypto_manager)
         self.__server_address = server_address
-        self.__udp_port = udp_port
-        self.__heartbeat_attempt = heartbeat_attempt
-        self.__stop_event = stop_event
-        self.__crypto_manager = crypto_manager
-        self.__client_socket = None
 
     def start_tcp_client(self):
         """
-        Establishes the TCP connection to the server and performs authentication using cryptographic methods.
+        Establishes a TCP connection to the server, authenticates and sets up the secure communication channel.
 
         Raises:
-            ConnectionError: If the connection to the server cannot be established or lost unexpectedly.
-            ValueError: If the server fails authentication checks.
+            ConnectionError: If there is an issue with connecting to the server.
+            ValueError: If the server's response during authentication is invalid.
         """
         self.__client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -71,50 +59,49 @@ class TCPClient:
 
     def __authenticate_with_server(self):
         """
-        Performs the authentication sequence with the server by exchanging and verifying encrypted data.
+        Performs authentication with the server using RSA encryption for the exchange of credentials.
+
+        Raises:
+            ValueError: If the authentication with the server fails or if versions mismatch.
         """
         try:
             self.__client_socket.sendall(self.__crypto_manager.get_serialized_public_key())
             server_public_key_pem = self.__client_socket.recv(1024)
             self.__crypto_manager.load_peer_public_key(server_public_key_pem)
 
-            self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(b"EchoWarpClient"))
+            client_auth_message_bytes = JSONMessage.encode_message_to_json_bytes(
+                JSONMessage.AUTH_CLIENT_MESSAGE,
+                200
+            )
+
+            self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(client_auth_message_bytes))
 
             encrypted_message_from_server = self.__client_socket.recv(1024)
             message_from_server = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_server)
-            if message_from_server != b"EchoWarpServer":
-                raise ValueError("Failed to authenticate server.")
+            config_server_message = JSONMessageServer(message_from_server)
 
-            encrypted_aes_key_iv = self.__client_socket.recv(1024)
-            self.__crypto_manager.load_aes_key_and_iv(encrypted_aes_key_iv)
+            if (config_server_message.message != JSONMessageServer.AUTH_SERVER_MESSAGE
+                    or config_server_message.response_code != 200):
+                logging.error(
+                    f"Failed to authenticate server. Message from server: "
+                    f"{config_server_message.response_code} {config_server_message.message}")
+                raise ValueError("Server authentication failed.")
 
-            logging.info("Authentication and encryption setup completed successfully.")
+            if config_server_message.version != DefaultValuesAndOptions.get_util_version():
+                logging.error(f"Client version not equal server version: "
+                              f"{DefaultValuesAndOptions.get_util_version()} - Client, "
+                              f"{config_server_message.version} - Server")
+                raise ValueError("Version mismatch between client and server.")
+
+            self.__crypto_manager.load_aes_key_and_iv(config_server_message.aes_key,
+                                                      config_server_message.aes_iv)
+            self.__crypto_manager.load_encryption_config_for_client(config_server_message.is_encrypt,
+                                                                    config_server_message.is_integrity_control)
+            self.__heartbeat_attempt = config_server_message.heartbeat_attempt
+
+            logging.info("Authentication and load config from server completed successfully.")
+
+            threading.Thread(target=self.__heartbeat, daemon=True).start()
         except Exception as e:
             logging.error(f"Error during authentication: {e}")
             raise
-
-    def __heartbeat(self):
-        """
-            Continuously sends heartbeat messages to the server to maintain the connection alive.
-
-            Raises:
-                RuntimeError: If too many heartbeat messages are missed, indicating a possible connection issue.
-        """
-        missed_heartbeats = 0
-
-        while not self.__stop_event.is_set() and missed_heartbeats <= self.__heartbeat_attempt:
-            try:
-                self.__client_socket.sendall(b"heartbeat")
-                if self.__client_socket.recv(1024) != b"heartbeat":
-                    missed_heartbeats += 1
-                    logging.warning(f"Heartbeat miss detected. Miss count: {missed_heartbeats}")
-                else:
-                    missed_heartbeats = max(0, missed_heartbeats - 1)
-                time.sleep(5)
-            except socket.error as e:
-                logging.error(f"Heartbeat failed due to network error: {e}")
-                break
-
-        if missed_heartbeats > self.__heartbeat_attempt:
-            logging.error("Too many heartbeat misses, terminating connection.")
-            self.__stop_event.set()

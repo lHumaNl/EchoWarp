@@ -6,6 +6,18 @@ from settings.settings import Settings
 
 
 def get_settings_by_args() -> Settings:
+    """
+        Parses command line arguments to configure the EchoWarp utility settings. This function
+        constructs the settings based on the provided command line arguments, handling different modes
+        and configurations such as server/client mode, audio device selection, and network settings.
+
+        Returns:
+            Settings: An instance of the Settings class populated with values derived from parsed command line arguments.
+
+        Raises:
+            argparse.ArgumentError: If there are issues with the provided arguments, such as missing required arguments
+                                    or invalid values.
+    """
     parser = argparse.ArgumentParser(description="EchoWarp Audio Streamer")
 
     parser.add_argument("-c", "--client", action='store_false',

@@ -11,10 +11,31 @@ from start_modes.options_data_creater import OptionsData
 
 
 class NumberValidator(Validator):
+    """
+        A custom validator for prompt_toolkit that ensures user input is a valid number within a specified range.
+
+        Attributes:
+            valid_numbers (set): A set of numbers that are considered valid for input.
+    """
     def __init__(self, valid_numbers):
+        """
+        Initializes the NumberValidator with the specified set of valid numbers.
+
+        Args:
+            valid_numbers (set): The set of valid numbers.
+        """
         self.valid_numbers = valid_numbers
 
     def validate(self, document):
+        """
+        Validates the user input against the allowed numbers.
+
+        Args:
+            document (Document): The input document to validate.
+
+        Raises:
+            ValidationError: If the input is not a valid number or not in the allowed set.
+        """
         text = document.text
         if not text:
             return None
@@ -26,8 +47,18 @@ class NumberValidator(Validator):
 
 
 class InteractiveSettings:
+    """
+    Handles the interactive configuration of EchoWarp settings through command line prompts.
+    Allows users to configure settings such as server/client mode, audio device selection, and network options.
+    """
     @staticmethod
     def get_settings_interactive() -> Settings:
+        """
+        Prompts the user interactively to configure the EchoWarp settings and returns the configured settings object.
+
+        Returns:
+            Settings: A fully configured Settings object based on user input.
+        """
         server_address = None
         heartbeat_attempt = None
         is_ssl = None
@@ -81,6 +112,16 @@ class InteractiveSettings:
 
     @staticmethod
     def __select_in_interactive_from_values(descr: str, options_data: OptionsData):
+        """
+        Displays a list of options to the user and allows them to select one interactively.
+
+        Args:
+            descr (str): Description of the setting being configured.
+            options_data (OptionsData): Data containing the options and their descriptions.
+
+        Returns:
+            Any: The value of the selected option.
+        """
         options_dict = {index: opt for index, opt in enumerate(options_data.options, start=1)}
 
         choices = os.linesep.join([f"{num}. {desc.option_descr}" for num, desc in options_dict.items()])
@@ -101,6 +142,16 @@ class InteractiveSettings:
 
     @staticmethod
     def __input_in_interactive_int_value(default_value: int, descr: str) -> int:
+        """
+        Prompts the user to input an integer value interactively, providing a default if no input is given.
+
+        Args:
+            default_value (int): The default value to use if no input is provided.
+            descr (str): Description of the setting being configured.
+
+        Returns:
+            int: The user-input value or the default value.
+        """
         while True:
             try:
                 value = prompt(f"Select {descr} (default={default_value}): ")

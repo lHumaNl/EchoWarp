@@ -90,5 +90,5 @@ class UDPServerStreamer:
             encoder (opuslib.Encoder): Opus encoder for audio data.
             data (bytes): Raw audio data to encode and send.
         """
-        encoded_data = self.__crypto_manager.encrypt_and_sign_data(encoder.encode(data, 1024))
+        encoded_data = self.__crypto_manager.encrypt_aes_and_sign_data(encoder.encode(data, 1024))
         server_socket.sendto(encoded_data, (self.__client_addr, self.__udp_port))
