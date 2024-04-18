@@ -44,13 +44,13 @@ class TCPServer(TCPBase):
         Starts the TCP server, listens for incoming connections, and handles client authentication and setup.
         """
         self.__server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
         self.__server_socket.bind(('0.0.0.0', self.__udp_port))
         self.__server_socket.listen(1)
         logging.info(f'TCP server started on port "{self.__udp_port}" awaiting client connection')
 
         try:
-            self.__client_socket, client_addr = self.__server_socket.accept()
-            self.client_addr = client_addr[0]
+            self._established_connection()
             logging.info(f"Client connected from {self.client_addr}")
 
             self.__authenticate_client()
@@ -63,7 +63,8 @@ class TCPServer(TCPBase):
 
     def __authenticate_client(self):
         """
-        Handles the authentication sequence with the client by exchanging encrypted messages and establishing encryption settings.
+        Handles the authentication sequence with the client by exchanging encrypted messages and
+        establishing encryption settings.
 
         Raises:
             ValueError: If client authentication fails or there is a version mismatch.
@@ -122,3 +123,10 @@ class TCPServer(TCPBase):
 
         self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(config_json))
         logging.info("Configuration sent to client.")
+
+    def _initialize_socket(self):
+        return
+
+    def _established_connection(self):
+        self.__client_socket, client_addr = self.__server_socket.accept()
+        self.client_addr = client_addr[0]

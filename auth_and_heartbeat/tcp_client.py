@@ -42,10 +42,10 @@ class TCPClient(TCPBase):
             ConnectionError: If there is an issue with connecting to the server.
             ValueError: If the server's response during authentication is invalid.
         """
-        self.__client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._initialize_socket()
 
         try:
-            self.__client_socket.connect((self.__server_address, self.__udp_port))
+            self._established_connection()
             logging.info(f"TCP connection to {self.__server_address}:{self.__udp_port} established.")
 
             self.__authenticate_with_server()
@@ -105,3 +105,9 @@ class TCPClient(TCPBase):
         except Exception as e:
             logging.error(f"Error during authentication: {e}")
             raise
+
+    def _initialize_socket(self):
+        self.__client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    def _established_connection(self):
+        self.__client_socket.connect((self.__server_address, self.__udp_port))

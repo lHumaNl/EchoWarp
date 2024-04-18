@@ -1,34 +1,31 @@
 # EchoWarp
 
-EchoWarp is a network audio streaming utility designed to stream audio from a server to a client over a network. It
-supports both input and output audio devices, providing flexibility for various audio streaming scenarios. EchoWarp
-operates in either server or client mode, with a background thread handling authentication and heartbeat checks to
-ensure a stable connection.
+EchoWarp is a versatile network audio streaming tool designed to transmit audio streams between a server and a client over a network. It supports both audio input and output devices, adapting to various audio streaming scenarios. EchoWarp can operate in either server or client mode, with robust configuration options available via command-line arguments or an interactive setup.
 
-## Features
+## Key Features
 
-- **Audio Streaming**: Stream audio in real-time over the network.
-- **Server & Client Modes**: Operate as either a server (sending audio) or a client (receiving audio).
-- **Device Selection**: Choose specific input or output audio devices for streaming.
-- **Authentication and Heartbeat**: Secure connection establishment with heartbeat monitoring for connection integrity.
-- **Interactive and Argument Modes**: Configure settings interactively or via command-line arguments for flexibility in
-  different use cases.
+- **Cross-Platform Compatibility**: Works seamlessly on Windows, macOS, and Linux.
+- **Flexible Audio Device Selection**: Choose specific input or output devices for audio streaming.
+- **Real-Time Audio Streaming**: Utilizes UDP for transmitting audio data and TCP for control signals.
+- **Robust Encryption and Integrity Checks**: Supports AES encryption and SHA-256 hashing to secure data streams.
+- **Automatic Reconnection**: Implements heartbeat and authentication mechanisms to handle reconnections and ensure continuous streaming.
+- **Configurable through CLI and Interactive Modes**: Offers easy setup through an interactive mode or scriptable CLI options.
 
-## Windows Compatibility
+## Prerequisites
 
-EchoWarp is designed to be compatible with Windows operating systems. Please ensure you are running this utility on a
-Windows machine.
+- **Operating System**: Windows, Linux, or macOS.
+- **Python Version**: Python 3.6 or later.
+- **Dependencies**: Includes libraries like PyAudio, Opuslib, and Cryptography.
 
-## Installation in Virtual Environment
+## Installation
 
-Before running EchoWarp, ensure you have Python 3.6+ installed on your system. Clone this repository and install the
-required dependencies:
+Clone the repository and set up a Python virtual environment:
 
 ```bash
-git clone https://github.com/lHumaNl/EchoWarp.git
+git clone https://github.com/yourgithub/EchoWarp.git
 cd EchoWarp
 python -m venv venv
-.\venv\Scripts\activate
+source venv/bin/activate  # On Windows, use `.\venv\Scripts\activate`
 pip install -r requirements.txt
 ```
 
@@ -53,29 +50,36 @@ EchoWarp supports configuration via command-line arguments for easy integration 
 
 #### Arguments Table
 
-| Argument              | Description                                     | Required | Default Value |
-|-----------------------|-------------------------------------------------|----------|---------------|
-| `-s`, `--server`      | Launch EchoWarp in server mode.                 | No       | Client mode   |
-| `-o`, `--output`      | Use the output audio device.                    | No       | Input device  |
-| `-a`, `--server_addr` | Specify the server address (Client mode only).  | Yes*     | -             |
-| `-p`, `--udp_port`    | UDP port for audio streaming.                   | No       | 6532          |
-| `-e`, `--encoding`    | Encoding for device names.                      | No       | cp1251        |
-| `-b`, `--heartbeat`   | Number of heartbeat attempts before disconnect. | No       | 5             |
+## Command-Line Arguments
 
-\* Required only in client mode.
+| Argument        | Description                                                                                   | Default     |
+|-----------------|-----------------------------------------------------------------------------------------------|-------------|
+| `-c`, `--client`| Start utility in client mode.                                                                 | Server mode |
+| `-o`, `--output`| Use the output audio device for streaming.                                                    | Input device|
+| `-p`, `--udp_port`| Specify the UDP port for audio data transmission.                                             | 4415        |
+| `-d`, `--device_id`| Specify the device ID directly to avoid interactive selection.                               | None        |
+| `-t`, `--thread_mode`| Enable threading mode for parallel processing.                                               | False       |
+| `-w`, `--workers`| Set the maximum number of worker threads or processes.                                        | 2           |
+| `-a`, `--server_addr`| Specify the server address (only valid in client mode).                                       | None        |
+| `-b`, `--heartbeat`| Set the number of allowed missed heartbeats before disconnect (server mode only).             | 5           |
+| `--ssl`| Enable SSL mode for encrypted communication (server mode only).                               | False       |
+| `-i`, `--integrity_control`| Enable integrity control using hash (server mode only).                                       | False       |
+
+Use these arguments to configure the utility directly from the command line for both automation and manual setups.
+
 
 ## Examples
 
-### Server Mode with Default Settings:
+### Consult the help output for detailed command-line options::
 
 ```bash
-python main.py --server
+python main.py --help
 ```
 
 ### Client Mode with Custom Server Address and Port:
 
 ```bash
-python main.py --server_addr 192.168.1.5 --udp_port 6555
+python main.py --client --server_addr 192.168.1.5 --udp_port 6555
 ```
 
 ## Dependencies

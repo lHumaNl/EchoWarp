@@ -2,6 +2,7 @@ import logging
 import socket
 import threading
 import time
+from abc import abstractmethod
 from typing import Optional
 
 from logging_config import setup_logging
@@ -15,7 +16,8 @@ setup_logging()
 class TCPBase:
     """
         Provides base TCP functionality for both client and server sides of the EchoWarp application.
-        This class manages the TCP connection, including sending heartbeats to keep the connection alive and handling potential connection losses.
+        This class manages the TCP connection, including sending heartbeats to keep the connection alive and
+        handling potential connection losses.
 
         Attributes:
             __client_socket (socket.socket): Socket used for TCP communication.
@@ -55,10 +57,9 @@ class TCPBase:
         Raises:
             RuntimeError: Raised if too many consecutive heartbeat messages are missed, indicating a connection issue.
         """
-        missed_heartbeats = 0
         heartbeat_interval = 5
 
-        while not self.__stop_event.is_set() and missed_heartbeats <= self.__heartbeat_attempt:
+        while not self.__stop_event.is_set():
             try:
                 heartbeat_message = JSONMessage.encode_message_to_json_bytes(JSONMessage.HEARTBEAT_MESSAGE, 200)
                 self.__client_socket.sendall(self.__crypto_manager.encrypt_aes_and_sign_data(heartbeat_message))
@@ -67,20 +68,69 @@ class TCPBase:
                 response_message = JSONMessage(self.__crypto_manager.decrypt_aes_and_verify_data(encrypted_response))
 
                 if response_message.message != JSONMessage.HEARTBEAT_MESSAGE or response_message.response_code != 200:
-                    missed_heartbeats += 1
-                    logging.warning(f"Heartbeat miss detected. Miss count: {missed_heartbeats}")
-                else:
-                    missed_heartbeats = max(0, missed_heartbeats - 1)
+                    raise ValueError(
+                        f"Response heartbeat message: {response_message.response_code} {response_message.message}")
 
                 time.sleep(heartbeat_interval)
+            except ValueError as e:
+                logging.error(e)
+                self.__reconnect()
             except socket.error as e:
                 logging.error(f"Heartbeat failed due to network error: {e}")
-                missed_heartbeats += 1
+                self.__reconnect()
             except Exception as e:
                 logging.error(f"Unexpected error during heartbeat: {e}")
-                missed_heartbeats += 1
+                self.__reconnect()
 
-            if missed_heartbeats > self.__heartbeat_attempt:
-                logging.error("Too many heartbeat misses, terminating connection.")
-                self.__stop_event.set()
-                raise RuntimeError("Connection lost due to missed heartbeats")
+    def __reconnect(self):
+        logging.info("Attempting to stabilize the connection...")
+        if self.__try_send_heartbeat():
+            return
+
+        self._cleanup_client_sockets()
+        self._initialize_socket()
+
+        self.__perform_reconnect_attempts()
+
+    def __try_send_heartbeat(self):
+        try:
+            heartbeat_message = JSONMessage.encode_message_to_json_bytes(JSONMessage.HEARTBEAT_MESSAGE, 200)
+            self.__client_socket.sendall(self.__crypto_manager.encrypt_aes_and_sign_data(heartbeat_message))
+            logging.info("Connection stabilized with heartbeat.")
+            return True
+        except socket.error:
+            logging.info("Failed to send heartbeat.")
+            return False
+
+    def _cleanup_client_sockets(self):
+        try:
+            if self.__client_socket:
+                self.__client_socket.shutdown(socket.SHUT_RDWR)
+                self.__client_socket.close()
+        except socket.error as e:
+            logging.error(f"Error closing client socket: {e}")
+
+    def __perform_reconnect_attempts(self):
+        attempts = 0
+        while not self.__stop_event.is_set() and attempts < self.__heartbeat_attempt:
+            try:
+                self._established_connection()
+                logging.info("Reconnect successful")
+                break
+            except socket.error as e:
+                attempts += 1
+                logging.error(f"Reconnect failed: {e}, retrying... (Attempt {attempts}/{self.__heartbeat_attempt})")
+                time.sleep(5)
+
+        if attempts >= self.__heartbeat_attempt:
+            logging.error("Maximum reconnect attempts reached, terminating connection.")
+            self.__stop_event.set()
+            raise RuntimeError("Connection lost due to missed reconnect attempts")
+
+    @abstractmethod
+    def _initialize_socket(self):
+        pass
+
+    @abstractmethod
+    def _established_connection(self):
+        pass
