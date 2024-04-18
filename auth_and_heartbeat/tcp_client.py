@@ -17,9 +17,9 @@ class TCPClient(TCPBase):
     server authentication, and secure data exchange.
 
     Attributes:
-        __server_address (str): The IP address or hostname of the server.
+        _server_address (str): The IP address or hostname of the server.
     """
-    __server_address: str
+    _server_address: str
 
     def __init__(self, server_address: str, udp_port: int, stop_event: threading.Event, crypto_manager: CryptoManager):
         """
@@ -32,7 +32,7 @@ class TCPClient(TCPBase):
             crypto_manager (CryptoManager): An instance to manage cryptographic operations.
         """
         super().__init__(udp_port, stop_event, None, crypto_manager)
-        self.__server_address = server_address
+        self._server_address = server_address
 
     def start_tcp_client(self):
         """
@@ -46,16 +46,16 @@ class TCPClient(TCPBase):
 
         try:
             self._established_connection()
-            logging.info(f"TCP connection to {self.__server_address}:{self.__udp_port} established.")
+            logging.info(f"TCP connection to {self._server_address}:{self._udp_port} established.")
 
             self.__authenticate_with_server()
         except socket.error as e:
-            logging.error(f"Failed to establish connection to {self.__server_address}:{self.__udp_port}: {e}")
-            raise ConnectionError(f"Failed to establish connection to {self.__server_address}:{self.__udp_port}")
+            logging.error(f"Failed to establish connection to {self._server_address}:{self._udp_port}: {e}")
+            raise ConnectionError(f"Failed to establish connection to {self._server_address}:{self._udp_port}")
         except Exception as e:
             logging.error(f"Authentication or encryption setup failed: {e}")
         finally:
-            self.__client_socket.close()
+            self._client_socket.close()
 
     def __authenticate_with_server(self):
         """
@@ -65,19 +65,19 @@ class TCPClient(TCPBase):
             ValueError: If the authentication with the server fails or if versions mismatch.
         """
         try:
-            self.__client_socket.sendall(self.__crypto_manager.get_serialized_public_key())
-            server_public_key_pem = self.__client_socket.recv(1024)
-            self.__crypto_manager.load_peer_public_key(server_public_key_pem)
+            self._client_socket.sendall(self._crypto_manager.get_serialized_public_key())
+            server_public_key_pem = self._client_socket.recv(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
+            self._crypto_manager.load_peer_public_key(server_public_key_pem)
 
             client_auth_message_bytes = JSONMessage.encode_message_to_json_bytes(
                 JSONMessage.AUTH_CLIENT_MESSAGE,
                 200
             )
 
-            self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(client_auth_message_bytes))
+            self._client_socket.sendall(self._crypto_manager.encrypt_rsa_message(client_auth_message_bytes))
 
-            encrypted_message_from_server = self.__client_socket.recv(1024)
-            message_from_server = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_server)
+            encrypted_message_from_server = self._client_socket.recv(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
+            message_from_server = self._crypto_manager.decrypt_rsa_message(encrypted_message_from_server)
             config_server_message = JSONMessageServer(message_from_server)
 
             if (config_server_message.message != JSONMessageServer.AUTH_SERVER_MESSAGE
@@ -93,21 +93,22 @@ class TCPClient(TCPBase):
                               f"{config_server_message.version} - Server")
                 raise ValueError("Version mismatch between client and server.")
 
-            self.__crypto_manager.load_aes_key_and_iv(config_server_message.aes_key,
-                                                      config_server_message.aes_iv)
-            self.__crypto_manager.load_encryption_config_for_client(config_server_message.is_encrypt,
-                                                                    config_server_message.is_integrity_control)
-            self.__heartbeat_attempt = config_server_message.heartbeat_attempt
+            self._crypto_manager.load_aes_key_and_iv(config_server_message.aes_key,
+                                                     config_server_message.aes_iv)
+            self._crypto_manager.load_encryption_config_for_client(config_server_message.is_encrypt,
+                                                                   config_server_message.is_integrity_control)
+            self._heartbeat_attempt = config_server_message.heartbeat_attempt
 
             logging.info("Authentication and load config from server completed successfully.")
+            # self._heartbeat()
 
-            threading.Thread(target=self.__heartbeat, daemon=True).start()
+            # threading.Thread(target=self._heartbeat, daemon=True).start()
         except Exception as e:
             logging.error(f"Error during authentication: {e}")
             raise
 
     def _initialize_socket(self):
-        self.__client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     def _established_connection(self):
-        self.__client_socket.connect((self.__server_address, self.__udp_port))
+        self._client_socket.connect((self._server_address, self._udp_port))

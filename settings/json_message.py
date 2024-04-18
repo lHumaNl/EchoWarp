@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from logging_config import setup_logging
@@ -17,7 +18,7 @@ class JSONMessage:
             response_code (int): The HTTP-like response code indicating the status of the message.
             version (float): The version of the utility that the message is compatible with.
     """
-    __json_message: dict
+    _json_message: dict
 
     message: str
     response_code: int
@@ -27,9 +28,9 @@ class JSONMessage:
     AUTH_SERVER_MESSAGE = "EchoWarpServer"
     HEARTBEAT_MESSAGE = "heartbeat"
 
-    __MESSAGE_KEY = "message"
-    __RESPONSE_CODE = "response_code"
-    __VERSION_KEY = "version"
+    _MESSAGE_KEY = "message"
+    _RESPONSE_CODE = "response_code"
+    _VERSION_KEY = "version"
 
     def __init__(self, json_bytes: bytes):
         """
@@ -42,11 +43,11 @@ class JSONMessage:
                     Exception: If there is an error decoding the JSON data.
         """
         try:
-            self.__json_message = json.loads(json_bytes.decode('utf-8'))
+            self._json_message = json.loads(json_bytes.decode('utf-8'))
 
-            self.message = self.__json_message[self.__MESSAGE_KEY]
-            self.response_code = self.__json_message[self.__RESPONSE_CODE]
-            self.version = self.__json_message[self.__VERSION_KEY]
+            self.message = self._json_message[self._MESSAGE_KEY]
+            self.response_code = self._json_message[self._RESPONSE_CODE]
+            self.version = self._json_message[self._VERSION_KEY]
         except Exception as e:
             logging.error(f"Decode json message error: {e}")
             raise
@@ -64,9 +65,9 @@ class JSONMessage:
                     bytes: A byte array containing the JSON-encoded message.
         """
         message = {
-            JSONMessage.__MESSAGE_KEY: message,
-            JSONMessage.__RESPONSE_CODE: response_code,
-            JSONMessage.__VERSION_KEY: DefaultValuesAndOptions.get_util_version(),
+            JSONMessage._MESSAGE_KEY: message,
+            JSONMessage._RESPONSE_CODE: response_code,
+            JSONMessage._VERSION_KEY: DefaultValuesAndOptions.get_util_version(),
         }
 
         return json.dumps(message).encode('utf-8')
@@ -87,12 +88,12 @@ class JSONMessageServer(JSONMessage):
     is_encrypt: bool
     is_integrity_control: bool
 
-    __CONFIGS_KEY = "config"
-    __HEARTBEAT_ATTEMPT_KEY = "heartbeat_attempt"
-    __IS_ENCRYPT_KEY = "is_encrypt"
-    __IS_INTEGRITY_CONTROL_KEY = "is_integrity_control"
-    __AES_KEY = "aes_key"
-    __AES_IV_KEY = "aes_iv"
+    _CONFIGS_KEY = "config"
+    _HEARTBEAT_ATTEMPT_KEY = "heartbeat_attempt"
+    _IS_ENCRYPT_KEY = "is_encrypt"
+    _IS_INTEGRITY_CONTROL_KEY = "is_integrity_control"
+    _AES_KEY = "aes_key"
+    _AES_IV_KEY = "aes_iv"
 
     def __init__(self, json_bytes: bytes):
         """
@@ -107,18 +108,21 @@ class JSONMessageServer(JSONMessage):
         """
         super().__init__(json_bytes)
 
-        if self.__CONFIGS_KEY in self.__json_message:
+        if self._CONFIGS_KEY in self._json_message:
             try:
-                self.heartbeat_attempt = self.__json_message[self.__CONFIGS_KEY][self.__HEARTBEAT_ATTEMPT_KEY]
-                self.is_encrypt = self.__json_message[self.__CONFIGS_KEY][self.__IS_ENCRYPT_KEY]
-                self.is_integrity_control = self.__json_message[self.__CONFIGS_KEY][self.__IS_INTEGRITY_CONTROL_KEY]
-                self.aes_key = self.__json_message[self.__CONFIGS_KEY][self.__AES_KEY]
-                self.aes_iv = self.__json_message[self.__CONFIGS_KEY][self.__AES_IV_KEY]
+                self.heartbeat_attempt = self._json_message[self._CONFIGS_KEY][self._HEARTBEAT_ATTEMPT_KEY]
+                self.is_encrypt = self._json_message[self._CONFIGS_KEY][self._IS_ENCRYPT_KEY]
+                self.is_integrity_control = self._json_message[self._CONFIGS_KEY][self._IS_INTEGRITY_CONTROL_KEY]
+                aes_key = self._json_message[self._CONFIGS_KEY][self._AES_KEY]
+                aes_iv = self._json_message[self._CONFIGS_KEY][self._AES_IV_KEY]
+
+                self.aes_key = base64.b64decode(aes_key)
+                self.aes_iv = base64.b64decode(aes_iv)
             except Exception as e:
                 logging.error(f"Decode json message error: {e}")
                 raise
         else:
-            logging.error(self.__CONFIGS_KEY + " not in json config message")
+            logging.error(self._CONFIGS_KEY + " not in json config message")
             raise ValueError
 
     @staticmethod
@@ -137,17 +141,20 @@ class JSONMessageServer(JSONMessage):
         Returns:
             bytes: A byte array containing the JSON-encoded server configuration.
         """
-        config = {
-            JSONMessageServer.__MESSAGE_KEY: JSONMessageServer.AUTH_SERVER_MESSAGE,
-            JSONMessageServer.__RESPONSE_CODE: 200,
-            JSONMessageServer.__VERSION_KEY: DefaultValuesAndOptions.get_util_version(),
+        encoded_aes_key = base64.b64encode(aes_key).decode('utf-8')
+        encoded_aes_iv = base64.b64encode(aes_iv).decode('utf-8')
 
-            JSONMessageServer.__CONFIGS_KEY: {
-                JSONMessageServer.__HEARTBEAT_ATTEMPT_KEY: heartbeat_attempt,
-                JSONMessageServer.__IS_ENCRYPT_KEY: is_encrypt,
-                JSONMessageServer.__IS_INTEGRITY_CONTROL_KEY: is_hash_control,
-                JSONMessageServer.__AES_KEY: aes_key,
-                JSONMessageServer.__AES_IV_KEY: aes_iv,
+        config = {
+            JSONMessageServer._MESSAGE_KEY: JSONMessageServer.AUTH_SERVER_MESSAGE,
+            JSONMessageServer._RESPONSE_CODE: 200,
+            JSONMessageServer._VERSION_KEY: DefaultValuesAndOptions.get_util_version(),
+
+            JSONMessageServer._CONFIGS_KEY: {
+                JSONMessageServer._HEARTBEAT_ATTEMPT_KEY: heartbeat_attempt,
+                JSONMessageServer._IS_ENCRYPT_KEY: is_encrypt,
+                JSONMessageServer._IS_INTEGRITY_CONTROL_KEY: is_hash_control,
+                JSONMessageServer._AES_KEY: encoded_aes_key,
+                JSONMessageServer._AES_IV_KEY: encoded_aes_iv,
             }
         }
 

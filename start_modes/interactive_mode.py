@@ -1,7 +1,5 @@
 import os
 
-from prompt_toolkit import prompt
-from prompt_toolkit.validation import Validator, ValidationError
 import logging
 
 from settings.audio_device import AudioDevice
@@ -10,40 +8,37 @@ from settings.settings import Settings
 from start_modes.options_data_creater import OptionsData
 
 
-class NumberValidator(Validator):
+class NumberValidator:
     """
         A custom validator for prompt_toolkit that ensures user input is a valid number within a specified range.
 
         Attributes:
             valid_numbers (set): A set of numbers that are considered valid for input.
     """
-    def __init__(self, valid_numbers):
+
+    def __init__(self, valid_numbers: list):
         """
         Initializes the NumberValidator with the specified set of valid numbers.
 
         Args:
-            valid_numbers (set): The set of valid numbers.
+            valid_numbers (list): The set of valid numbers.
         """
         self.valid_numbers = valid_numbers
 
-    def validate(self, document):
+    def validate(self, input_str: str):
         """
         Validates the user input against the allowed numbers.
-
-        Args:
-            document (Document): The input document to validate.
 
         Raises:
             ValidationError: If the input is not a valid number or not in the allowed set.
         """
-        text = document.text
-        if not text:
+        if input_str.strip() == '':
             return None
 
-        if not text.isdigit() or int(text) not in self.valid_numbers:
-            raise ValidationError(
-                message="Please enter a valid number",
-                cursor_position=len(text))
+        if not input_str.isdigit() or int(input_str) not in self.valid_numbers:
+            return False
+        else:
+            return True
 
 
 class InteractiveSettings:
@@ -51,6 +46,7 @@ class InteractiveSettings:
     Handles the interactive configuration of EchoWarp settings through command line prompts.
     Allows users to configure settings such as server/client mode, audio device selection, and network options.
     """
+
     @staticmethod
     def get_settings_interactive() -> Settings:
         """
@@ -63,6 +59,7 @@ class InteractiveSettings:
         heartbeat_attempt = None
         is_ssl = None
         is_hash_control = None
+        workers_count = 1
 
         is_server_mode = InteractiveSettings.__select_in_interactive_from_values(
             'util mode',
@@ -80,7 +77,7 @@ class InteractiveSettings:
         )
 
         if not is_server_mode:
-            server_address = prompt("Select server host: ")
+            server_address = input("Select server host: ")
         else:
             heartbeat_attempt = InteractiveSettings.__input_in_interactive_int_value(
                 DefaultValuesAndOptions.get_default_heartbeat_attempt(),
@@ -97,18 +94,13 @@ class InteractiveSettings:
                 DefaultValuesAndOptions.get_hash_control_options_data()
             )
 
-        is_thread_mode = InteractiveSettings.__select_in_interactive_from_values(
-            'workers mode',
-            DefaultValuesAndOptions.get_thread_mode_options_data()
-        )
-
-        workers_count = InteractiveSettings.__input_in_interactive_int_value(
-            DefaultValuesAndOptions.get_default_workers(), 'thread/process workers count')
+            workers_count = InteractiveSettings.__input_in_interactive_int_value(
+                DefaultValuesAndOptions.get_default_workers(), 'thread workers count')
 
         audio_device = AudioDevice(is_input_device, None)
 
         return Settings(is_server_mode, udp_port, server_address, heartbeat_attempt, is_ssl,
-                        is_hash_control, is_thread_mode, workers_count, audio_device)
+                        is_hash_control, workers_count, audio_device)
 
     @staticmethod
     def __select_in_interactive_from_values(descr: str, options_data: OptionsData):
@@ -127,18 +119,23 @@ class InteractiveSettings:
         choices = os.linesep.join([f"{num}. {desc.option_descr}" for num, desc in options_dict.items()])
         prompt_text = (f"Select id of {descr}:"
                        f"{os.linesep + choices + os.linesep}"
-                       f"Your choice (default={options_data.default_descr}): ")
+                       f"Your choice (default={options_data.default_descr}): {os.linesep}")
+
+        number_validator = NumberValidator(list(options_dict.keys()))
         while True:
             try:
-                choice = prompt(prompt_text, validator=NumberValidator(options_dict.keys()))
+                choice = input(prompt_text)
+                is_validating = number_validator.validate(choice)
 
-                if not choice:
+                if is_validating is None:
                     return options_data.default_value
-                else:
+                elif is_validating:
                     return options_dict[int(choice)].option_value
-            except ValidationError as ve:
-                logging.error(f"Error: {ve}")
-                print("Invalid input, please try again.")
+                else:
+                    raise ValueError
+            except ValueError:
+                logging.error(f"Invalid input, please try again.{os.linesep}"
+                              f"Valid input id's: {number_validator.valid_numbers}")
 
     @staticmethod
     def __input_in_interactive_int_value(default_value: int, descr: str) -> int:
@@ -154,7 +151,7 @@ class InteractiveSettings:
         """
         while True:
             try:
-                value = prompt(f"Select {descr} (default={default_value}): ")
+                value = input(f"Select {descr} (default={default_value}): ")
 
                 return int(value) if value else default_value
             except ValueError as ve:

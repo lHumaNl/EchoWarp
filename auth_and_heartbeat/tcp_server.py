@@ -19,10 +19,10 @@ class TCPServer(TCPBase):
 
     Attributes:
         client_addr (Optional[str]): IP address of the connected client.
-        __server_socket (Optional[socket.socket]): Server socket for accepting client connections.
+        _server_socket (Optional[socket.socket]): Server socket for accepting client connections.
     """
     client_addr: Optional[str]
-    __server_socket: Optional[socket.socket]
+    _server_socket: Optional[socket.socket]
 
     def __init__(self, udp_port, heartbeat_attempt: int, stop_event: threading.Event, crypto_manager: CryptoManager):
         """
@@ -37,17 +37,17 @@ class TCPServer(TCPBase):
         super().__init__(udp_port, stop_event, heartbeat_attempt, crypto_manager)
 
         self.client_addr = None
-        self.__server_socket = None
+        self._server_socket = None
 
     def start_tcp_server(self):
         """
         Starts the TCP server, listens for incoming connections, and handles client authentication and setup.
         """
-        self.__server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        self.__server_socket.bind(('0.0.0.0', self.__udp_port))
-        self.__server_socket.listen(1)
-        logging.info(f'TCP server started on port "{self.__udp_port}" awaiting client connection')
+        self._server_socket.bind(('0.0.0.0', self._udp_port))
+        self._server_socket.listen(1)
+        logging.info(f'TCP server started on port "{self._udp_port}" awaiting client connection')
 
         try:
             self._established_connection()
@@ -57,9 +57,9 @@ class TCPServer(TCPBase):
         except Exception as e:
             logging.error(f"Server encountered an error: {e}")
         finally:
-            if self.__client_socket:
-                self.__client_socket.close()
-            self.__server_socket.close()
+            if self._client_socket:
+                self._client_socket.close()
+            self._server_socket.close()
 
     def __authenticate_client(self):
         """
@@ -70,13 +70,13 @@ class TCPServer(TCPBase):
             ValueError: If client authentication fails or there is a version mismatch.
         """
         try:
-            self.__client_socket.sendall(self.__crypto_manager.get_serialized_public_key())
+            self._client_socket.sendall(self._crypto_manager.get_serialized_public_key())
 
-            client_public_key_pem = self.__client_socket.recv(1024)
-            self.__crypto_manager.load_peer_public_key(client_public_key_pem)
+            client_public_key_pem = self._client_socket.recv(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
+            self._crypto_manager.load_peer_public_key(client_public_key_pem)
 
-            encrypted_message_from_client = self.__client_socket.recv(1024)
-            message_from_client = self.__crypto_manager.decrypt_rsa_message(encrypted_message_from_client)
+            encrypted_message_from_client = self._client_socket.recv(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
+            message_from_client = self._crypto_manager.decrypt_rsa_message(encrypted_message_from_client)
 
             client_auth_message = JSONMessage(message_from_client)
 
@@ -85,7 +85,7 @@ class TCPServer(TCPBase):
                 error_message = "Forbidden"
                 error_message_bytes = JSONMessage.encode_message_to_json_bytes(error_message, 403)
 
-                self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(error_message_bytes))
+                self._client_socket.sendall(self._crypto_manager.encrypt_rsa_message(error_message_bytes))
 
                 logging.error(f"Failed to authenticate client. Client sent message: {client_auth_message.message}")
                 raise ValueError("Client authentication failed.")
@@ -98,14 +98,15 @@ class TCPServer(TCPBase):
                                  f"{DefaultValuesAndOptions.get_util_version()} - Server")
                 error_message_bytes = JSONMessage.encode_message_to_json_bytes(error_message, 500)
 
-                self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(error_message_bytes))
+                self._client_socket.sendall(self._crypto_manager.encrypt_rsa_message(error_message_bytes))
 
                 logging.error(error_message)
                 raise ValueError("Version mismatch between client and server.")
 
             self.__send_configuration()
+            # self._heartbeat()
 
-            threading.Thread(target=self.__heartbeat, daemon=True).start()
+            # threading.Thread(target=self._heartbeat, daemon=True).start()
         except Exception as e:
             logging.error(f"Authentication error: {e}")
             raise
@@ -117,16 +118,16 @@ class TCPServer(TCPBase):
         The configuration is sent as an encrypted JSON string.
         """
         config_json = JSONMessageServer.encode_server_config_to_json_bytes(
-            self.__heartbeat_attempt, self.__crypto_manager.is_encrypt, self.__crypto_manager.is_hash_control,
-            self.__crypto_manager.get_aes_key(), self.__crypto_manager.get_aes_iv()
+            self._heartbeat_attempt, self._crypto_manager.is_encrypt, self._crypto_manager.is_hash_control,
+            self._crypto_manager.get_aes_key(), self._crypto_manager.get_aes_iv()
         )
 
-        self.__client_socket.sendall(self.__crypto_manager.encrypt_rsa_message(config_json))
+        self._client_socket.sendall(self._crypto_manager.encrypt_rsa_message(config_json))
         logging.info("Configuration sent to client.")
 
     def _initialize_socket(self):
         return
 
     def _established_connection(self):
-        self.__client_socket, client_addr = self.__server_socket.accept()
+        self._client_socket, client_addr = self._server_socket.accept()
         self.client_addr = client_addr[0]

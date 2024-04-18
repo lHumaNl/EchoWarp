@@ -64,7 +64,7 @@ class AudioDevice:
 
         while device_index not in id_list:
             try:
-                device_index = input("Select device by id:")
+                device_index = input()
                 device_index = int(device_index)
             except Exception as e:
                 logging.error(f'Selected invalid device id: {device_index}{os.linesep}{e}')
@@ -84,6 +84,8 @@ class AudioDevice:
         if is_windows:
             result_from_powershell = self.__get_data_from_powershell()
 
+        audio_devices_str = ""
+
         for i in range(self.py_audio.get_device_count()):
             dev = self.py_audio.get_device_info_by_index(i)
 
@@ -91,10 +93,13 @@ class AudioDevice:
 
             if self.__is_needed_audio_device(dev, device_name, device_type, is_windows, result_from_powershell):
                 id_list.append(i)
-                logging.info(
+                audio_devices_str += (
                     f"{i}: {device_name}, "
                     f"Channels: {dev[f'max{device_type}Channels']}, "
-                    f"Sample rate: {int(dev['defaultSampleRate'])}Hz")
+                    f"Sample rate: {int(dev['defaultSampleRate'])}Hz{os.linesep}"
+                )
+
+        logging.info(os.linesep + audio_devices_str)
 
         return id_list
 
@@ -121,10 +126,9 @@ class AudioDevice:
 
         return device_names
 
-    def __parse_powershell_stdout(self, stdout: str) -> List[str]:
-        decoded_stdout = self.__decode_string(stdout)
-
-        lines = decoded_stdout.split('\n')
+    @staticmethod
+    def __parse_powershell_stdout(stdout: str) -> List[str]:
+        lines = stdout.split('\n')
         device_names = []
         collect_names = False
 

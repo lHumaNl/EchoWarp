@@ -19,14 +19,14 @@ class DefaultValuesAndOptions:
         __SSL_OPTIONS (list of lists): Available SSL options.
         __DEFAULT_HASH_CONTROL (list): Default hash control option and its boolean value.
         __HASH_CONTROL_OPTIONS (list of lists): Available integrity control options.
-        __DEFAULT_THREAD_MODE (list): Default thread mode option and its description.
-        __THREAD_MODE_OPTIONS (list of lists): Available thread mode options.
     """
     __UTIL_VERSION = 0.1
 
     __DEFAULT_PORT = 4415
-    __DEFAULT_WORKERS_COUNT = 2
+    __DEFAULT_WORKERS_COUNT = 1
     __DEFAULT_HEARTBEAT_ATTEMPT = 5
+
+    SOCKET_BUFFER_SIZE = 6144
 
     __DEFAULT_SERVER_MODE = ['Server mode', True]
     __SERVER_MODE_OPTIONS = [
@@ -50,12 +50,6 @@ class DefaultValuesAndOptions:
     __HASH_CONTROL_OPTIONS = [
         ['Enable integrity control', True],
         __DEFAULT_HASH_CONTROL
-    ]
-
-    __DEFAULT_THREAD_MODE = ['Multiprocessing mode (One CPU core per process may increase performance', False]
-    __THREAD_MODE_OPTIONS = [
-        ['Multithreading mode (GIL may reduce performance, because all threads works on one CPU core)', True],
-        __DEFAULT_THREAD_MODE
     ]
 
     @staticmethod
@@ -84,13 +78,6 @@ class DefaultValuesAndOptions:
         return OptionsData(
             DefaultValuesAndOptions.__DEFAULT_HASH_CONTROL,
             DefaultValuesAndOptions.__HASH_CONTROL_OPTIONS
-        )
-
-    @staticmethod
-    def get_thread_mode_options_data() -> OptionsData:
-        return OptionsData(
-            DefaultValuesAndOptions.__DEFAULT_THREAD_MODE,
-            DefaultValuesAndOptions.__THREAD_MODE_OPTIONS
         )
 
     @staticmethod

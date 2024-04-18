@@ -1,9 +1,8 @@
 import socket
 import threading
-from concurrent.futures import Executor
+from concurrent.futures import ThreadPoolExecutor
 
 import pyaudio
-import opuslib
 import logging
 
 from crypto_manager import CryptoManager
@@ -30,10 +29,10 @@ class UDPServerStreamer:
     __audio_device: AudioDevice
     __stop_event: threading.Event
     __crypto_manager: CryptoManager
-    __executor: Executor
+    __executor: ThreadPoolExecutor
 
     def __init__(self, client_addr: str, udp_port: int, audio_device: AudioDevice, stop_event: threading.Event,
-                 crypto_manager: CryptoManager, executor: Executor):
+                 crypto_manager: CryptoManager, executor: ThreadPoolExecutor):
         """
         Initializes the UDPServerStreamer with specified client address, port, and audio settings.
 
@@ -43,7 +42,7 @@ class UDPServerStreamer:
             audio_device (AudioDevice): Configured audio device for capturing audio.
             stop_event (threading.Event): Event to control the shutdown process.
             crypto_manager (CryptoManager): Manager handling encryption and decryption.
-            executor (Executor): Executor for managing asynchronous tasks.
+            executor (ThreadPoolExecutor): Executor for managing asynchronous tasks.
         """
         self.__client_addr = client_addr
         self.__udp_port = udp_port
@@ -56,9 +55,6 @@ class UDPServerStreamer:
         """
         Captures audio from the selected device, encodes it, encrypts, and sends it to the client over UDP.
         """
-        encoder = opuslib.Encoder(self.__audio_device.sample_rate, self.__audio_device.channels,
-                                  opuslib.APPLICATION_AUDIO)
-
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         stream = self.__audio_device.py_audio.open(format=pyaudio.paInt16,
                                                    channels=self.__audio_device.channels,
@@ -71,7 +67,7 @@ class UDPServerStreamer:
             while not self.__stop_event.is_set():
                 data = stream.read(1024, exception_on_overflow=False)
 
-                self.__executor.submit(self.__send_stream_to_client, server_socket, encoder, data)
+                self.__executor.submit(self.__send_stream_to_client, server_socket, data)
         except Exception as e:
             logging.error(f"Error in streaming audio: {e}")
         finally:
@@ -81,14 +77,13 @@ class UDPServerStreamer:
             self.__audio_device.py_audio.terminate()
             logging.info("Streaming audio stopped.")
 
-    def __send_stream_to_client(self, server_socket, encoder, data):
+    def __send_stream_to_client(self, server_socket, data):
         """
         Encodes and encrypts audio data, then sends it to the client using UDP.
 
         Args:
             server_socket (socket.socket): Socket used for sending audio.
-            encoder (opuslib.Encoder): Opus encoder for audio data.
             data (bytes): Raw audio data to encode and send.
         """
-        encoded_data = self.__crypto_manager.encrypt_aes_and_sign_data(encoder.encode(data, 1024))
+        encoded_data = self.__crypto_manager.encrypt_aes_and_sign_data(data)
         server_socket.sendto(encoded_data, (self.__client_addr, self.__udp_port))

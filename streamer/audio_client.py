@@ -1,14 +1,14 @@
 import socket
 import threading
-from concurrent.futures import Executor
+from concurrent.futures import ThreadPoolExecutor
 
 import pyaudio
-import opuslib
 import logging
 
 from crypto_manager import CryptoManager
 from logging_config import setup_logging
 from settings.audio_device import AudioDevice
+from start_modes.default_values_and_options import DefaultValuesAndOptions
 
 setup_logging()
 
@@ -23,17 +23,17 @@ class UDPClientStreamReceiver:
             __audio_device (AudioDevice): Audio device configuration for output.
             __stop_event (threading.Event): Event to signal the termination of audio receiving.
             __crypto_manager (CryptoManager): Cryptographic manager for secure communication.
-            __executor (Executor): Executor for asynchronous task handling.
+            __executor (ThreadPoolExecutor): Executor for asynchronous task handling.
     """
     __server_address: str
     __udp_port: int
     __audio_device: AudioDevice
     __stop_event: threading.Event
     __crypto_manager: CryptoManager
-    __executor: Executor
+    __executor: ThreadPoolExecutor
 
     def __init__(self, server_address: str, udp_port: int, audio_device: AudioDevice, stop_event: threading.Event,
-                 crypto_manager: CryptoManager, executor: Executor):
+                 crypto_manager: CryptoManager, executor: ThreadPoolExecutor):
         """
                 Initializes a UDP client to receive and play back audio streams.
 
@@ -60,7 +60,6 @@ class UDPClientStreamReceiver:
             sock.bind((self.__server_address, self.__udp_port))
             logging.info("UDP listening started")
 
-            decoder = opuslib.Decoder(self.__audio_device.sample_rate, self.__audio_device.channels)
             stream = self.__audio_device.py_audio.open(
                 format=pyaudio.paInt16,
                 channels=self.__audio_device.channels,
@@ -71,24 +70,21 @@ class UDPClientStreamReceiver:
 
             try:
                 while not self.__stop_event.is_set():
-                    data, _ = sock.recvfrom(4096)
+                    data, _ = sock.recvfrom(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
 
-                    self.__executor.submit(self.__decode_and_play, decoder, data, stream)
+                    self.__executor.submit(self.__decode_and_play, data, stream)
             finally:
                 stream.stop_stream()
                 stream.close()
                 logging.info("UDP listening stopped")
 
-    def __decode_and_play(self, decoder, data, stream):
+    def __decode_and_play(self, data, stream):
         """
         Decodes the received encrypted audio data and plays it back.
 
         Args:
-            decoder (opuslib.Decoder): Decoder instance for Opus audio format.
             data (bytes): Encrypted audio data.
             stream (pyaudio.Stream): PyAudio stream for audio playback.
         """
         data = self.__crypto_manager.decrypt_aes_and_verify_data(data)
-
-        decoded_data = decoder.decode(data, len(data))
-        stream.write(decoded_data)
+        stream.write(data)

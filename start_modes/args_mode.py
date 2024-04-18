@@ -30,12 +30,6 @@ def get_settings_by_args() -> Settings:
                         help="UDP port for audio streaming.")
     parser.add_argument("-d", "--device_id", type=int,
                         help="Specify the device ID to bypass interactive selection.")
-    parser.add_argument("-t", "--thread_mode", action='store_true',
-                        help=f"Use {DefaultValuesAndOptions.get_thread_mode_options_data().options[0].option_descr}. "
-                             f"(default={DefaultValuesAndOptions.get_thread_mode_options_data().default_descr})")
-    parser.add_argument("-w", "--workers", type=int,
-                        help="Max workers for multithreading/multiprocessing.",
-                        default=DefaultValuesAndOptions.get_default_workers())
 
     client_args = parser.add_argument_group('Client Only Options')
     client_args.add_argument("-a", "--server_addr", type=str, help="Server address.")
@@ -50,17 +44,20 @@ def get_settings_by_args() -> Settings:
     server_args.add_argument("-i", "--integrity_control", action='store_true',
                              help=f"Init integrity control by hash (server mode only). "
                                   f"(default={DefaultValuesAndOptions.get_hash_control_options_data().default_descr})")
+    server_args.add_argument("-w", "--workers", type=int,
+                             help="Max workers in multithreading (server mode only).",
+                             default=DefaultValuesAndOptions.get_default_workers())
 
     args = parser.parse_args()
 
-    if args.client:
-        if args.server_addr:
-            parser.error("The --server_addr argument is only valid in client mode.")
-    else:
-        if any([args.ssl, args.heartbeat, args.integrity_control]):
-            parser.error("Options --ssl, --heartbeat, and --integrity_control are only available in server mode.")
+    if not args.client:
+        if any([args.ssl, args.integrity_control]) and args.workers != 1:
+            parser.error("Options --ssl, --integrity_control and --workers are only available in server mode.")
         if not args.server_addr:
             parser.error("The --server_addr argument is required in client mode.")
+    else:
+        if args.server_addr:
+            parser.error("The --server_addr argument is only valid in client mode.")
 
     audio_device = AudioDevice(args.output, args.device_id)
 
@@ -71,7 +68,6 @@ def get_settings_by_args() -> Settings:
         args.heartbeat,
         args.ssl,
         args.integrity_control,
-        args.thread_mode,
         args.workers,
         audio_device
     )
