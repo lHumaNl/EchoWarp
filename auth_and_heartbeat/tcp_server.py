@@ -56,10 +56,8 @@ class TCPServer(TCPBase):
             self.__authenticate_client()
         except Exception as e:
             logging.error(f"Server encountered an error: {e}")
-        finally:
-            if self._client_socket:
-                self._client_socket.close()
-            self._server_socket.close()
+            self._cleanup_client_sockets()
+            self._cleanup_server_socket()
 
     def __authenticate_client(self):
         """
@@ -104,9 +102,7 @@ class TCPServer(TCPBase):
                 raise ValueError("Version mismatch between client and server.")
 
             self.__send_configuration()
-            # self._heartbeat()
-
-            # threading.Thread(target=self._heartbeat, daemon=True).start()
+            threading.Thread(target=self._heartbeat, daemon=True).start()
         except Exception as e:
             logging.error(f"Authentication error: {e}")
             raise
@@ -131,3 +127,11 @@ class TCPServer(TCPBase):
     def _established_connection(self):
         self._client_socket, client_addr = self._server_socket.accept()
         self.client_addr = client_addr[0]
+
+    def _cleanup_server_socket(self):
+        try:
+            if self._server_socket:
+                self._server_socket.shutdown(socket.SHUT_RDWR)
+                self._server_socket.close()
+        except socket.error as e:
+            logging.error(f"Error closing server socket: {e}")

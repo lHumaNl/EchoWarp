@@ -51,11 +51,11 @@ class TCPClient(TCPBase):
             self.__authenticate_with_server()
         except socket.error as e:
             logging.error(f"Failed to establish connection to {self._server_address}:{self._udp_port}: {e}")
+            self._cleanup_client_sockets()
             raise ConnectionError(f"Failed to establish connection to {self._server_address}:{self._udp_port}")
         except Exception as e:
             logging.error(f"Authentication or encryption setup failed: {e}")
-        finally:
-            self._client_socket.close()
+            self._cleanup_client_sockets()
 
     def __authenticate_with_server(self):
         """
@@ -100,9 +100,7 @@ class TCPClient(TCPBase):
             self._heartbeat_attempt = config_server_message.heartbeat_attempt
 
             logging.info("Authentication and load config from server completed successfully.")
-            # self._heartbeat()
-
-            # threading.Thread(target=self._heartbeat, daemon=True).start()
+            threading.Thread(target=self._heartbeat, daemon=True).start()
         except Exception as e:
             logging.error(f"Error during authentication: {e}")
             raise
