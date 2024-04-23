@@ -37,17 +37,12 @@ jobs:
           python setup.py sdist bdist_wheel
 
       - name: Build binary with PyInstaller
-        run: pyinstaller --onefile --paths ./echowarp/ --name EchoWarp-${{ matrix.os }} ./echowarp/main.py
-
-      - name: Set Artifact Name
-        run: |
-          echo "ARTIFACT_NAME=$(python -c "import sys; sys.stdout.write('lHumaNl/EchoWarp-macos-latest'.replace('/', '-'))")" >> $GITHUB_ENV
-        shell: bash
+        run: pyinstaller EchoWart.spec
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ env.ARTIFACT_NAME }}
+          name: EchoWarp${{ steps.version.outputs.VERSION }}
           path: dist/*
 
       - name: Publish to PyPI

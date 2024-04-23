@@ -1,8 +1,9 @@
 from setuptools import setup, find_packages
+import version
 
 setup(
     name='echowarp',
-    version='0.2.0',
+    version=version.__version__,
     packages=find_packages(include=['echowarp', 'echowarp.*']),
     include_package_data=True,
     install_requires=[
