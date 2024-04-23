@@ -37,7 +37,7 @@ jobs:
           python setup.py sdist bdist_wheel
 
       - name: Build binary with PyInstaller
-        run: pyinstaller EchoWart.spec
+        run: pyinstaller EchoWarp.spec
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
