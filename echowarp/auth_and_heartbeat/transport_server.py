@@ -4,10 +4,10 @@ import threading
 from abc import ABC
 from typing import Optional
 
-from ..auth_and_heartbeat.transport_base import TransportBase
-from ..services.crypto_manager import CryptoManager
-from ..models.json_message import JSONMessageServer, JSONMessage
-from ..models.default_values_and_options import DefaultValuesAndOptions
+from echowarp.auth_and_heartbeat.transport_base import TransportBase
+from echowarp.services.crypto_manager import CryptoManager
+from echowarp.models.json_message import JSONMessageServer, JSONMessage
+from echowarp.models.default_values_and_options import DefaultValuesAndOptions
 
 
 class TransportServer(TransportBase, ABC):

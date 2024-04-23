@@ -2,10 +2,10 @@ import os
 
 import logging
 
-from ..models.audio_device import AudioDevice
-from ..models.default_values_and_options import DefaultValuesAndOptions
-from ..settings import Settings
-from ..models.options_data_creater import OptionsData
+from echowarp.models.audio_device import AudioDevice
+from echowarp.models.default_values_and_options import DefaultValuesAndOptions
+from echowarp.settings import Settings
+from echowarp.models.options_data_creater import OptionsData
 
 
 class NumberValidator:

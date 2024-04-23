@@ -1,8 +1,8 @@
 import argparse
 
-from ..models.audio_device import AudioDevice
-from ..models.default_values_and_options import DefaultValuesAndOptions
-from ..settings import Settings
+from echowarp.models.audio_device import AudioDevice
+from echowarp.models.default_values_and_options import DefaultValuesAndOptions
+from echowarp.settings import Settings
 
 
 def get_settings_by_args() -> Settings:

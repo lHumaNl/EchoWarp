@@ -1,8 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from .services.crypto_manager import CryptoManager
-from .models.audio_device import AudioDevice
+from echowarp.services.crypto_manager import CryptoManager
+from echowarp.models.audio_device import AudioDevice
 
 
 class Settings:

@@ -4,12 +4,12 @@ import logging
 import signal
 from functools import partial
 
-from .start_modes import args_mode
-from .logging_config import setup_logging
-from .start_modes.interactive_mode import InteractiveSettings
+from echowarp.start_modes import args_mode
+from echowarp.logging_config import setup_logging
+from echowarp.start_modes.interactive_mode import InteractiveSettings
 
-from .streamer.audio_client import ClientStreamReceiver
-from .streamer.audio_server import ServerStreamer
+from echowarp.streamer.audio_client import ClientStreamReceiver
+from echowarp.streamer.audio_server import ServerStreamer
 
 
 def graceful_shutdown(signum, frame, stop_util_event: threading.Event, stop_stream_event: threading.Event):
