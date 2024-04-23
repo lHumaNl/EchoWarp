@@ -37,7 +37,19 @@ jobs:
           python setup.py sdist bdist_wheel
 
       - name: Build binary with PyInstaller
-        run: pyinstaller main.spec
+        run: >
+          pyinstaller 
+          --noconfirm 
+          --paths=./echowarp/ 
+          --paths=./echowarp/auth_and_heartbeat/ 
+          --paths=./echowarp/models/ 
+          --paths=./echowarp/services/ 
+          --paths=./echowarp/start_modes/ 
+          --paths=./echowarp/streamer/ 
+          --hidden-import=pyaudio 
+          --hidden-import=cryptography 
+          --onefile 
+          ./echowarp/main.py
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
