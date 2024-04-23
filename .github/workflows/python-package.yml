@@ -37,12 +37,20 @@ jobs:
           python setup.py sdist bdist_wheel
 
       - name: Build binary with PyInstaller
-        run: pyinstaller EchoWarp.spec
+        run: >
+          pyinstaller --onefile
+          --paths ./echowarp/
+          --paths ./echowarp/streamer
+          --paths ./echowarp/auth_and_heartbeat
+          --paths ./echowarp/models
+          --paths ./echowarp/services
+          --paths ./echowarp/start_modes
+          ./echowarp/main.py
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: EchoWarp${{ steps.version.outputs.VERSION }}
+          name: EchoWarp-${{ steps.version.outputs.VERSION }}
           path: dist/*
 
       - name: Publish to PyPI
