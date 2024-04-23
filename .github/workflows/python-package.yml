@@ -41,8 +41,8 @@ jobs:
 
       - name: Set Artifact Name
         run: |
-          ARTIFACT_NAME=$(python -c "print('lHumaNl/EchoWarp-macos-latest'.replace('/', '-'))")
-          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=$(python -c "import sys; sys.stdout.write('lHumaNl/EchoWarp-macos-latest'.replace('/', '-'))")" >> $GITHUB_ENV
+        shell: bash
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
