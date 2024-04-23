@@ -60,19 +60,17 @@ jobs:
           name: EchoWarp-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}
           path: dist/*
 
-      - name: Publish to PyPI
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: pypa/gh-action-pypi-publish@v1.4.2
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          user: __token__
-          repository_url: https://upload.pypi.org/legacy/
-
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/create-release@v1
         with:
           tag_name: ${{ steps.version.outputs.VERSION }}
           release_name: Release ${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: false
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.4.2
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          user: __token__
+          repository_url: https://upload.pypi.org/legacy/
