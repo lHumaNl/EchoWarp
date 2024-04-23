@@ -44,10 +44,14 @@ jobs:
       - name: Build binary with PyInstaller
         run: pyinstaller --onefile --paths ./echowarp/ --name EchoWarp-${{ matrix.os }} ./echowarp/main.py
 
+      - name: Set Artifact Name
+        id: artifact_name
+        run: echo "ARTIFACT_NAME=$(echo ${{ github.repository }}-${{ matrix.os }} | sed 's/\//-/g')" >> $GITHUB_ENV
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: ${{ github.repository }}-${{ matrix.os }}
+          name: $ARTIFACT_NAME
           path: dist/*
 
       - name: Publish to PyPI
