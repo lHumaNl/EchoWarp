@@ -50,14 +50,8 @@ jobs:
           pyinstaller 
           --noconfirm 
           --paths=./echowarp/ 
-          --paths=./echowarp/auth_and_heartbeat/ 
-          --paths=./echowarp/models/ 
-          --paths=./echowarp/services/ 
-          --paths=./echowarp/start_modes/ 
-          --paths=./echowarp/streamer/ 
-          --hidden-import=pyaudio 
-          --hidden-import=cryptography 
           --onefile 
+          --name=EchoWarp-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}
           ./echowarp/main.py
 
       - name: Upload Artifacts
