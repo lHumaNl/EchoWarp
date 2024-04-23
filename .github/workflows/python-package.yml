@@ -39,7 +39,7 @@ jobs:
           python setup.py sdist bdist_wheel
 
       - name: Build binary with PyInstaller
-        run: pyinstaller --onefile --name ${{ github.repository }}-${{ matrix.os }} main.py
+        run: pyinstaller --onefile --paths EchoWarp/echowarp/ --name EchoWarp-${{ matrix.os }} EchoWarp/echowarp/main.py
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2

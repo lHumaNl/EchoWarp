@@ -55,3 +55,7 @@ def main():
 
         receiver_thread = threading.Thread(target=receiver.receive_audio_and_decode, daemon=True)
         receiver.start_heartbeat(receiver_thread)
+
+
+if __name__ == "__main__":
+    main()
