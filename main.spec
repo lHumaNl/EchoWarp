@@ -1,9 +1,7 @@
-# -*- mode: python ; coding: utf-8 -*-
-
 block_cipher = None
 
-a = Analysis(['./echowarp/main.py'],
-             pathex=['./echowarp/'],
+a = Analysis(['echowarp/main.py'],
+             pathex=['.'],
              binaries=[],
              datas=[('echowarp/*', 'echowarp')],
              hiddenimports=['pyaudio', 'cryptography'],
@@ -18,11 +16,21 @@ pyz = PYZ(a.pure, a.zipped_data,
 
 exe = EXE(pyz,
           a.scripts,
+          a.binaries,
+          a.zipfiles,
+          a.datas,
           [],
-          exclude_binaries=True,
           name='EchoWarp',
           debug=False,
           bootloader_ignore_signals=False,
           strip=False,
           upx=True,
           console=True )
+
+coll = COLLECT(exe,
+               a.binaries,
+               a.zipfiles,
+               a.datas,
+               strip=False,
+               upx=True,
+               name='EchoWarp')
