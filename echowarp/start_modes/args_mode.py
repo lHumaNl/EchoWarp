@@ -1,8 +1,8 @@
 import argparse
 
-from settings.audio_device import AudioDevice
-from start_modes.default_values_and_options import DefaultValuesAndOptions
-from settings.settings import Settings
+from ..models.audio_device import AudioDevice
+from ..models.default_values_and_options import DefaultValuesAndOptions
+from ..settings import Settings
 
 
 def get_settings_by_args() -> Settings:

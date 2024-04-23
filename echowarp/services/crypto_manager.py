@@ -9,24 +9,21 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding as sym_padding
 
-from logging_config import setup_logging
-
-setup_logging()
-
 
 class CryptoManager:
     """
-    Manages cryptographic operations within EchoWarp, such as RSA and AES encryption/decryption.
+    Manages cryptographic operations such as RSA and AES encryption/decryption for secure communication in EchoWarp.
 
     Attributes:
-        __is_server (bool): True if this instance is for server use, False for client.
-        is_encrypt (bool): True to enable encryption, False otherwise.
-        is_hash_control (bool): True to enable integrity checks, False otherwise.
-        __private_key (rsa.RSAPrivateKey): RSA private key for decryption purposes.
-        __public_key (rsa.RSAPublicKey): RSA public key for encryption purposes.
-        __aes_key (Optional[bytes]): AES key for symmetric encryption of audio data.
-        __aes_iv (Optional[bytes]): AES initialization vector for symmetric encryption.
-        __peer_public_key (Optional[rsa.RSAPublicKey]): Public key of the communication peer.
+        __is_server (bool): True if this instance is configured for server-side operations.
+        is_encrypt (bool): Determines if encryption is enabled.
+        is_hash_control (bool): Determines if integrity control via hashing is enabled.
+        __private_key (rsa.RSAPrivateKey): The RSA private key for decryption.
+        __public_key (rsa.RSAPublicKey): The RSA public key for encryption.
+        __aes_key (Optional[bytes]): The AES key for symmetric encryption, used if encryption is enabled.
+        __aes_iv (Optional[bytes]): The AES IV for symmetric encryption.
+        __peer_public_key (Optional[rsa.RSAPublicKey]): The public key of the communication peer,
+        for encrypted communications.
     """
     __is_server: bool
     is_encrypt: Optional[bool]
@@ -35,7 +32,7 @@ class CryptoManager:
     __public_key: rsa.RSAPublicKey
     __aes_key: Optional[bytes]
     __aes_iv: Optional[bytes]
-    __peer_public_key: Optional[rsa.RSAPublicKey]
+    __peer_public_key: rsa.RSAPublicKey
 
     def __init__(self, is_server: bool, is_hash_control: bool, is_encrypt: bool):
         """
@@ -50,11 +47,8 @@ class CryptoManager:
         self.is_encrypt = is_encrypt
         self.is_hash_control = is_hash_control
 
-        self.__private_key, self.__public_key = self.__generate_keys()
-        self.__aes_key = self.__aes_iv = self.__peer_public_key = None
-
-        if self.__is_server and self.is_encrypt:
-            self.__generate_aes_key_and_iv()
+        self.__private_key, self.__public_key = self.__generate_and_get_rsa_keys()
+        self.__aes_key, self.__aes_iv = self.__generate_and_get_aes_key_and_iv() if is_server else (None, None)
 
     def load_encryption_config_for_client(self, is_encrypt: bool, is_hash_control: bool):
         if self.__is_server:
@@ -122,7 +116,7 @@ class CryptoManager:
         return data
 
     @staticmethod
-    def __generate_keys() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
+    def __generate_and_get_rsa_keys() -> Tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey]:
         """
         Generates a pair of RSA keys.
 
@@ -158,13 +152,13 @@ class CryptoManager:
 
     def encrypt_rsa_message(self, message):
         """
-        Encrypts a message using the peer's public key.
+        Encrypts a message using RSA encryption with the public key of a peer.
 
         Args:
-            message: The plaintext message to encrypt.
+            message (bytes): The plaintext message to be encrypted.
 
         Returns:
-            The encrypted message.
+            bytes: The ciphertext resulting from encrypting the input message with RSA.
         """
         return self.__peer_public_key.encrypt(
             message,
@@ -177,13 +171,13 @@ class CryptoManager:
 
     def decrypt_rsa_message(self, encrypted_message):
         """
-        Decrypts a message using the private key.
+        Decrypts an RSA encrypted message using the private key of this instance.
 
         Args:
-            encrypted_message: The encrypted message to decrypt.
+            encrypted_message (bytes): The encrypted message to be decrypted.
 
         Returns:
-            The decrypted plaintext message.
+            bytes: The plaintext resulting from decrypting the input message.
         """
 
         return self.__private_key.decrypt(
@@ -195,12 +189,15 @@ class CryptoManager:
             )
         )
 
-    def __generate_aes_key_and_iv(self):
+    @staticmethod
+    def __generate_and_get_aes_key_and_iv() -> Tuple[bytes, bytes]:
         """
         Generates a new AES key and IV for symmetric encryption.
         """
-        self.__aes_key = os.urandom(32)
-        self.__aes_iv = os.urandom(16)
+        aes_key = os.urandom(32)
+        aes_iv = os.urandom(16)
+
+        return aes_key, aes_iv
 
     def get_aes_key(self) -> bytes:
         """

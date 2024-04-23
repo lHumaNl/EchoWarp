@@ -1,28 +1,25 @@
 import base64
 import json
 import logging
-from logging_config import setup_logging
 
-from start_modes.default_values_and_options import DefaultValuesAndOptions
-
-setup_logging()
+from ..models.default_values_and_options import DefaultValuesAndOptions
 
 
 class JSONMessage:
     """
-        Represents a JSON message used for communication between client and server. This class encapsulates
-        the message structure and provides methods for encoding and decoding messages.
+    Encapsulates the structure of JSON messages used for communication between the client and server in the EchoWarp application.
+    Provides methods for encoding and decoding these messages.
 
-        Attributes:
-            message (str): The main content of the message.
-            response_code (int): The HTTP-like response code indicating the status of the message.
-            version (float): The version of the utility that the message is compatible with.
+    Attributes:
+        message (str): The main content of the message.
+        response_code (int): An HTTP-like response code indicating the status of the message.
+        version (float): The version of the utility compatible with this message format.
     """
     _json_message: dict
 
     message: str
     response_code: int
-    version: float
+    version: str
 
     AUTH_CLIENT_MESSAGE = "EchoWarpClient"
     AUTH_SERVER_MESSAGE = "EchoWarpServer"
@@ -75,14 +72,15 @@ class JSONMessage:
 
 class JSONMessageServer(JSONMessage):
     """
-    Represents a server-specific JSON message that includes configuration settings in addition to the basic message structure.
+    Extends JSONMessage to include server-specific configuration settings such as heartbeat attempts,
+    encryption status, and integrity control settings.
 
     Attributes:
-        heartbeat_attempt (int): Number of allowed missed heartbeats before the server considers the connection lost.
-        is_encrypt (bool): Indicates whether encryption is enabled.
-        is_integrity_control (bool): Indicates whether integrity control is enabled.
-        aes_key (bytes): The AES key used for encryption.
-        aes_iv (bytes): The AES initialization vector.
+        heartbeat_attempt (int): The number of allowed missed heartbeats before the server considers the connection lost.
+        is_encrypt (bool): Indicates if encryption is enabled for the communication.
+        is_integrity_control (bool): Indicates if data integrity checks are enabled.
+        aes_key (bytes): AES key used for encryption, provided as a base64-encoded string.
+        aes_iv (bytes): AES initialization vector used for encryption, provided as a base64-encoded string.
     """
     heartbeat_attempt: int
     is_encrypt: bool

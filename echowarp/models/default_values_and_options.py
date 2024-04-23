@@ -1,4 +1,5 @@
-from start_modes.options_data_creater import OptionsData
+from ..models.options_data_creater import OptionsData
+import version
 
 
 class DefaultValuesAndOptions:
@@ -7,7 +8,6 @@ class DefaultValuesAndOptions:
     This class facilitates the retrieval of default values and options for user interface and setup configurations.
 
     Attributes:
-        __UTIL_VERSION (float): Specifies the current version of the utility.
         __DEFAULT_PORT (int): Default port number used for UDP and TCP communication.
         __DEFAULT_WORKERS_COUNT (int): Default number of worker threads or processes.
         __DEFAULT_HEARTBEAT_ATTEMPT (int): Default number of heartbeat attempts before considering the connection lost.
@@ -20,8 +20,6 @@ class DefaultValuesAndOptions:
         __DEFAULT_HASH_CONTROL (list): Default hash control option and its boolean value.
         __HASH_CONTROL_OPTIONS (list of lists): Available integrity control options.
     """
-    __UTIL_VERSION = 0.1
-
     __DEFAULT_PORT = 4415
     __DEFAULT_WORKERS_COUNT = 1
     __DEFAULT_HEARTBEAT_ATTEMPT = 5
@@ -93,5 +91,5 @@ class DefaultValuesAndOptions:
         return DefaultValuesAndOptions.__DEFAULT_WORKERS_COUNT
 
     @staticmethod
-    def get_util_version() -> float:
-        return DefaultValuesAndOptions.__UTIL_VERSION
+    def get_util_version() -> str:
+        return version.__version__

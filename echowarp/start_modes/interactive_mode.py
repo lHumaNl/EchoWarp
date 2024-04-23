@@ -2,10 +2,10 @@ import os
 
 import logging
 
-from settings.audio_device import AudioDevice
-from start_modes.default_values_and_options import DefaultValuesAndOptions
-from settings.settings import Settings
-from start_modes.options_data_creater import OptionsData
+from ..models.audio_device import AudioDevice
+from ..models.default_values_and_options import DefaultValuesAndOptions
+from ..settings import Settings
+from ..models.options_data_creater import OptionsData
 
 
 class NumberValidator:
@@ -44,7 +44,8 @@ class NumberValidator:
 class InteractiveSettings:
     """
     Handles the interactive configuration of EchoWarp settings through command line prompts.
-    Allows users to configure settings such as server/client mode, audio device selection, and network options.
+    Allows users to configure settings such as server/client mode, audio device selection, and network options
+    by answering interactive questions.
     """
 
     @staticmethod
