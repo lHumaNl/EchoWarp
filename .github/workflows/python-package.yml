@@ -16,7 +16,10 @@ on:
 jobs:
   build-n-publish:
     name: Build and publish to PyPI and create binaries
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
     steps:
       - uses: actions/checkout@v2
 
@@ -39,7 +42,7 @@ jobs:
           python setup.py sdist bdist_wheel
 
       - name: Build binary with PyInstaller
-        run: pyinstaller --onefile --paths EchoWarp/echowarp/ --name EchoWarp-${{ matrix.os }} EchoWarp/echowarp/main.py
+        run: pyinstaller --onefile --paths ./echowarp/ --name EchoWarp-${{ matrix.os }} ./echowarp/main.py
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
