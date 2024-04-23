@@ -23,10 +23,19 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Install system dependencies on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
+
+      - name: Install system dependencies on macOS
+        if: matrix.os == 'macos-latest'
+        run: brew install portaudio
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install setuptools wheel twine pyinstaller
+          pip install -r requirements.txt
 
       - name: Extract version from Python script
         id: version
@@ -37,12 +46,18 @@ jobs:
           python setup.py sdist bdist_wheel
 
       - name: Build binary with PyInstaller
-        run: pyinstaller EchoWarp.spec
+        run: >
+          pyinstaller 
+          --noconfirm 
+          --paths=./echowarp/ 
+          --onefile 
+          --name=EchoWarp-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}
+          ./echowarp/main.py
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: EchoWarp${{ steps.version.outputs.VERSION }}
+          name: EchoWarp-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}
           path: dist/*
 
       - name: Publish to PyPI
@@ -56,8 +71,6 @@ jobs:
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.version.outputs.VERSION }}
           release_name: Release ${{ steps.version.outputs.VERSION }}
