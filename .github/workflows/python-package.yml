@@ -4,11 +4,6 @@ on:
   push:
     branches:
       - master
-    tags:
-      - 'v*.*.*'
-  pull_request:
-    branches:
-      - master
   release:
     types:
       - created
@@ -45,7 +40,9 @@ jobs:
         run: pyinstaller --onefile --paths ./echowarp/ --name EchoWarp-${{ matrix.os }} ./echowarp/main.py
 
       - name: Set Artifact Name
-        run: echo "ARTIFACT_NAME=${{ github.repository }}-${{ matrix.os }}".replace('/', '-') >> $GITHUB_ENV
+        run: |
+          ARTIFACT_NAME=$(python -c "print('lHumaNl/EchoWarp-macos-latest'.replace('/', '-'))")
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v2
