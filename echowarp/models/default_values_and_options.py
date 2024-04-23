@@ -1,4 +1,4 @@
-from ..models.options_data_creater import OptionsData
+from echowarp.models.options_data_creater import OptionsData
 import version
 
 

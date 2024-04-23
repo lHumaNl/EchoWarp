@@ -5,9 +5,9 @@ import time
 from abc import abstractmethod
 from typing import Optional
 
-from ..services.crypto_manager import CryptoManager
-from ..models.json_message import JSONMessage
-from ..models.default_values_and_options import DefaultValuesAndOptions
+from echowarp.services.crypto_manager import CryptoManager
+from echowarp.models.json_message import JSONMessage
+from echowarp.models.default_values_and_options import DefaultValuesAndOptions
 
 
 class TransportBase:

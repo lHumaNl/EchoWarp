@@ -5,10 +5,10 @@ from concurrent.futures import ThreadPoolExecutor
 import pyaudio
 import logging
 
-from ..auth_and_heartbeat.transport_client import TransportClient
-from ..models.audio_device import AudioDevice
-from ..models.default_values_and_options import DefaultValuesAndOptions
-from ..services.crypto_manager import CryptoManager
+from echowarp.auth_and_heartbeat.transport_client import TransportClient
+from echowarp.models.audio_device import AudioDevice
+from echowarp.models.default_values_and_options import DefaultValuesAndOptions
+from echowarp.services.crypto_manager import CryptoManager
 
 
 class ClientStreamReceiver(TransportClient):

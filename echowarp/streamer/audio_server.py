@@ -5,9 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pyaudio
 import logging
 
-from ..auth_and_heartbeat.transport_server import TransportServer
-from ..services.crypto_manager import CryptoManager
-from ..models.audio_device import AudioDevice
+from echowarp.auth_and_heartbeat.transport_server import TransportServer
+from echowarp.services.crypto_manager import CryptoManager
+from echowarp.models.audio_device import AudioDevice
 
 
 class ServerStreamer(TransportServer):

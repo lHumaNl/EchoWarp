@@ -2,7 +2,7 @@ import base64
 import json
 import logging
 
-from ..models.default_values_and_options import DefaultValuesAndOptions
+from echowarp.models.default_values_and_options import DefaultValuesAndOptions
 
 
 class JSONMessage:
