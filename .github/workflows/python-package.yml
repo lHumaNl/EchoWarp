@@ -110,14 +110,6 @@ jobs:
         with:
           path: dist
 
-      - name: Extract files
-        run: |
-          mkdir -p unpacked
-          find dist -type f -name "*.zip" -exec unzip {} -d unpacked \;
-
-      - name: List files to check
-        run: ls -R unpacked
-
       - name: Create and Push Tag
         run: |
           git config --local user.email "action@github.com"
@@ -130,7 +122,7 @@ jobs:
         with:
           tag_name: ${{ needs.get_version.outputs.version }}
           name: Release ${{ needs.get_version.outputs.version }}
-          files: unpacked/*
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -141,6 +133,11 @@ jobs:
 
       - uses: actions/checkout@v2
 
+      - name: Download all artifacts
+        uses: actions/download-artifact@v2
+        with:
+          path: dist
+
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
@@ -149,7 +146,7 @@ jobs:
       - name: Publish to PyPI
         run: |
           pip install twine
-          twine upload unpacked/**/*.whl
+          twine upload dist/*.whl
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
