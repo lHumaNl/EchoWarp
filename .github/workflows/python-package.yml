@@ -17,15 +17,21 @@ jobs:
 
       - name: Extract version from Python script
         id: version
-        run: echo "::set-output name=VERSION::$(python -c 'from version import __version__; print(__version__)')"
+        run: |
+          VERSION=$(python -c 'from version import __version__; print(__version__)')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Set output
+        id: set_output
+        run: |
+          echo "::set-output name=version::$VERSION"
 
       - name: Check if version exists on PyPI
-        id: check_version
         run: |
           RESPONSE=$(curl -s https://pypi.org/pypi/echowarp/json)
-          EXISTS=$(echo $RESPONSE | jq --arg VERSION "${{ steps.version.outputs.VERSION }}" '.releases | has($VERSION)')
+          EXISTS=$(echo $RESPONSE | jq --arg VERSION "$VERSION" '.releases | has($VERSION)')
           if [[ "$EXISTS" == "true" ]]; then
-            echo "Version ${{ steps.version.outputs.VERSION }} already exists on PyPI, stopping job."
+            echo "Version $VERSION already exists on PyPI, stopping job."
             exit 1
           fi
 
@@ -49,7 +55,7 @@ jobs:
 
       - name: Install system dependencies on Ubuntu
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y portaudio19-dev
+        run: sudo apt-get install -y portaudio19-dev
 
       - name: Install system dependencies on macOS
         if: matrix.os == 'macos-latest'
@@ -91,6 +97,12 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           path: dist
+
+      - name: Create and Push Tag
+        run: |
+            VERSION=$(echo ${{ needs.get_version.outputs.version }})
+            git tag -a $VERSION -m "Release $VERSION"
+            git push origin $VERSION
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
