@@ -28,12 +28,12 @@ jobs:
 
       - name: Check if version exists on PyPI
         run: |
-            RESPONSE=$(curl -s https://pypi.org/pypi/echowarp/json)
-            EXISTS=$(echo $RESPONSE | jq --arg VERSION "$VERSION" '.releases | has($VERSION)')
-            if [[ "$EXISTS" == "true" ]]; then
-              echo "Version $VERSION already exists on PyPI, stopping job."
-              exit 1
-            fi
+          RESPONSE=$(curl -s https://pypi.org/pypi/echowarp/json)
+          EXISTS=$(echo $RESPONSE | jq --arg VERSION "$VERSION" '.releases | has($VERSION)')
+          if [[ "$EXISTS" == "true" ]]; then
+            echo "Version $VERSION already exists on PyPI, stopping job."
+            exit 1
+          fi
 
     outputs:
       version: ${{ steps.set_output.outputs.version }}
@@ -87,7 +87,7 @@ jobs:
           path: dist/EchoWarp-${{ needs.get_version.outputs.version }}-${{ matrix.os }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
   release:
-    needs: [build, get_version]
+    needs: [ build, get_version ]
     name: Create Release and Publish to PyPI
     runs-on: ubuntu-latest
     steps:
@@ -100,9 +100,10 @@ jobs:
 
       - name: Create and Push Tag
         run: |
-            VERSION=${{ needs.get_version.outputs.version }}
-            git tag -a $VERSION -m "Release $VERSION"
-            git push origin $VERSION
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git tag -a ${{ needs.get_version.outputs.version }} -m "Release ${{ needs.get_version.outputs.version }}"
+          git push origin $VERSION
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
