@@ -118,7 +118,7 @@ jobs:
         with:
           tag_name: ${{ needs.get_version.outputs.version }}
           name: Release ${{ needs.get_version.outputs.version }}
-          files: dist/
+          files: dist/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -135,7 +135,7 @@ jobs:
           path: dist
 
       - name: List dist directory contents
-        run: ls -l dist
+        run: ls -l dist/echowarp-${{ needs.get_version.outputs.version }}-py3-none-any.whl
 
       - name: Set up Python
         uses: actions/setup-python@v2
@@ -145,7 +145,7 @@ jobs:
       - name: Publish to PyPI
         run: |
           pip install twine
-          twine upload dist/echowarp-${{ needs.get_version.outputs.version }}-py3-none-any.whl
+          twine upload dist/**/*.whl
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
