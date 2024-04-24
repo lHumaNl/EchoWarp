@@ -81,6 +81,10 @@ jobs:
           --name=EchoWarp-${{ needs.get_version.outputs.version }}-${{ matrix.os }}
           ./echowarp/main.py
 
+      - name: List dist directory contents
+        if: matrix.os == 'ubuntu-latest'
+        run: ls -l dist
+
       - name: Upload WHL for Ubuntu
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v2
@@ -109,7 +113,7 @@ jobs:
       - name: Extract files
         run: |
           mkdir -p unpacked
-          find dist -name "*.zip" -exec unzip {} -d unpacked \;
+          find dist -type f -name "*.zip" -exec unzip {} -d unpacked \;
 
       - name: List files to check
         run: ls -R unpacked
@@ -135,17 +139,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.x'
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
 
-    - name: Publish to PyPI
-      run: |
-        pip install twine
-        twine upload unpacked/echowarp-${{ needs.get_version.outputs.version }}-py3-none-any.whl
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish to PyPI
+        run: |
+          pip install twine
+          twine upload unpacked/**/*.whl
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
