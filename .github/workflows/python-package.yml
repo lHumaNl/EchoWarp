@@ -87,7 +87,7 @@ jobs:
           path: dist/EchoWarp-${{ needs.get_version.outputs.version }}-${{ matrix.os }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
   release:
-    needs: build
+    needs: [build, get_version]
     name: Create Release and Publish to PyPI
     runs-on: ubuntu-latest
     steps:
