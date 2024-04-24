@@ -67,7 +67,8 @@ jobs:
           pip install setuptools wheel twine pyinstaller
           pip install -r requirements.txt
 
-      - name: Build dist
+      - name: Build dist on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
         run: |
           python setup.py sdist bdist_wheel
 
@@ -80,7 +81,14 @@ jobs:
           --name=EchoWarp-${{ needs.get_version.outputs.version }}-${{ matrix.os }}
           ./echowarp/main.py
 
-      - name: Upload Artifacts for each OS
+      - name: Upload WHL for Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v2
+        with:
+          name: echowarp-${{ needs.get_version.outputs.version }}-py3-none-any.whl
+          path: dist/echowarp-${{ needs.get_version.outputs.version }}-py3-none-any.whl
+
+      - name: Upload Binaries for each OS
         uses: actions/upload-artifact@v2
         with:
           name: EchoWarp-${{ needs.get_version.outputs.version }}-${{ matrix.os }}
@@ -98,6 +106,14 @@ jobs:
         with:
           path: dist
 
+      - name: Extract files
+        run: |
+          mkdir -p unpacked
+          find dist -name "*.zip" -exec unzip {} -d unpacked \;
+
+      - name: List files to check
+        run: ls -R unpacked
+
       - name: Create and Push Tag
         run: |
           git config --local user.email "action@github.com"
@@ -110,13 +126,26 @@ jobs:
         with:
           tag_name: ${{ needs.get_version.outputs.version }}
           name: Release ${{ needs.get_version.outputs.version }}
-          files: dist/*
+          files: unpacked/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.4.2
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          user: __token__
-          repository_url: https://upload.pypi.org/legacy/
+  publish-to-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+
+    - uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.x'
+
+    - name: Publish to PyPI
+      run: |
+        pip install twine
+        twine upload unpacked/echowarp-${{ needs.get_version.outputs.version }}-py3-none-any.whl
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
