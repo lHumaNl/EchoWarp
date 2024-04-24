@@ -9,8 +9,32 @@ on:
       - created
 
 jobs:
-  build-n-publish:
-    name: Build and publish to PyPI and create binaries
+  get_version:
+    name: Get version of package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Extract version from Python script
+        id: version
+        run: echo "::set-output name=VERSION::$(python -c 'from version import __version__; print(__version__)')"
+
+      - name: Check if version exists on PyPI
+        id: check_version
+        run: |
+          RESPONSE=$(curl -s https://pypi.org/pypi/echowarp/json)
+          EXISTS=$(echo $RESPONSE | jq --arg VERSION "${{ steps.version.outputs.VERSION }}" '.releases | has($VERSION)')
+          if [[ "$EXISTS" == "true" ]]; then
+            echo "Version ${{ steps.version.outputs.VERSION }} already exists on PyPI, stopping job."
+            exit 1
+          fi
+
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+
+  build:
+    needs: get_version
+    name: Build and package
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -37,10 +61,6 @@ jobs:
           pip install setuptools wheel twine pyinstaller
           pip install -r requirements.txt
 
-      - name: Extract version from Python script
-        id: version
-        run: echo "::set-output name=VERSION::$(python -c 'from version import __version__; print(__version__)')"
-
       - name: Build dist
         run: |
           python setup.py sdist bdist_wheel
@@ -51,22 +71,35 @@ jobs:
           --noconfirm 
           --paths=./echowarp/ 
           --onefile 
-          --name=EchoWarp-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}
+          --name=EchoWarp-${{ needs.get_version.outputs.VERSION }}-${{ matrix.os }}
           ./echowarp/main.py
 
-      - name: Upload Artifacts
+      - name: Upload Artifacts for each OS
         uses: actions/upload-artifact@v2
         with:
-          name: EchoWarp-${{ steps.version.outputs.VERSION }}-${{ matrix.os }}
-          path: dist/*
+          name: EchoWarp-${{ matrix.os }}-${{ needs.get_version.outputs.VERSION }}
+          path: dist/EchoWarp-${{ matrix.os }}-${{ needs.get_version.outputs.VERSION }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+
+  release:
+    needs: build
+    name: Create Release and Publish to PyPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v2
+        with:
+          path: dist
 
       - name: Create Release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.VERSION }}
-          release_name: Release ${{ steps.version.outputs.VERSION }}
-          draft: false
-          prerelease: false
+          tag_name: ${{ needs.get_version.outputs.VERSION }}
+          name: Release ${{ needs.get_version.outputs.VERSION }}
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.4.2
