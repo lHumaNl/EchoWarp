@@ -131,7 +131,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish-to-pypi:
-    needs: build
+    needs: [ release, get_version ]
     runs-on: ubuntu-latest
     steps:
 
