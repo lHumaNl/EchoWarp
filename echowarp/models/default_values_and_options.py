@@ -1,5 +1,5 @@
 from echowarp.models.options_data_creater import OptionsData
-import version
+from echowarp import version
 
 
 class DefaultValuesAndOptions:

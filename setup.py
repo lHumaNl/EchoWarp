@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-import version
+from echowarp import version
 
 setup(
     name='echowarp',
