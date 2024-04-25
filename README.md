@@ -22,12 +22,56 @@ an interactive setup.
 - **Python Version**: Python 3.6 or later.
 - **Dependencies**: Includes libraries like PyAudio, and Cryptography.
 
-## Installation
+## PyPi Repository
+
+EchoWarp is also available as a package on the Python Package Index (PyPi), which simplifies the installation process
+and manages dependencies automatically. This is the recommended method if you wish to include EchoWarp in your Python
+project.
+
+### Features of Installing via PyPi:
+
+- **Automatic Dependency Management**: All required libraries, such as PyAudio and Cryptography, are automatically
+  installed.
+- **Easy Updates**: Simplifies the process of obtaining the latest version of EchoWarp with a simple pip command.
+- **Isolation from System Python**: Installing via a virtual environment prevents any conflicts with system-wide Python
+  packages.
+
+### Installation with PyPi (pip)
+
+To install EchoWarp using pip, follow these steps:
+
+1. Set up a Python virtual environment (optional but recommended):
+
+```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows, use `.\.venv\Scripts\activate`
+```
+
+2. Install EchoWarp using pip:
+
+```bash
+   pip install echowarp
+```
+
+### Updating EchoWarp
+
+To update to the latest version of EchoWarp, simply run:
+
+```bash
+   pip install --upgrade echowarp
+```
+
+This ensures that you have the latest features and improvements.
+
+For more information and assistance, you can visit the EchoWarp PyPi page:
+https://pypi.org/project/echowarp/
+
+## Installation from source
 
 Clone the repository and set up a Python virtual environment:
 
 ```bash
-git clone https://github.com/yourgithub/EchoWarp.git
+git clone https://github.com/lHumaNl/EchoWarp.git
 cd EchoWarp
 python -m venv venv
 source venv/bin/activate  # On Windows, use `.\venv\Scripts\activate`

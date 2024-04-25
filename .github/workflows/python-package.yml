@@ -126,16 +126,12 @@ jobs:
     needs: [ release, get_version ]
     runs-on: ubuntu-latest
     steps:
-
       - uses: actions/checkout@v2
 
       - name: Download all artifacts
         uses: actions/download-artifact@v2
         with:
           path: dist
-
-      - name: List dist directory contents
-        run: ls -l dist/echowarp-${{ needs.get_version.outputs.version }}-py3-none-any.whl
 
       - name: Set up Python
         uses: actions/setup-python@v2
