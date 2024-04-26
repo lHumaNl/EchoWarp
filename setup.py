@@ -1,11 +1,14 @@
 from setuptools import setup, find_packages
-from echowarp import version
+import version
 
 setup(
     name='echowarp',
     version=version.__version__,
     packages=find_packages(include=['echowarp', 'echowarp.*']),
     include_package_data=True,
+    package_data={
+        '': ['../version.py'],
+    },
     install_requires=[
         'pyaudio',
         'cryptography'
