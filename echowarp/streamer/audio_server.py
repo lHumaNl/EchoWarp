@@ -1,4 +1,3 @@
-import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -8,6 +7,7 @@ import logging
 from echowarp.auth_and_heartbeat.transport_server import TransportServer
 from echowarp.services.crypto_manager import CryptoManager
 from echowarp.models.audio_device import AudioDevice
+from echowarp.settings import Settings
 
 
 class ServerStreamer(TransportServer):
@@ -15,7 +15,7 @@ class ServerStreamer(TransportServer):
     Handles streaming audio from the server to the client over UDP.
 
     Attributes:
-        _client_addr (str): The client's IP address to send audio data to.
+        _client_address (str): The client's IP address to send audio data to.
         _udp_port (int): The port used for UDP streaming.
         _audio_device (AudioDevice): Audio device used for capturing audio.
         _stop_util_event (threading.Event): Event to signal util to stop.
@@ -26,20 +26,16 @@ class ServerStreamer(TransportServer):
     _audio_device: AudioDevice
     _executor: ThreadPoolExecutor
 
-    def __init__(self, udp_port: int, heartbeat_attempt: int, stop_util_event: threading.Event,
-                 stop_stream_event: threading.Event, crypto_manager: CryptoManager, audio_device: AudioDevice,
-                 executor: ThreadPoolExecutor):
+    def __init__(self, settings: Settings, stop_util_event: threading.Event(), stop_stream_event: threading.Event()):
         """
         Initializes the UDPServerStreamer with specified client address, port, and audio settings.
 
         Args:
-            udp_port (int): UDP port to use for audio streaming.
-            audio_device (AudioDevice): Configured audio device for capturing audio.
-            executor (ThreadPoolExecutor): Executor for managing asynchronous tasks.
+            settings (Settings): Settings object.
         """
-        super().__init__(udp_port, heartbeat_attempt, stop_util_event, stop_stream_event, crypto_manager)
-        self._audio_device = audio_device
-        self._executor = executor
+        super().__init__(settings, stop_util_event, stop_stream_event)
+        self._audio_device = settings.audio_device
+        self._executor = settings.executor
 
     def encode_audio_and_send_to_client(self):
         """
@@ -53,28 +49,24 @@ class ServerStreamer(TransportServer):
                                                   input_device_index=self._audio_device.device_index,
                                                   frames_per_buffer=1024)
 
-        self._print_listener()
+        self._print_udp_listener_and_start_stream()
         try:
             while not self._stop_util_event.is_set():
-                self._stop_stream_event.wait()
-
-                data = stream.read(1024, exception_on_overflow=False)
-
                 try:
+                    data = stream.read(1024, exception_on_overflow=False)
                     self._executor.submit(self.__send_stream_to_client, data)
-                except socket.error as e:
-                    logging.error(f"Failed to send stream: {e}")
+                except Exception:
+                    pass
 
-        except Exception as e:
-            logging.error(f"Error in streaming audio: {e}")
+                self._stop_stream_event.wait()
         finally:
+            self._executor.shutdown()
             stream.stop_stream()
             stream.close()
 
             self._audio_device.py_audio.terminate()
-            self._cleanup_client_sockets()
 
-            logging.info("Streaming audio stopped.")
+            logging.info("UDP streaming finished...")
 
     def __send_stream_to_client(self, data):
         """
@@ -84,7 +76,4 @@ class ServerStreamer(TransportServer):
             data (bytes): Raw audio data to encode and send.
         """
         encoded_data = self._crypto_manager.encrypt_aes_and_sign_data(data)
-        self._udp_server_socket.sendto(encoded_data, (self._client_addr, self._udp_port))
-
-    def _print_listener(self):
-        logging.info(f"Start audio streaming to client on host {self._client_addr}:{self._udp_port}")
+        self._udp_socket.sendto(encoded_data, (self._client_address, self._udp_port))

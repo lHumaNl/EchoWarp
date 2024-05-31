@@ -15,6 +15,8 @@ an interactive setup.
   continuous streaming.
 - **Configurable through CLI and Interactive Modes**: Offers easy setup through an interactive mode or scriptable CLI
   options.
+- **Ban List Management**: Server maintains a ban list to block clients after a specified number of failed connection
+  attempts.
 
 ## Prerequisites
 
@@ -88,7 +90,7 @@ arguments.
 Simply run the main.py script without arguments to enter interactive mode:
 
 ```bash
-python main.py
+python -m echowarp.main
 ```
 
 Follow the on-screen prompts to configure the utility.
@@ -99,30 +101,95 @@ EchoWarp supports configuration via command-line arguments for easy integration 
 
 #### Arguments Table
 
-| Argument                    | Description                                                                       | Default      |
-|-----------------------------|-----------------------------------------------------------------------------------|--------------|
-| `-c`, `--client`            | Start utility in client mode.                                                     | Server mode  |
-| `-o`, `--output`            | Use the output audio device for streaming.                                        | Input device |
-| `-p`, `--udp_port`          | Specify the UDP port for audio data transmission.                                 | 4415         |
-| `-d`, `--device_id`         | Specify the device ID directly to avoid interactive selection.                    | None         |
-| `-a`, `--server_addr`       | Specify the server address (only valid in client mode).                           | None         |
-| `-b`, `--heartbeat`         | Set the number of allowed missed heartbeats before disconnect (server mode only). | 5            |
-| `--ssl`                     | Enable SSL mode for encrypted communication (server mode only).                   | False        |
-| `-i`, `--integrity_control` | Enable integrity control using hash (server mode only).                           | False        |
-| `-w`, `--workers`           | Set the maximum number of worker threads (server mode only).                      | 1            |
+| Argument                         | Description                                                     | Default                 |
+|----------------------------------|-----------------------------------------------------------------|-------------------------|
+| `-c`, `--client`                 | Start utility in client mode.                                   | Server mode             |
+| `-o`, `--output`                 | Use the output audio device for streaming.                      | Input device            |
+| `-u`, `--udp_port`               | Specify the UDP port for audio data transmission.               | 4415                    |
+| `-b`, `--socket_buffer_size`     | Size of socket buffer.                                          | 6144                    |
+| `-d`, `--device_id`              | Specify the device ID directly to avoid interactive selection.  | None                    |
+| `-p`, `--password`               | Password for authentication.                                    | None                    |
+| `-f`, `--config_file`            | Path to config file (ignoring other args, if they added).       | None                    |
+| `-e`, `--device_encoding_names`  | Charset encoding for audio device.                              | System default encoding |
+| `--ignore_device_encoding_names` | Ignoring device names encoding.                                 | False                   |
+| `-l`, `--is_error_log`           | Init error file logger.                                         | False                   |
+| `-r`, `--reconnect`              | Number of failed connections before closing the application.    | 5                       |
+| `-s`, `--save_config`            | Save config file from selected args (ignoring default values).  | None                    |
+| `-a`, `--server_address`         | Specify the server address (only valid in client mode).         | None                    |
+| `--ssl`                          | Enable SSL mode for encrypted communication (server mode only). | False                   |
+| `-i`, `--integrity_control`      | Enable integrity control using hash (server mode only).         | False                   |
+| `-w`, `--workers`                | Set the maximum number of worker threads (server mode only).    | 1                       |
 
 Use these arguments to configure the utility directly from the command line for both automation and manual setups.
+
+## Launching with Config File
+
+You can launch EchoWarp using a configuration file to avoid specifying all the arguments manually. Create a
+configuration file with the desired settings and use the --config_file argument to specify the path to this file.
+
+Example of a configuration file (config.conf):
+
+```ini
+[echowarp_conf]
+is_server=False
+udp_port=6532
+socket_buffer_size=10240
+device_id=1
+password=mysecretpassword
+device_encoding_names=cp1251
+is_error_log=True
+server_address=192.168.1.5
+reconnect_attempt=15
+is_ssl=True
+is_integrity_control=True
+```
+
+To launch EchoWarp with the configuration file with CLI args:
+
+```bash
+python -m echowarp.main --config_file path/to/config.conf
+```
+
+## Ban List Management
+
+EchoWarp server maintains a ban list to block clients after a specified number of failed connection attempts. This
+feature helps to secure the server from unauthorized access attempts and repeated failed authentications.
+
+### How Ban List Works
+
+1. **Failed Connection Attempts**: Each client connection attempt is monitored. If a client fails to authenticate multiple times (as specified by the `--reconnect` argument), the client is added to the ban list. Setting `--reconnect` to `0` in server mode disables the ban list feature.
+2. **Banning Clients**: Once a client is banned, it cannot reconnect to the server until the ban list is manually
+   cleared or the server is restarted.
+3. **Persistent Ban List**: The ban list is saved to a file (`echowarp_ban_list.txt`) to maintain the list of banned
+   clients across server restarts.
+
+### Example of Ban List File
+
+The ban list file (`echowarp_ban_list.txt`) contains the IP addresses of banned clients, one per line:
+
+```txt
+192.168.1.100
+192.168.1.101
+```
+
+## Additional Features
+
+- **Heartbeat Mechanism**: Ensures the continuous connection between client and server by periodically sending heartbeat
+  messages.
+- **Thread Pooling**: Utilizes thread pooling for handling concurrent tasks efficiently.
+- **Logging**: Comprehensive logging for both normal operations and errors, with an option to enable error logging to a
+  file.
 
 ## Examples
 
 ### Consult the help output for detailed command-line options::
 
 ```bash
-python main.py --help
+python -m echowarp.main --help
 ```
 
 ### Client Mode with Custom Server Address and Port:
 
 ```bash
-python main.py --client --server_addr 192.168.1.5 --udp_port 6555
+python -m echowarp.main --client --server_addr 192.168.1.5 --udp_port 6555
 ```

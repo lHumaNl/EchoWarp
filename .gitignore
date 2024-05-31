@@ -4,3 +4,6 @@ venv/
 build
 dist
 main.spec
+*.conf
+*.log
+*.txt

@@ -1,13 +1,15 @@
 import logging
+import os
 import socket
 import threading
 from abc import ABC
 from typing import Optional
 
 from echowarp.auth_and_heartbeat.transport_base import TransportBase
-from echowarp.services.crypto_manager import CryptoManager
+from echowarp.models.ban_list import BanList
 from echowarp.models.json_message import JSONMessageServer, JSONMessage
 from echowarp.models.default_values_and_options import DefaultValuesAndOptions
+from echowarp.settings import Settings
 
 
 class TransportServer(TransportBase, ABC):
@@ -16,54 +18,27 @@ class TransportServer(TransportBase, ABC):
     authentication, and setting up a secure communication channel.
 
     Attributes:
-        _client_addr (Optional[str]): IP address of the connected client.
-        _tcp_server_socket (Optional[socket.socket]): Server TCP socket for accepting client connections.
-        _udp_server_socket (Optional[socket.socket]): Server UDP socket for accepting client connections.
+        _client_address (Optional[str]): IP address of the connected client.
         _stop_util_event (threading.Event): Event to signal util to stop.
         _stop_stream_event (threading.Event): Event to signal stream to stop.
     """
-    _client_addr: Optional[str]
-    _tcp_server_socket: Optional[socket.socket]
-    _udp_server_socket: Optional[socket.socket]
+    _server_tcp_socket: socket.socket
+    _client_address: Optional[str]
+    __ban_list: BanList
 
-    def __init__(self, udp_port, heartbeat_attempt: int, stop_util_event: threading.Event,
-                 stop_stream_event: threading.Event, crypto_manager: CryptoManager):
+    def __init__(self, settings: Settings, stop_util_event: threading.Event(), stop_stream_event: threading.Event()):
         """
         Initializes the TCPServer with specified configuration parameters.
 
         Args:
-            udp_port (int): The port number on which the server listens for incoming TCP connections.
-            heartbeat_attempt (int): The number of allowed missed heartbeats before considering the connection lost.
-            stop_util_event (threading.Event): An event to signal the server to stop operations.
-            stop_stream_event (threading.Event): An event to signal the server to stop operations.
-            crypto_manager (CryptoManager): An instance to manage cryptographic operations.
+            settings (Settings): Settings object.
         """
-        super().__init__(udp_port, stop_util_event, stop_stream_event, heartbeat_attempt, crypto_manager)
+        super().__init__(settings, stop_util_event, stop_stream_event)
 
-        self._client_addr = None
-        self._tcp_server_socket = None
-        self._udp_server_socket = None
+        self._client_address = None
+        self.__ban_list = BanList(settings.reconnect_attempt)
 
-        self._start_tcp_server()
-
-    def _start_tcp_server(self):
-        """
-        Starts the TCP server, listens for incoming connections, and handles client authentication and setup.
-        """
-        self._tcp_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._udp_server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        self._tcp_server_socket.bind(('0.0.0.0', self._tcp_port))
-        self._tcp_server_socket.listen(1)
-
-        logging.info(f'TCP server started on port "{self._tcp_port}" awaiting client connection')
-
-        try:
-            self._established_connection(False)
-        except Exception as e:
-            logging.error(f"Server encountered an error: {e}")
-            self._cleanup_client_sockets()
-            self._cleanup_server_socket()
+        self._init_tcp_connection()
 
     def __authenticate_client(self):
         """
@@ -73,50 +48,60 @@ class TransportServer(TransportBase, ABC):
         Raises:
             ValueError: If client authentication fails or there is a version mismatch.
         """
-        try:
-            self._client_tcp_socket.sendall(self._crypto_manager.get_serialized_public_key())
 
-            client_public_key_pem = self._client_tcp_socket.recv(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
-            self._crypto_manager.load_peer_public_key(client_public_key_pem)
+        self._client_tcp_socket.sendall(self._crypto_manager.get_serialized_public_key())
 
-            encrypted_message_from_client = self._client_tcp_socket.recv(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
-            message_from_client = self._crypto_manager.decrypt_rsa_message(encrypted_message_from_client)
+        client_public_key_pem = self._client_tcp_socket.recv(self._socket_buffer_size)
+        self._crypto_manager.load_peer_public_key(client_public_key_pem)
 
-            client_auth_message = JSONMessage(message_from_client)
+        encrypted_message_from_client = self._client_tcp_socket.recv(self._socket_buffer_size)
+        message_from_client = self._crypto_manager.decrypt_rsa_message(encrypted_message_from_client)
 
-            if (client_auth_message.message != JSONMessage.AUTH_CLIENT_MESSAGE
-                    or client_auth_message.response_code != 200):
-                error_message = "Forbidden"
-                error_message_bytes = JSONMessage.encode_message_to_json_bytes(error_message, 403)
+        client_auth_message = JSONMessage(message_from_client)
 
-                self._client_tcp_socket.sendall(self._crypto_manager.encrypt_rsa_message(error_message_bytes))
+        if self.__ban_list.is_banned(self._client_address):
+            self.__form_error_message(
+                JSONMessage.FORBIDDEN_MESSAGE.response_message,
+                JSONMessage.FORBIDDEN_MESSAGE.response_code,
+                f"Failed to authenticate client: {self._client_address}. "
+                f"Client is {JSONMessage.FORBIDDEN_MESSAGE.response_message}"
+            )
 
-                logging.error(f"Failed to authenticate client. Client sent message: {client_auth_message.message}")
-                raise ValueError("Client authentication failed.")
+        if client_auth_message.message != self._password_base64:
+            self.__form_error_message(
+                JSONMessage.UNAUTHORIZED_MESSAGE.response_message,
+                JSONMessage.UNAUTHORIZED_MESSAGE.response_code,
+                f"Failed to authenticate client: {self._client_address}. "
+                f"Client is {JSONMessage.UNAUTHORIZED_MESSAGE.response_message}"
+            )
 
-            logging.info("Client authenticated")
+        if client_auth_message.version != DefaultValuesAndOptions.get_util_comparability_version():
+            self.__form_error_message(
+                JSONMessage.CONFLICT_MESSAGE.response_message,
+                JSONMessage.CONFLICT_MESSAGE.response_code,
+                f"Client version not equal server version: "
+                f"{client_auth_message.version} - Client, "
+                f"{DefaultValuesAndOptions.get_util_comparability_version()} - Server"
+            )
 
-            if client_auth_message.version != DefaultValuesAndOptions.get_util_version():
-                error_message = (f"Client version not equal server version: "
-                                 f"{client_auth_message.version} - Client, "
-                                 f"{DefaultValuesAndOptions.get_util_version()} - Server")
-                error_message_bytes = JSONMessage.encode_message_to_json_bytes(error_message, 500)
+        logging.info(f"Client {self._client_address} authenticated.")
+        self.__ban_list.success_connect_attempt(self._client_address)
+        self.__print_client_info()
 
-                self._client_tcp_socket.sendall(self._crypto_manager.encrypt_rsa_message(error_message_bytes))
+        self.__send_configuration()
 
-                logging.error(error_message)
-                raise ValueError("Version mismatch between client and server.")
+    def __form_error_message(self, response_message: str, response_code: int, exception_message: str):
+        self.__ban_list.fail_connect_attempt(self._client_address)
 
-            self.__send_configuration()
-        except socket.error as e:
-            logging.error(f"Failed to send/receive data: {e}")
-            self._stop_util_event.set()
-        except RuntimeError as e:
-            logging.error(f"Failed to maintain connection: {e}")
-            self._stop_util_event.set()
-        except Exception as e:
-            logging.error(f"Error during authentication: {e}")
-            self._stop_util_event.set()
+        error_message_bytes = JSONMessage.encode_message_to_json_bytes(
+            response_message,
+            response_code,
+            self.__ban_list.get_failed_connect_attempts(self._client_address),
+            self._reconnect_attempt
+        )
+
+        self._client_tcp_socket.sendall(self._crypto_manager.encrypt_rsa_message(error_message_bytes))
+        raise ValueError(exception_message)
 
     def __send_configuration(self):
         """
@@ -125,46 +110,92 @@ class TransportServer(TransportBase, ABC):
         The configuration is sent as an encrypted JSON string.
         """
         config_json = JSONMessageServer.encode_server_config_to_json_bytes(
-            self._heartbeat_attempt, self._crypto_manager.is_encrypt, self._crypto_manager.is_hash_control,
-            self._crypto_manager.get_aes_key(), self._crypto_manager.get_aes_iv()
+            self._crypto_manager.is_ssl, self._crypto_manager.is_integrity_control,
+            self._crypto_manager.get_aes_key_base64(), self._crypto_manager.get_aes_iv_base64(),
+            self.__ban_list.get_failed_connect_attempts(self._client_address), self._reconnect_attempt
         )
 
         self._client_tcp_socket.sendall(self._crypto_manager.encrypt_rsa_message(config_json))
         logging.info("Configuration sent to client.")
 
     def _initialize_socket(self):
-        pass
+        self._server_tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._server_tcp_socket.bind(('0.0.0.0', self._tcp_port))
+        self._server_tcp_socket.settimeout(DefaultValuesAndOptions.get_timeout())
+        self._server_tcp_socket.listen(1)
 
-    def _established_connection(self, is_reconnect=True):
-        self._tcp_server_socket.settimeout(5.0)
-        is_connected = False
+    def _established_connection(self):
+        is_log = True
         while not self._stop_util_event.is_set():
+            if is_log:
+                logging.info(f'Authenticate server started and awaiting client connection')
+
             try:
-                self._stop_stream_event.clear()
-                self._client_tcp_socket, client_addr = self._tcp_server_socket.accept()
-            except socket.timeout:
+                self._client_tcp_socket, client_address = self._server_tcp_socket.accept()
+            except (socket.error, socket.timeout):
+                is_log = False
                 continue
 
-            self._client_addr = client_addr[0]
+            is_log = True
+            self._client_address = client_address[0]
+            self.__ban_list.add_client_to_ban_list(self._client_address)
 
-            logging.info(f"Client connected from {self._client_addr}")
+            if self.__ban_list.is_banned(self._client_address) and not self.__ban_list.is_first_time_message(
+                    self._client_address):
+                logging.error(f'Client {self._client_address} banned!')
+                self.__ban_list.fail_connect_attempt(self._client_address)
+                continue
 
-            self.__authenticate_client()
-            is_connected = True
+            logging.info(f"Client connected from {self._client_address}")
+
+            try:
+                self.__authenticate_client()
+            except ValueError as e:
+                logging.error(e)
+                self.__print_client_info()
+                continue
+            except (socket.error, socket.timeout) as e:
+                logging.error(f"Failed to send/receive data: {e}")
+                self.__print_client_info()
+                continue
+            except Exception as e:
+                logging.error(f"Error during authentication: {e}")
+                self.__print_client_info()
+                continue
+            finally:
+                self.__ban_list.update_ban_list_file()
+
             break
 
+    def __print_client_info(self):
+        success_connections = self.__ban_list.get_success_connect_attempts(self._client_address)
+        failed_connections = self.__ban_list.get_failed_connect_attempts(self._client_address)
+        all_failed_connections = self.__ban_list.get_all_failed_connect_attempts(self._client_address)
+
+        failed_connections_attempts = f'{failed_connections}/{self._reconnect_attempt}' if self._reconnect_attempt > 0 \
+            else failed_connections
+
+        logging.info(
+            f"Client {self._client_address} info:{os.linesep}"
+            f"Success client connections: {success_connections}{os.linesep}"
+            f"Failed client connection attempts after last success: {failed_connections_attempts}{os.linesep}"
+            f"Count of failed client connections: {all_failed_connections}"
+        )
+
+    def _shutdown(self):
+        super()._shutdown()
+        try:
+            if self._server_tcp_socket:
+                self._server_tcp_socket.close()
+        except socket.error as e:
+            logging.error(f"Error closing server TCP socket: {e}")
+        except Exception as e:
+            logging.error(f"Unhandled exception during TCP socket cleanup: {e}")
+
+    def _print_udp_listener_and_start_stream(self):
+        logging.info(f"Start UDP audio streaming to client {self._client_address}:{self._udp_port}")
         self._stop_stream_event.set()
 
-        if not is_connected:
-            raise RuntimeError
-
-    def _cleanup_server_socket(self):
-        try:
-            if self._tcp_server_socket:
-                self._tcp_server_socket.shutdown(socket.SHUT_RDWR)
-                self._tcp_server_socket.close()
-                self._tcp_server_socket = None
-        except socket.error as e:
-            logging.error(f"Error closing server socket: {e}")
-        except Exception as e:
-            logging.error(f"Unhandled exception during server socket cleanup: {e}")
+    def _print_pause_udp_listener_and_pause_stream(self):
+        logging.warning(f'Audio streaming paused!')
+        self._stop_stream_event.clear()

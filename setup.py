@@ -10,12 +10,13 @@ setup(
         '': ['../version.py'],
     },
     install_requires=[
-        'pyaudio',
-        'cryptography'
+        'PyAudio',
+        'cryptography',
+        'chardet'
     ],
     entry_points={
         'console_scripts': [
-            'echowarp=echowarp.__init__:main',
+            'echowarp=echowarp.main:main',
         ],
     },
     author='lHumaNl',

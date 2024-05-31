@@ -79,6 +79,7 @@ jobs:
           --paths=./echowarp/ 
           --onefile 
           --name=EchoWarp-${{ needs.get_version.outputs.version }}-${{ matrix.os }}
+          --icon EchoWarp.ico
           ./echowarp/main.py
 
       - name: Upload WHL for Ubuntu

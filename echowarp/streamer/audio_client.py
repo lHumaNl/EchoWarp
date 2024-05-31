@@ -1,4 +1,3 @@
-import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -7,8 +6,7 @@ import logging
 
 from echowarp.auth_and_heartbeat.transport_client import TransportClient
 from echowarp.models.audio_device import AudioDevice
-from echowarp.models.default_values_and_options import DefaultValuesAndOptions
-from echowarp.services.crypto_manager import CryptoManager
+from echowarp.settings import Settings
 
 
 class ClientStreamReceiver(TransportClient):
@@ -23,21 +21,16 @@ class ClientStreamReceiver(TransportClient):
     _audio_device: AudioDevice
     _executor: ThreadPoolExecutor
 
-    def __init__(self, server_address: str, udp_port: int, stop_util_event: threading.Event,
-                 stop_stream_event: threading.Event, crypto_manager: CryptoManager, audio_device: AudioDevice,
-                 executor: ThreadPoolExecutor):
+    def __init__(self, settings: Settings, stop_util_event: threading.Event(), stop_stream_event: threading.Event()):
         """
                 Initializes a UDP client to receive and play back audio streams.
 
                 Args:
-                    server_address (str): The IP address of the audio source server.
-                    udp_port (int): The UDP port to listen for incoming audio data.
-                    audio_device (AudioDevice): Configured audio device for output.
-                    executor (Executor): Executor for running tasks asynchronously.
+                    settings (Settings): Settings object.
         """
-        super().__init__(server_address, udp_port, stop_util_event, stop_stream_event, crypto_manager)
-        self._audio_device = audio_device
-        self._executor = executor
+        super().__init__(settings, stop_util_event, stop_stream_event)
+        self._audio_device = settings.audio_device
+        self._executor = settings.executor
 
     def receive_audio_and_decode(self):
         """
@@ -54,31 +47,24 @@ class ClientStreamReceiver(TransportClient):
             output_device_index=self._audio_device.device_index
         )
 
-        self._print_listener()
+        self._print_udp_listener_and_start_stream()
         try:
             while not self._stop_util_event.is_set():
-                self._stop_stream_event.wait()
-
                 try:
-                    data, _ = self._client_udp_socket.recvfrom(DefaultValuesAndOptions.SOCKET_BUFFER_SIZE)
-                except socket.timeout as e:
-                    logging.error(f"Timeout to receive stream: {e}")
-                    continue
-                except socket.error as e:
-                    logging.error(f"Failed to receive stream: {e}")
-                    continue
+                    data, _ = self._udp_socket.recvfrom(self._socket_buffer_size)
+                    self._executor.submit(self.__decode_and_play, data, stream)
+                except Exception:
+                    pass
 
-                self._executor.submit(self.__decode_and_play, data, stream)
-        except Exception as e:
-            logging.error(f"Error in streaming audio: {e}")
+                self._stop_stream_event.wait()
         finally:
+            self._executor.shutdown()
             stream.stop_stream()
             stream.close()
 
             self._audio_device.py_audio.terminate()
-            self._cleanup_client_sockets()
 
-            logging.info("UDP listening stopped")
+            logging.info("UDP listening finished...")
 
     def __decode_and_play(self, data, stream):
         """
@@ -90,6 +76,3 @@ class ClientStreamReceiver(TransportClient):
         """
         data = self._crypto_manager.decrypt_aes_and_verify_data(data)
         stream.write(data)
-
-    def _print_listener(self):
-        logging.info(f'UDP listening started from host {self._server_address}:{self._udp_port}')
