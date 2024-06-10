@@ -71,11 +71,11 @@ class ArgsParser:
 
         server_args = parser.add_argument_group('Server Only Options')
         server_args.add_argument("--ssl", action='store_true',
-                                 help=f"Init SSL mode (server mode only). "
+                                 help=f"Init SSL (Encryption) mode (server mode only). "
                                       f"(default={DefaultValuesAndOptions.get_ssl_options_data().default_descr})")
         server_args.add_argument(
             "-i", "--integrity_control", action='store_true',
-            help=f"Init integrity control by hash (server mode only). "
+            help=f"Init integrity control of sending data (server mode only). "
                  f"(default={DefaultValuesAndOptions.get_hash_control_options_data().default_descr})"
         )
         server_args.add_argument("-w", "--workers", type=int,

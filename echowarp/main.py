@@ -1,3 +1,4 @@
+import socket
 import sys
 import threading
 import logging
@@ -40,13 +41,13 @@ def run_app(stop_util_event: threading.Event(), stop_stream_event: threading.Eve
         settings = ArgsParser.get_settings_from_cli_args()
 
     if settings.is_server:
-        logging.info("Start EchoWarp in server mode")
+        logging.info("Starting EchoWarp in server mode")
         streamer = ServerStreamer(settings, stop_util_event, stop_stream_event)
 
         streamer_thread = threading.Thread(target=streamer.encode_audio_and_send_to_client, daemon=True)
         streamer.start_streaming(streamer_thread)
     else:
-        logging.info("Start EchoWarp in client mode")
+        logging.info("Starting EchoWarp in client mode")
         receiver = ClientStreamReceiver(settings, stop_util_event, stop_stream_event)
 
         receiver_thread = threading.Thread(target=receiver.receive_audio_and_decode, daemon=True)
@@ -68,6 +69,8 @@ def main():
 
     try:
         run_app(stop_util_event, stop_stream_event)
+    except (socket.gaierror, OSError) as e:
+        logging.error(e)
     except RuntimeError as e:
         logging.error(e)
     except Exception as e:

@@ -137,7 +137,7 @@ class ConfigParser:
         if not filename.endswith('.conf'):
             filename += '.conf'
 
-        with open(filename, 'w', encoding='utf-8') as file:
+        with open(filename, 'w', encoding=locale.getpreferredencoding()) as file:
             file.write(f"[{DefaultValuesAndOptions.CONFIG_TITLE}]\n")
             for key, value in save_dict.items():
                 file.write(f"{key}={value}\n")
@@ -296,7 +296,7 @@ class ConfigParser:
     @staticmethod
     def get_file_str(file_path: str) -> str:
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
+            with open(file_path, 'r', encoding=locale.getpreferredencoding()) as file:
                 file_str = file.read()
         except Exception as e:
             try:

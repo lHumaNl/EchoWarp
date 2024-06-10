@@ -22,8 +22,7 @@ class TransportBase:
         _is_server (bool): Indicates if the instance is running as a server.
         _client_tcp_socket (Optional[socket.socket]): Socket for TCP communication.
         _udp_socket (socket.socket): Socket for UDP communication.
-        _tcp_port (int): TCP port used for communication, derived from UDP port.
-        _udp_port (int): UDP port used for audio streaming.
+        _udp_port (int): UDP/TCP port used for audio streaming.
         _stop_util_event (threading.Event): Event to signal when to terminate the application.
         _stop_stream_event (threading.Event): Event to signal when to stop streaming.
         _crypto_manager (CryptoManager): Manages cryptographic operations.
@@ -34,7 +33,6 @@ class TransportBase:
     _is_server: bool
     _client_tcp_socket: Optional[socket.socket]
     _udp_socket: socket.socket
-    _tcp_port: int
     _udp_port: int
     _stop_util_event: threading.Event
     _stop_stream_event: threading.Event
@@ -53,7 +51,6 @@ class TransportBase:
             stop_stream_event (threading.Event): Event to signal when to stop streaming.
         """
         self._is_server = settings.is_server
-        self._tcp_port = settings.udp_port - 1
         self._udp_port = settings.udp_port
         self._stop_util_event = stop_util_event
         self._stop_stream_event = stop_stream_event
@@ -338,7 +335,7 @@ class TransportBase:
         self._initialize_socket()
         try:
             self._established_connection()
-        except (socket.error, socket.timeout, RuntimeError, ValueError) as e:
+        except (socket.error, socket.timeout, socket.gaierror, RuntimeError, ValueError, OSError) as e:
             self._shutdown()
             raise RuntimeError(e)
         except Exception as e:

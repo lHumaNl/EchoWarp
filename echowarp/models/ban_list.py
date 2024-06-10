@@ -1,3 +1,4 @@
+import locale
 import logging
 import os
 from typing import Dict
@@ -113,7 +114,7 @@ class BanList:
 
         if len(banned_clients) > 0:
             try:
-                with open(DefaultValuesAndOptions.BAN_LIST_FILE, 'w', encoding='utf-8') as file:
+                with open(DefaultValuesAndOptions.BAN_LIST_FILE, 'w', encoding=locale.getpreferredencoding()) as file:
                     file.write(os.linesep.join(banned_clients))
             except Exception as e:
                 logging.error(f'Failed to update ban list file: {e}')

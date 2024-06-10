@@ -1,4 +1,5 @@
 import datetime
+import locale
 import logging
 
 
@@ -14,12 +15,15 @@ class Logger:
         including timestamp, log level, module, function name, and message.
         """
         if not Logger.IS_CORE_LOGGER_ENABLED:
-            logging.basicConfig(level=logging.INFO,
-                                format='[%(asctime)s] %(levelname)s | '
-                                       'module: %(module)s | '
-                                       'funcName: %(funcName)s | '
-                                       '%(message)s',
-                                datefmt='%Y-%m-%d %H:%M:%S')
+            logging.basicConfig(
+                level=logging.INFO,
+                format='[%(asctime)s] %(levelname)s | '
+                       'module: %(module)s | '
+                       'funcName: %(funcName)s | '
+                       '%(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S',
+                encoding=locale.getpreferredencoding()
+            )
 
             Logger.IS_CORE_LOGGER_ENABLED = True
 
@@ -31,7 +35,10 @@ class Logger:
         """
         if not Logger.IS_WARNING_LOGGER_ENABLED:
             current_date = datetime.datetime.now().strftime('%Y-%m-%d')
-            file_handler = logging.FileHandler(f"echowarp_errors_{current_date}.log")
+            file_handler = logging.FileHandler(
+                f"echowarp_errors_{current_date}.log",
+                encoding=locale.getpreferredencoding()
+            )
             file_handler.setLevel(logging.WARNING)
 
             formatter = logging.Formatter('[%(asctime)s] %(levelname)s | '

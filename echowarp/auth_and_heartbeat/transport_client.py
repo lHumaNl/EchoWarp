@@ -29,9 +29,9 @@ class TransportClient(TransportBase, ABC):
         """
         super().__init__(settings, stop_util_event, stop_stream_event)
         self._server_address = settings.server_address
-        self._udp_socket.bind((self._server_address, self._udp_port))
 
         self._init_tcp_connection()
+        self._udp_socket.bind((self._server_address, self._udp_port))
 
     def __authenticate_on_server(self):
         """
@@ -100,7 +100,7 @@ class TransportClient(TransportBase, ABC):
         self._client_tcp_socket.settimeout(DefaultValuesAndOptions.get_timeout())
 
     def _established_connection(self):
-        self._client_tcp_socket.connect((self._server_address, self._tcp_port))
+        self._client_tcp_socket.connect((self._server_address, self._udp_port))
 
         logging.info(f"TCP connection to {self._server_address} established.")
 

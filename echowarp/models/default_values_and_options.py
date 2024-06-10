@@ -32,10 +32,14 @@ class DefaultValuesAndOptions:
     CONFIG_TITLE = 'echowarp_conf'
     BAN_LIST_FILE = 'echowarp_ban_list.txt'
 
-    __DEFAULT_SERVER_MODE = ['Server mode', True]
+    __DEFAULT_SERVER_MODE = [
+        'Server mode (Mode in which the audio stream from the specified device is captured and '
+        'sent to the client over the network)',
+        True]
     __SERVER_MODE_OPTIONS = [
         __DEFAULT_SERVER_MODE,
-        ['Client mode', False]
+        ['Client mode (Mode in which the device receives an audio stream from the server over the network and '
+         'plays it on the specified audio device)', False]
     ]
 
     __DEFAULT_SOCKET_BUFFER_SIZE = [f'{__DEFAULT_BUFFER_SIZE}', __DEFAULT_BUFFER_SIZE]
@@ -44,54 +48,57 @@ class DefaultValuesAndOptions:
         ['Custom size', False]
     ]
 
-    __DEFAULT_AUDIO_DEVICE_TYPE = ['Input audio device', True]
+    __DEFAULT_AUDIO_DEVICE_TYPE = ['Input audio device (like microphones)', True]
     __AUDIO_DEVICE_OPTIONS = [
         __DEFAULT_AUDIO_DEVICE_TYPE,
-        ['Output audio device', False]
+        ['Output audio device (like speakers and headphones)', False]
     ]
 
-    __DEFAULT_DEVICE_ENCODING_NAMES = [f'Locale of OS - {locale.getpreferredencoding()}', locale.getpreferredencoding()]
+    __DEFAULT_DEVICE_ENCODING_NAMES = [
+        f'Use standard charset encoding of OS for audio device names ({locale.getpreferredencoding()})',
+        locale.getpreferredencoding()]
     __DEVICE_ENCODING_NAMES_OPTIONS = [
         __DEFAULT_DEVICE_ENCODING_NAMES,
-        ['Use custom encoding', True]
+        ['Use custom charset encoding for audio device names', True]
     ]
 
-    __DEFAULT_IGNORE_DEVICE_ENCODING_NAMES = ['Enable encoding', False]
+    __DEFAULT_IGNORE_DEVICE_ENCODING_NAMES = ['Enable charset encoding audio device names', False]
     __IGNORE_DEVICE_ENCODING_NAMES_OPTIONS = [
         __DEFAULT_IGNORE_DEVICE_ENCODING_NAMES,
-        ['Disable encoding', True]
+        ['Disable charset encoding audio device names', True]
     ]
 
-    __DEFAULT_IS_ERROR_LOG = ['Disable error file log', False]
+    __DEFAULT_IS_ERROR_LOG = ['Disable writing error log lines to file', False]
     __IS_ERROR_LOG_OPTIONS = [
         __DEFAULT_IS_ERROR_LOG,
-        ['Enable error file log', True]]
+        ['Enable writing error log lines to file', True]
+    ]
 
-    __DEFAULT_SSL = ['Disable SSL', False]
+    __DEFAULT_SSL = ['Disable SSL (Encryption)', False]
     __SSL_OPTIONS = [
-        ['Enable SSL', True],
+        ['Enable SSL (Encryption)', True],
         __DEFAULT_SSL
     ]
 
-    __DEFAULT_HASH_CONTROL = ['Disable integrity control', False]
+    __DEFAULT_HASH_CONTROL = ['Disable integrity control of sending data', False]
     __HASH_CONTROL_OPTIONS = [
-        ['Enable integrity control', True],
+        ['Enable integrity control of sending data', True],
         __DEFAULT_HASH_CONTROL
     ]
 
-    __DEFAULT_SAVE_PROFILE = ['Skip saving params', False]
+    __DEFAULT_SAVE_PROFILE = ['Skip saving selected params', False]
     __SAVE_PROFILE_OPTIONS = [
-        ['Save values to config file', True],
+        ['Save selected params to config file', True],
         __DEFAULT_SAVE_PROFILE
     ]
 
     @staticmethod
     def get_variants_config_load_options_data() -> OptionsData:
         return OptionsData(
-            ["Load config", True],
+            ["Load config from file", True],
             [
-                ["Load config", True],
-                ["Skip config", False]
+                ["Load config from file", True],
+                ["Skip configs", False]
             ]
         )
 

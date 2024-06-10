@@ -144,7 +144,7 @@ class InteractiveSettings:
             DefaultValuesAndOptions.get_ignore_encoding_options_data()
         )
 
-        if ignore_device_encoding_names:
+        if not ignore_device_encoding_names:
             device_encoding_names = InteractiveSettings.__select_in_interactive_from_values(
                 'audio device charset encoding names',
                 DefaultValuesAndOptions.get_encoding_charset_options_data()
@@ -159,7 +159,7 @@ class InteractiveSettings:
             server_address = input("Select server host: ")
         else:
             is_ssl = InteractiveSettings.__select_in_interactive_from_values(
-                'init ssl mode',
+                'init SSL (Encryption) mode',
                 DefaultValuesAndOptions.get_ssl_options_data()
             )
 

@@ -6,6 +6,7 @@ from abc import ABC
 from typing import Optional
 
 from echowarp.auth_and_heartbeat.transport_base import TransportBase
+from echowarp.models.net_interfaces_info import NetInterfacesInfo
 from echowarp.models.ban_list import BanList
 from echowarp.models.json_message import JSONMessageServer, JSONMessage
 from echowarp.models.default_values_and_options import DefaultValuesAndOptions
@@ -25,6 +26,7 @@ class TransportServer(TransportBase, ABC):
     _server_tcp_socket: socket.socket
     _client_address: Optional[str]
     __ban_list: BanList
+    __net_interfaces_info: NetInterfacesInfo
 
     def __init__(self, settings: Settings, stop_util_event: threading.Event(), stop_stream_event: threading.Event()):
         """
@@ -37,6 +39,7 @@ class TransportServer(TransportBase, ABC):
 
         self._client_address = None
         self.__ban_list = BanList(settings.reconnect_attempt)
+        self.__net_interfaces_info = NetInterfacesInfo(self._udp_port)
 
         self._init_tcp_connection()
 
@@ -120,15 +123,16 @@ class TransportServer(TransportBase, ABC):
 
     def _initialize_socket(self):
         self._server_tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server_tcp_socket.bind(('0.0.0.0', self._tcp_port))
+        self._server_tcp_socket.bind(('', self._udp_port))
         self._server_tcp_socket.settimeout(DefaultValuesAndOptions.get_timeout())
-        self._server_tcp_socket.listen(1)
+        self._server_tcp_socket.listen()
 
     def _established_connection(self):
         is_log = True
         while not self._stop_util_event.is_set():
             if is_log:
-                logging.info(f'Authenticate server started and awaiting client connection')
+                logging.info(f'Authenticate server started and awaiting client connection on next INET interfaces:'
+                             f'{os.linesep}{self.__net_interfaces_info.get_formatted_info_str()}')
 
             try:
                 self._client_tcp_socket, client_address = self._server_tcp_socket.accept()

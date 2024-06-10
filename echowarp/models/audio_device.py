@@ -196,6 +196,4 @@ class AudioDevice:
                     chardet.detect(string.encode(self.device_encoding_names))['encoding']
                 )
             except (UnicodeEncodeError, UnicodeDecodeError):
-                pass
-
-        return string
+                return string
