@@ -299,10 +299,6 @@ class ConfigParser:
             with open(file_path, 'r', encoding=locale.getpreferredencoding()) as file:
                 file_str = file.read()
         except Exception as e:
-            try:
-                with open(file_path, 'r', encoding=locale.getpreferredencoding()) as file:
-                    file_str = file.read()
-            except Exception as e:
-                raise ValueError(f"Failed to decode config file: {e}")
+            raise ValueError(f"Failed to decode config file: {e}")
 
         return file_str
