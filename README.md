@@ -269,5 +269,5 @@ python -m echowarp.main --help
 ### Client Mode with Custom Server Address and Port:
 
 ```bash
-python -m echowarp.main --client --server_addr 192.168.1.5 --udp_port 6555
+python -m echowarp.main --client --server_address 192.168.1.5 --udp_port 6555
 ```

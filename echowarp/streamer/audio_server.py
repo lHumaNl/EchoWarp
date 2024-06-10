@@ -42,12 +42,24 @@ class ServerStreamer(TransportServer):
         Captures audio from the selected device, encodes it, encrypts, and sends it to the client over UDP.
         This method continuously captures and sends audio until a stop event is triggered.
         """
-        stream = self._audio_device.py_audio.open(format=pyaudio.paInt16,
-                                                  channels=self._audio_device.channels,
-                                                  rate=self._audio_device.sample_rate,
-                                                  input=True,
-                                                  input_device_index=self._audio_device.device_index,
-                                                  frames_per_buffer=1024)
+        if self._audio_device.is_input_device:
+            stream = self._audio_device.py_audio.open(
+                format=pyaudio.paInt16,
+                channels=self._audio_device.channels,
+                rate=self._audio_device.sample_rate,
+                input=True,
+                input_device_index=self._audio_device.device_index,
+                frames_per_buffer=1024
+            )
+        else:
+            stream = self._audio_device.py_audio.open(
+                format=pyaudio.paInt16,
+                channels=self._audio_device.channels,
+                rate=self._audio_device.sample_rate,
+                output=True,
+                output_device_index=self._audio_device.device_index,
+                frames_per_buffer=1024
+            )
 
         self._print_udp_listener_and_start_stream()
         try:

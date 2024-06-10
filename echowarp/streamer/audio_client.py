@@ -39,13 +39,22 @@ class ClientStreamReceiver(TransportClient):
 
         This method handles continuous audio streaming until a stop event is triggered.
         """
-        stream = self._audio_device.py_audio.open(
-            format=pyaudio.paInt16,
-            channels=self._audio_device.channels,
-            rate=self._audio_device.sample_rate,
-            output=True,
-            output_device_index=self._audio_device.device_index
-        )
+        if self._audio_device.is_input_device:
+            stream = self._audio_device.py_audio.open(
+                format=pyaudio.paInt16,
+                channels=self._audio_device.channels,
+                rate=self._audio_device.sample_rate,
+                input=True,
+                input_device_index=self._audio_device.device_index
+            )
+        else:
+            stream = self._audio_device.py_audio.open(
+                format=pyaudio.paInt16,
+                channels=self._audio_device.channels,
+                rate=self._audio_device.sample_rate,
+                output=True,
+                output_device_index=self._audio_device.device_index
+            )
 
         self._print_udp_listener_and_start_stream()
         try:

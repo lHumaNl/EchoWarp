@@ -30,8 +30,8 @@ class TransportClient(TransportBase, ABC):
         super().__init__(settings, stop_util_event, stop_stream_event)
         self._server_address = settings.server_address
 
+        self._udp_socket.bind(('', self._udp_port))
         self._init_tcp_connection()
-        self._udp_socket.bind((self._server_address, self._udp_port))
 
     def __authenticate_on_server(self):
         """
