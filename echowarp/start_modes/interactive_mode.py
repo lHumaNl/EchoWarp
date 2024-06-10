@@ -134,9 +134,14 @@ class InteractiveSettings:
         if password.strip() == '':
             password = None
 
+        if is_server_mode:
+            reconnect_str = 'number of failed client authorization before ban (0=infinite)'
+        else:
+            reconnect_str = 'number of failed connections before closing the application (0=infinite)'
+
         reconnect_attempt = InteractiveSettings.__input_in_interactive_int_value(
             DefaultValuesAndOptions.get_default_reconnect_attempt(),
-            'count of reconnect attempt'
+            reconnect_str
         )
 
         ignore_device_encoding_names = InteractiveSettings.__select_in_interactive_from_values(
