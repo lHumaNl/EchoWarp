@@ -1,2 +1,2 @@
-__version__ = '0.3.2'
+__version__ = '0.3.3'
 __comparability_version__ = '0.3.1'
