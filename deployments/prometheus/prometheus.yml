@@ -1,0 +1,13 @@
+# Prometheus configuration for EchoWarp monitoring
+# Scrape metrics from EchoWarp service
+
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  # Scrape EchoWarp application metrics
+  - job_name: 'echowarp'
+    static_configs:
+      - targets: ['echowarp:8080']
+    metrics_path: '/metrics'

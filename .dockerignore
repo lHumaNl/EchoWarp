@@ -1,0 +1,67 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+echowarp
+EchoWarp
+*.exe
+*.dll
+*.so
+*.dylib
+*.syso
+*.test
+*.out
+coverage.out
+coverage.html
+coverage*.out
+dist/
+bin/
+build/bin/
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+
+# Test and CI
+test/
+.github/
+
+# Temporary files
+.DS_Store
+*.log
+*.tmp
+tmp/
+temp/
+
+# Config files with sensitive data
+*.local.yaml
+*.local.yml
+config.local.*
+.env
+.env.*
+
+# TLS certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Distribution archives
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# Debug / profiling
+__debug_bin*
+*.prof
+*.pprof

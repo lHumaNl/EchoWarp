@@ -1,0 +1,43 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Go source files - always LF
+*.go text eol=lf
+
+# Documentation files - always LF
+*.md text eol=lf
+
+# Configuration files - always LF
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Shell scripts - always LF
+*.sh text eol=lf
+
+# Go module files - always LF
+*.mod text eol=lf
+*.sum text eol=lf
+
+# Build files - always LF
+Makefile text eol=lf
+Dockerfile text eol=lf
+
+# Windows-specific files - CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary

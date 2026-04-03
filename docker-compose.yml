@@ -1,0 +1,67 @@
+# EchoWarp Docker Compose Configuration
+# Includes EchoWarp application with Prometheus and Grafana monitoring stack
+
+version: '3.8'
+
+services:
+  # EchoWarp Application Service
+  echowarp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: echowarp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # API and metrics endpoint
+      - "4415:4415"  # Signaling port
+    environment:
+      - ECHOWARP_LOG_LEVEL=info
+    networks:
+      - echowarp-net
+
+  # Prometheus Monitoring Service
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: echowarp-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deployments/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - echowarp-net
+
+  # Grafana Visualization Service
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: echowarp-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=echowarp
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deployments/grafana:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      - echowarp-net
+    depends_on:
+      - prometheus
+
+# Network configuration
+networks:
+  echowarp-net:
+    driver: bridge
+
+# Persistent data volumes
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

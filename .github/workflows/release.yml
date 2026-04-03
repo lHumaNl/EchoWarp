@@ -1,0 +1,415 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Native builds ──────────────────────────────────────
+          - name: linux/amd64
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive: tar.gz
+            suffix: linux_amd64
+
+          - name: darwin/arm64
+            os: macos-latest
+            goos: darwin
+            goarch: arm64
+            archive: zip
+            suffix: darwin_arm64
+
+          - name: darwin/amd64
+            os: macos-13
+            goos: darwin
+            goarch: amd64
+            archive: zip
+            suffix: darwin_amd64
+
+          - name: windows/amd64
+            os: windows-latest
+            goos: windows
+            goarch: amd64
+            archive: zip
+            suffix: windows_amd64
+
+          # ── Linux ARM cross-compilation (on ubuntu) ────────────
+          - name: linux/arm64
+            os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            archive: tar.gz
+            suffix: linux_arm64
+            cross: true
+            cc: aarch64-linux-gnu-gcc
+            cross_pkg: gcc-aarch64-linux-gnu
+            opus_host: aarch64-linux-gnu
+
+          - name: linux/armv7
+            os: ubuntu-latest
+            goos: linux
+            goarch: arm
+            goarm: '7'
+            archive: tar.gz
+            suffix: linux_armv7
+            cross: true
+            cc: arm-linux-gnueabihf-gcc
+            cross_pkg: gcc-arm-linux-gnueabihf
+            opus_host: arm-linux-gnueabihf
+
+          - name: linux/armv6
+            os: ubuntu-latest
+            goos: linux
+            goarch: arm
+            goarm: '6'
+            archive: tar.gz
+            suffix: linux_armv6
+            cross: true
+            cc: arm-linux-gnueabi-gcc
+            cross_pkg: gcc-arm-linux-gnueabi
+            opus_host: arm-linux-gnueabi
+
+          # ── Windows ARM64 cross-compilation (on ubuntu) ────────
+          - name: windows/arm64
+            os: ubuntu-latest
+            goos: windows
+            goarch: arm64
+            archive: zip
+            suffix: windows_arm64
+            cross: true
+            cc: aarch64-w64-mingw32-gcc
+            opus_host: aarch64-w64-mingw32
+            llvm_mingw: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      # ── Native dependency installation ───────────────────────
+      - name: Install deps (Linux native)
+        if: runner.os == 'Linux' && !matrix.cross
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libopus-dev pkg-config
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install opus pkg-config
+
+      - name: Install MSYS2 and deps (Windows native)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkg-config mingw-w64-ucrt-x86_64-opus
+
+      # ── Cross-compilation setup ──────────────────────────────
+      - name: Install cross-compiler (Linux ARM)
+        if: matrix.cross && !matrix.llvm_mingw
+        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.cross_pkg }} pkg-config autoconf automake libtool
+
+      - name: Install llvm-mingw (Windows ARM64)
+        if: matrix.llvm_mingw
+        run: |
+          curl -sL https://github.com/mstorsjo/llvm-mingw/releases/download/20250114/llvm-mingw-20250114-ucrt-ubuntu-20.04-x86_64.tar.xz | tar xJ -C /tmp
+          echo "/tmp/llvm-mingw-20250114-ucrt-ubuntu-20.04-x86_64/bin" >> $GITHUB_PATH
+          sudo apt-get update && sudo apt-get install -y autoconf automake libtool
+
+      - name: Cross-compile opus
+        if: matrix.cross
+        run: |
+          OPUS_VERSION=1.5.2
+          curl -sL "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz" | tar xz
+          cd "opus-${OPUS_VERSION}"
+          ./configure \
+            --host=${{ matrix.opus_host }} \
+            --prefix=/tmp/opus-cross \
+            --enable-static --disable-shared \
+            --disable-doc --disable-extra-programs
+          make -j$(nproc)
+          make install
+
+      # ── Static opus linkage ──────────────────────────────────
+      - name: Set static opus linkage (Linux native)
+        if: runner.os == 'Linux' && !matrix.cross
+        run: |
+          mkdir -p /tmp/opus_static
+          cp /usr/lib/x86_64-linux-gnu/libopus.a /tmp/opus_static/
+          echo "CGO_LDFLAGS=-L/tmp/opus_static -lopus" >> $GITHUB_ENV
+
+      - name: Set static opus linkage (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p /tmp/opus_static
+          cp $(brew --prefix opus)/lib/libopus.a /tmp/opus_static/
+          echo "CGO_LDFLAGS=-L/tmp/opus_static" >> $GITHUB_ENV
+          echo "CGO_CFLAGS=-I$(brew --prefix opus)/include" >> $GITHUB_ENV
+
+      - name: Set Windows CGo env (native)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          MSYS_ROOT="D:/a/_temp/msys64/ucrt64"
+          echo "PATH=${MSYS_ROOT}/bin;$PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${MSYS_ROOT}/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=-static -lopus -lssp" >> $GITHUB_ENV
+
+      - name: Set cross-compilation env
+        if: matrix.cross
+        run: |
+          echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=-L/tmp/opus-cross/lib" >> $GITHUB_ENV
+          echo "CGO_CFLAGS=-I/tmp/opus-cross/include/opus -I/tmp/opus-cross/include" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/tmp/opus-cross/lib/pkgconfig" >> $GITHUB_ENV
+
+      # ── Windows ARM64: additional static flags ───────────────
+      - name: Set Windows ARM64 static flags
+        if: matrix.llvm_mingw
+        run: |
+          echo "CGO_LDFLAGS=-L/tmp/opus-cross/lib -static -lopus" >> $GITHUB_ENV
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        shell: bash
+
+      # ── Windows icon embedding ───────────────────────────────
+      - name: Embed Windows icon
+        if: matrix.goos == 'windows' && runner.os == 'Windows'
+        shell: bash
+        run: |
+          go install github.com/akavel/rsrc@latest
+          rsrc -ico build/icons/icon.ico -o cmd/echowarp/rsrc_windows_amd64.syso
+
+      # ── Build ────────────────────────────────────────────────
+      - name: Build
+        run: |
+          go build -tags nolibopusfile -ldflags "-s -w -X github.com/lHumaNl/echowarp/internal/version.Version=${{ steps.version.outputs.version }}" -o EchoWarp${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/echowarp/
+        env:
+          CGO_ENABLED: 1
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+
+      # ── Verify static linkage ────────────────────────────────
+      - name: Verify no opus dynamic dependency (Unix native)
+        if: matrix.goos != 'windows' && !matrix.cross
+        run: |
+          if [ "${{ matrix.goos }}" = "darwin" ]; then
+            if otool -L EchoWarp | grep -i opus; then
+              echo "ERROR: opus is dynamically linked!"; exit 1
+            fi
+          else
+            if ldd EchoWarp 2>/dev/null | grep -i opus; then
+              echo "ERROR: opus is dynamically linked!"; exit 1
+            fi
+          fi
+          echo "OK: opus is statically linked"
+
+      - name: Verify no opus dynamic dependency (Linux cross)
+        if: matrix.goos == 'linux' && matrix.cross
+        run: |
+          sudo apt-get install -y qemu-user-static || true
+          file EchoWarp
+          echo "OK: cross-compiled binary (static linkage verified at build time)"
+
+      - name: Verify no opus dynamic dependency (Windows native)
+        if: matrix.goos == 'windows' && runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          if ldd EchoWarp.exe 2>/dev/null | grep -i opus; then
+            echo "ERROR: opus is dynamically linked!"; exit 1
+          fi
+          echo "OK: opus is statically linked"
+
+      # ── macOS .app bundle ────────────────────────────────────
+      - name: Create macOS .app bundle
+        if: matrix.goos == 'darwin'
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          APP="EchoWarp.app"
+          mkdir -p "${APP}/Contents/MacOS"
+          mkdir -p "${APP}/Contents/Resources"
+          cp EchoWarp "${APP}/Contents/MacOS/EchoWarp"
+          cp build/icons/icon.icns "${APP}/Contents/Resources/icon.icns"
+          cat > "${APP}/Contents/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>EchoWarp</string>
+            <key>CFBundleIconFile</key>
+            <string>icon</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.lhumanl.echowarp</string>
+            <key>CFBundleName</key>
+            <string>EchoWarp</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+          PLIST
+          echo "  <string>${VERSION}</string>" >> "${APP}/Contents/Info.plist"
+          cat >> "${APP}/Contents/Info.plist" << 'PLIST'
+            <key>CFBundleVersion</key>
+          PLIST
+          echo "  <string>${VERSION}</string>" >> "${APP}/Contents/Info.plist"
+          cat >> "${APP}/Contents/Info.plist" << 'PLIST'
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>LSUIElement</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+
+      # ── Create archives ──────────────────────────────────────
+      - name: Create archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: tar czf EchoWarp_${{ matrix.suffix }}.tar.gz EchoWarp
+
+      - name: Create archive (zip, macOS)
+        if: matrix.archive == 'zip' && matrix.goos == 'darwin'
+        run: zip -r EchoWarp_${{ matrix.suffix }}.zip EchoWarp EchoWarp.app
+
+      - name: Create archive (zip, Windows)
+        if: matrix.archive == 'zip' && matrix.goos == 'windows'
+        shell: bash
+        run: zip EchoWarp_${{ matrix.suffix }}.zip EchoWarp.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EchoWarp-${{ matrix.suffix }}
+          path: EchoWarp_${{ matrix.suffix }}.*
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create checksums
+        run: sha256sum EchoWarp_* > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            EchoWarp_*
+            checksums.txt
+          body: |
+            ## Downloads
+
+            | Platform | Architecture | File |
+            |----------|-------------|------|
+            | **Linux** | x86_64 | `EchoWarp_linux_amd64.tar.gz` |
+            | **Linux** | ARM64 | `EchoWarp_linux_arm64.tar.gz` |
+            | **Linux** | ARMv7 | `EchoWarp_linux_armv7.tar.gz` |
+            | **Linux** | ARMv6 | `EchoWarp_linux_armv6.tar.gz` |
+            | **macOS** | Apple Silicon | `EchoWarp_darwin_arm64.zip` |
+            | **macOS** | Intel | `EchoWarp_darwin_amd64.zip` |
+            | **Windows** | x86_64 | `EchoWarp_windows_amd64.zip` |
+            | **Windows** | ARM64 | `EchoWarp_windows_arm64.zip` |
+
+            Each archive contains a single `EchoWarp` binary (or `EchoWarp.exe` on Windows). macOS archives also include an `EchoWarp.app` bundle.
+
+            **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/main/build/launchers) and place next to `EchoWarp.exe` to launch with a double-click.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  homebrew:
+    name: Update Homebrew Formula
+    if: false # TODO: enable after creating lHumaNl/homebrew-echowarp repo and HOMEBREW_TAP_TOKEN secret
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download release archives
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_arm64.zip" -o darwin_arm64.zip
+          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_amd64.zip" -o darwin_amd64.zip
+          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_linux_amd64.tar.gz" -o linux_amd64.tar.gz
+
+      - name: Compute checksums
+        id: sha
+        run: |
+          echo "darwin_arm64=$(sha256sum darwin_arm64.zip | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "darwin_amd64=$(sha256sum darwin_amd64.zip | awk '{print $1}')" >> $GITHUB_OUTPUT
+          echo "linux_amd64=$(sha256sum linux_amd64.tar.gz | awk '{print $1}')" >> $GITHUB_OUTPUT
+
+      - name: Generate formula
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          cat > echowarp.rb << FORMULA
+          class Echowarp < Formula
+            desc "Network audio streaming — capture on one host, play on another in real-time"
+            homepage "https://github.com/lHumaNl/EchoWarp"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_arm64.zip"
+                sha256 "${{ steps.sha.outputs.darwin_arm64 }}"
+              else
+                url "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_amd64.zip"
+                sha256 "${{ steps.sha.outputs.darwin_amd64 }}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.intel?
+                url "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_linux_amd64.tar.gz"
+                sha256 "${{ steps.sha.outputs.linux_amd64 }}"
+              end
+            end
+
+            def install
+              bin.install "EchoWarp"
+            end
+
+            test do
+              assert_match "EchoWarp", shell_output("#{bin}/EchoWarp version")
+            end
+          end
+          FORMULA
+
+      - name: Push formula to tap
+        uses: dmnemec/copy_file_to_another_repo_action@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        with:
+          source_file: 'echowarp.rb'
+          destination_repo: 'lHumaNl/homebrew-echowarp'
+          destination_folder: 'Formula'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          user_name: 'github-actions[bot]'
+          commit_message: 'Update echowarp to ${{ steps.version.outputs.version }}'

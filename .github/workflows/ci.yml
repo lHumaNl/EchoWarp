@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libopus-dev pkg-config
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install opus pkg-config
+
+      - name: Install MSYS2 and deps (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-pkg-config mingw-w64-ucrt-x86_64-opus
+
+      - name: Set Windows CGo env
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          MSYS_ROOT="D:/a/_temp/msys64/ucrt64"
+          echo "PATH=${MSYS_ROOT}/bin;$PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${MSYS_ROOT}/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CGO_ENABLED=1" >> $GITHUB_ENV
+          echo "CGO_LDFLAGS=-static -lopus -lssp" >> $GITHUB_ENV
+
+      - name: Run tests
+        run: go test -tags nolibopusfile -race -short -timeout 120s ./...
+
+      - name: Build
+        run: go build -tags nolibopusfile -o EchoWarp${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/echowarp/
+        env:
+          CGO_ENABLED: 1
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libopus-dev pkg-config
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --build-tags nolibopusfile

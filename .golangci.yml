@@ -1,0 +1,163 @@
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.26"
+
+output:
+  formats:
+    text:
+      path: stdout
+      colors: true
+      print-issued-lines: true
+      print-linter-name: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/lHumaNl/echowarp
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+    - ineffassign
+    - gocritic
+    - prealloc
+    - bodyclose
+    - dogsled
+    - goprintffuncname
+    - nakedret
+    - noctx
+    - unconvert
+    - unparam
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+    staticcheck:
+      checks: ["all"]
+
+    misspell:
+      locale: US
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        # exported rule disabled — too many false positives with bubbletea/cobra patterns
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+          arguments:
+            - allowRegex: "^(cmd|args|ctx|r|w|msg)$"
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - dupImport
+        - ifElseChain
+        - octalLiteral
+        - whyNoLint
+        - wrapperFunc
+        - hugeParam
+        - commentedOutCode
+        - rangeValCopy
+        - deprecatedComment
+        - paramTypeCombine
+        - unnamedResult
+
+    unparam:
+      check-exported: false
+
+    nakedret:
+      max-func-lines: 30
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+
+    whitespace:
+      multi-if: false
+      multi-func: false
+
+  exclusions:
+    paths:
+      - vendor
+      - test/testdata
+      - build
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - dupl
+          - gocritic
+          - gosec
+          - noctx
+          - dogsled
+          - bodyclose
+          - unparam
+          - prealloc
+          - revive
+          - govet
+          - staticcheck
+          - unused
+          - unconvert
+          - ineffassign
+
+      - path: internal/
+        linters:
+          - dupl
+
+      - linters:
+          - staticcheck
+        text: "SA1019:"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+severity:
+  default: error
