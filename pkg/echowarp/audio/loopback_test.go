@@ -29,7 +29,6 @@ func TestDetectBlackHole_NotInstalled(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-
 func TestLoopbackDevice_Types(t *testing.T) {
 	ld := LoopbackDevice{
 		OutputDevice: AudioDevice{Name: "Speakers", Channels: 2},
