@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -672,6 +673,9 @@ func TestHandleConfig_HidesPassword(t *testing.T) {
 // ── Discovery tests ──────────────────────────────────────────────────────────
 
 func TestHandleDiscover_NoBody(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - zeroconf crashes on mDNS browse cleanup")
+	}
 	// Discovery with no body should use default timeout and return an empty list
 	// (no real mDNS services on CI/test hosts). We just assert the shape is correct.
 	_, ts := setupTestHandlersServer(t)
@@ -687,6 +691,9 @@ func TestHandleDiscover_NoBody(t *testing.T) {
 }
 
 func TestHandleDiscover_InvalidJSON(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - zeroconf crashes on mDNS browse cleanup")
+	}
 	_, ts := setupTestHandlersServer(t)
 
 	resp, err := http.Post(ts.URL+"/api/v1/discover", "application/json", bytes.NewBufferString(`{bad}`))
@@ -702,6 +709,9 @@ func TestHandleDiscover_InvalidJSON(t *testing.T) {
 }
 
 func TestHandleDiscover_ZeroTimeout_UsesDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - zeroconf crashes on mDNS browse cleanup")
+	}
 	// timeout_ms: 0 should use default (5000ms). We send a very short explicit
 	// timeout so the test finishes fast; just validate status + JSON array shape.
 	_, ts := setupTestHandlersServer(t)
