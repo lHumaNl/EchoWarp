@@ -445,10 +445,12 @@ func TestSetupDiscovery_Enabled(t *testing.T) {
 	_ = cmd.ParseFlags([]string{"--server-name", "test-server"})
 
 	cfg := &config.Config{Port: 4415}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	setupDiscovery(ctx, cmd, cfg, nil)
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestSetupDiscovery_WithCustomName(t *testing.T) {
@@ -456,10 +458,12 @@ func TestSetupDiscovery_WithCustomName(t *testing.T) {
 	_ = cmd.ParseFlags([]string{"--server-name", "my-custom-server"})
 
 	cfg := &config.Config{Port: 4415, Password: "test"}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	setupDiscovery(ctx, cmd, cfg, nil)
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestSetupDiscovery_EmptyServerName(t *testing.T) {
@@ -467,10 +471,12 @@ func TestSetupDiscovery_EmptyServerName(t *testing.T) {
 	_ = cmd.ParseFlags([]string{"--server-name", ""})
 
 	cfg := &config.Config{Port: 4415}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	setupDiscovery(ctx, cmd, cfg, nil)
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestSetupDiscovery_NoServerNameFlag(t *testing.T) {
@@ -478,10 +484,12 @@ func TestSetupDiscovery_NoServerNameFlag(t *testing.T) {
 	_ = cmd.ParseFlags([]string{})
 
 	cfg := &config.Config{Port: 4415}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	setupDiscovery(ctx, cmd, cfg, nil)
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestSetupDiscovery_MulticastAddress(t *testing.T) {
@@ -708,10 +716,12 @@ func TestSetupDiscovery_WithPassword(t *testing.T) {
 	_ = cmd.ParseFlags([]string{"--server-name", "test-server"})
 
 	cfg := &config.Config{Port: 4415, Password: "secret"}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	setupDiscovery(ctx, cmd, cfg, nil)
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestSetupDiscovery_WithTLSCert(t *testing.T) {
@@ -719,10 +729,12 @@ func TestSetupDiscovery_WithTLSCert(t *testing.T) {
 	_ = cmd.ParseFlags([]string{"--server-name", "test-server"})
 
 	cfg := &config.Config{Port: 4415, TLSCert: "/path/cert.pem"}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	setupDiscovery(ctx, cmd, cfg, nil)
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
 }
 
 func TestOverrideLogFileFlag_Enabled(t *testing.T) {
