@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/lHumaNl/echowarp/internal/config"
@@ -423,6 +424,9 @@ func TestClientCommand_Long(t *testing.T) {
 }
 
 func TestRunClient_InvalidConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bubbletea TUI hangs without terminal on Windows CI")
+	}
 	cmd := newClientCmd()
 	_ = cmd.ParseFlags([]string{"--port", "-1", "--discover=false"})
 
@@ -433,6 +437,9 @@ func TestRunClient_InvalidConfig(t *testing.T) {
 }
 
 func TestRunClient_MissingConfigFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bubbletea TUI hangs without terminal on Windows CI")
+	}
 	cmd := newClientCmd()
 	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml", "--discover=false"})
 

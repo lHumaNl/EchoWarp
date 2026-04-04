@@ -397,8 +397,9 @@ func TestDeleteConfig_NotFound(t *testing.T) {
 }
 
 func TestConfigsDir(t *testing.T) {
-	t.Setenv("ECHOWARP_CONFIG_DIR", "/tmp/ew-test")
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
 
-	assert.Equal(t, "/tmp/ew-test/configs/server", ConfigsDir(ModeServer))
-	assert.Equal(t, "/tmp/ew-test/configs/client", ConfigsDir(ModeClient))
+	assert.Equal(t, filepath.Join(dir, "configs", "server"), ConfigsDir(ModeServer))
+	assert.Equal(t, filepath.Join(dir, "configs", "client"), ConfigsDir(ModeClient))
 }

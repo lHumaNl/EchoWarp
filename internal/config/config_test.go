@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -112,6 +113,9 @@ func TestSaveToFile_CreatesValidYAML(t *testing.T) {
 }
 
 func TestSaveToFile_CorrectPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permissions are not enforced on Windows")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "perms.yaml")
 
