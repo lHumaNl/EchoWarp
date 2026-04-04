@@ -492,7 +492,13 @@ func TestRunClient_SaveConfigToInvalidPath(t *testing.T) {
 	cmd := newClientCmd()
 	_ = cmd.ParseFlags([]string{"--device", "0", "--save-config", invalidPath, "--discover=false", "--no-interactive"})
 
-	err := runClient(cmd, []string{})
+	cfg := config.DefaultConfig()
+	cfg.Mode = config.ModeClient
+	cfg.Address = "127.0.0.1"
+	deviceID := uint32(0)
+	cfg.DeviceID = &deviceID
+
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid save path")
 	}
@@ -784,6 +790,9 @@ func TestExecuteClientMode_WithDeviceID(t *testing.T) {
 
 // TestRunClientInteractive_NoDevices tests runClientInteractive when no devices are available.
 func TestRunClientInteractive_NoDevices(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping interactive test in CI - requires terminal")
+	}
 	cmd := newClientCmd()
 	_ = cmd.ParseFlags([]string{})
 
@@ -792,17 +801,17 @@ func TestRunClientInteractive_NoDevices(t *testing.T) {
 		Reverse: false,
 	}
 
-	// This will fail on systems without audio devices
 	err := runClientInteractive(cmd, cfg)
-	// Error is expected on CI without audio hardware
 	if err == nil {
-		// If it succeeds, the function should have handled the case
 		t.Log("runClientInteractive succeeded - audio devices available")
 	}
 }
 
 // TestRunClientInteractive_ReverseMode tests runClientInteractive in reverse mode.
 func TestRunClientInteractive_ReverseMode(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping interactive test in CI - requires terminal")
+	}
 	cmd := newClientCmd()
 	_ = cmd.ParseFlags([]string{"--reverse"})
 
@@ -811,9 +820,7 @@ func TestRunClientInteractive_ReverseMode(t *testing.T) {
 		Reverse: true,
 	}
 
-	// This will try to list input devices in reverse mode
 	err := runClientInteractive(cmd, cfg)
-	// Error is expected on CI without audio hardware
 	if err == nil {
 		t.Log("runClientInteractive succeeded in reverse mode")
 	}

@@ -179,7 +179,6 @@ func TestBug7_PopupMuteIncoming_NoFlash(t *testing.T) {
 
 // TestBug7_Kick_SetsFlash verifies executeKick DOES set flashMsg.
 func TestBug7_Kick_SetsFlash(t *testing.T) {
-	t.Parallel()
 	origFunc := reasonsFilePathFunc
 	reasonsFilePathFunc = func() string { return filepath.Join(t.TempDir(), "reasons.json") }
 	defer func() { reasonsFilePathFunc = origFunc }()
@@ -196,7 +195,6 @@ func TestBug7_Kick_SetsFlash(t *testing.T) {
 
 // TestBug7_Ban_SetsFlash verifies executeBan DOES set flashMsg.
 func TestBug7_Ban_SetsFlash(t *testing.T) {
-	t.Parallel()
 	origFunc := reasonsFilePathFunc
 	reasonsFilePathFunc = func() string { return filepath.Join(t.TempDir(), "reasons.json") }
 	defer func() { reasonsFilePathFunc = origFunc }()

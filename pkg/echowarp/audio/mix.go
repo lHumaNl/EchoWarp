@@ -2,8 +2,12 @@
 package audio
 
 import (
+	"sync"
+
 	"golang.org/x/sys/cpu"
 )
+
+var simdMu sync.Mutex
 
 // mixFunc is the function signature for audio sample accumulation.
 type mixFunc func(dst, src []float32)
@@ -78,11 +82,15 @@ func setPureGo() {
 // DisableSIMD forces pure Go implementations. Call before any audio processing.
 // This is used by the --no-simd-optimization CLI flag.
 func DisableSIMD() {
+	simdMu.Lock()
+	defer simdMu.Unlock()
 	setPureGo()
 }
 
 // EnableSIMD re-enables hardware SIMD dispatch based on CPU capabilities.
 func EnableSIMD() {
+	simdMu.Lock()
+	defer simdMu.Unlock()
 	selectSIMD()
 }
 

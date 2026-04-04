@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lHumaNl/echowarp/internal/config"
 )
@@ -758,6 +759,9 @@ func uint32Ptr(v uint) *uint32 {
 
 // TestRunServerInteractive_NoDevices tests runServerInteractive when no devices are available.
 func TestRunServerInteractive_NoDevices(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping interactive test in CI - requires terminal")
+	}
 	cmd := newServerCmd()
 	_ = cmd.ParseFlags([]string{})
 
@@ -766,9 +770,7 @@ func TestRunServerInteractive_NoDevices(t *testing.T) {
 		Reverse: false,
 	}
 
-	// This will fail on systems without audio devices
 	err := runServerInteractive(cmd, cfg)
-	// Error is expected on CI without audio hardware
 	if err == nil {
 		t.Log("runServerInteractive succeeded - audio devices available")
 	}
@@ -776,6 +778,9 @@ func TestRunServerInteractive_NoDevices(t *testing.T) {
 
 // TestRunServerInteractive_ReverseMode tests runServerInteractive in reverse mode.
 func TestRunServerInteractive_ReverseMode(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping interactive test in CI - requires terminal")
+	}
 	cmd := newServerCmd()
 	_ = cmd.ParseFlags([]string{"--reverse"})
 
@@ -784,9 +789,7 @@ func TestRunServerInteractive_ReverseMode(t *testing.T) {
 		Reverse: true,
 	}
 
-	// This will try to list output devices in reverse mode
 	err := runServerInteractive(cmd, cfg)
-	// Error is expected on CI without audio hardware
 	if err == nil {
 		t.Log("runServerInteractive succeeded in reverse mode")
 	}
@@ -815,10 +818,13 @@ func TestSetupDiscovery_WithAllOptions(t *testing.T) {
 		Password: "secret",
 		TLSCert:  "/path/cert.pem",
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	setupDiscovery(ctx, cmd, cfg, nil)
+	// Wait for context to expire so zeroconf goroutines shut down cleanly.
+	<-ctx.Done()
+	time.Sleep(50 * time.Millisecond)
 }
 
 // TestRunServer_NilDeviceID tests that config with nil DeviceID passes validation
