@@ -1,0 +1,453 @@
+// Package cli provides the command-line interface for EchoWarp using Cobra.
+// It defines subcommands for server, client, daemon, devices, config, update, and version.
+package cli
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+
+	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/version"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
+)
+
+// NewRootCmd creates the root command with all subcommands attached.
+// The root command handles global flags and delegates to subcommands.
+// When run without arguments it launches an interactive quick-start menu.
+func NewRootCmd() *cobra.Command {
+	auth.Version = version.Version
+
+	rootCmd := &cobra.Command{
+		Use:   "echowarp",
+		Short: "EchoWarp — network audio streaming tool",
+		Long: fmt.Sprintf(`EchoWarp v%s — network audio streaming tool
+
+EchoWarp is a network tool for real-time audio streaming between two hosts.
+It captures audio from a device on one computer and plays it on another in real-time over the network.`, version.Version),
+		Example: `  echowarp                           # Interactive quick-start menu
+  echowarp server                      # Start server with TUI device selection
+  echowarp server -p 4415 -d 0         # Start server on port 4415 with device 0
+  echowarp client -a 192.168.1.10      # Connect to server
+  echowarp client --discover           # Auto-discover server in LAN
+  echowarp devices                     # List audio devices
+  echowarp doctor                      # Diagnose environment`,
+		Version:       version.Version,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          rootRunE,
+	}
+
+	rootCmd.AddCommand(
+		newVersionCmd(),
+		newDevicesCmd(),
+		newServerCmd(),
+		newClientCmd(),
+		newConfigCmd(),
+		newDaemonCmd(),
+		newUpdateCmd(),
+		newCompletionCmd(),
+		newDoctorCmd(),
+	)
+
+	return rootCmd
+}
+
+// rootRunE is executed when echowarp is invoked without a subcommand.
+// Launches an interactive quick-start menu.
+func rootRunE(cmd *cobra.Command, args []string) error {
+	cfgPath := defaultConfigPath()
+	hasConfig := false
+	if _, err := os.Stat(cfgPath); err == nil {
+		hasConfig = true
+	}
+
+	m := newQuickStartModel(hasConfig, cfgPath)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	finalModel, err := p.Run()
+	if err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	result, ok := finalModel.(quickStartModel)
+	if !ok || result.quitting {
+		return nil
+	}
+
+	return result.executeChoice(cmd)
+}
+
+// ─── Quick-start model ────────────────────────────────────────────────────────
+
+type quickStartChoice int
+
+const (
+	choiceStartServer quickStartChoice = iota
+	choiceStartClient
+	choiceConfigShow
+	choiceDoctor
+	choiceDevices
+	choiceHelp
+)
+
+type quickStartScreen int
+
+const (
+	qsScreenMenu    quickStartScreen = iota
+	qsScreenLoading                  // async content loading (e.g. doctor)
+	qsScreenResult                   // showing loaded content in a viewport
+)
+
+// resultReadyMsg carries async-loaded content for the result screen.
+type resultReadyMsg struct {
+	title   string
+	content string
+}
+
+type quickStartItem struct {
+	choice quickStartChoice
+	title  string
+	desc   string
+}
+
+func (i quickStartItem) Title() string       { return i.title }
+func (i quickStartItem) Description() string { return i.desc }
+func (i quickStartItem) FilterValue() string { return i.title }
+
+type quickStartModel struct {
+	screen      quickStartScreen
+	list        list.Model
+	viewport    viewport.Model
+	spinner     spinner.Model
+	hasConfig   bool
+	cfgPath     string
+	selected    *quickStartChoice
+	quitting    bool
+	resultTitle string
+	width       int
+	height      int
+}
+
+var (
+	resultHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("205")).
+				PaddingLeft(1)
+
+	resultFooterStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241")).
+				PaddingLeft(1)
+
+	loadingStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")).
+			PaddingLeft(2).
+			PaddingTop(2)
+)
+
+func newQuickStartModel(hasConfig bool, cfgPath string) quickStartModel {
+	var items []list.Item
+
+	items = []list.Item{
+		quickStartItem{choiceStartServer, "🎙  Server", "Create audio server (clients connect to stream)"},
+		quickStartItem{choiceStartClient, "🎧  Client", "Connect to a running server"},
+	}
+	if hasConfig {
+		items = append(items, quickStartItem{choiceConfigShow, "📋  Config", "Show current configuration"})
+	}
+	items = append(items,
+		quickStartItem{choiceDoctor, "🩺  Diagnostics", "Check audio & network health"},
+		quickStartItem{choiceDevices, "🔊  Devices", "List audio input/output devices"},
+		quickStartItem{choiceHelp, "❓  Help", "Commands, flags & examples"},
+	)
+
+	delegate := list.NewDefaultDelegate()
+	delegate.SetSpacing(0)
+
+	l := list.New(items, delegate, 60, 14+len(items)*2)
+	l.Title = fmt.Sprintf("EchoWarp v%s", version.Version)
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(false)
+	l.AdditionalShortHelpKeys = nil
+	l.AdditionalFullHelpKeys = nil
+	l.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).MarginBottom(1)
+
+	if hasConfig {
+		l.Title = fmt.Sprintf("EchoWarp v%s — %s", version.Version, shortenHome(cfgPath))
+	}
+
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	vp := viewport.New(80, 20)
+	vp.Style = lipgloss.NewStyle().PaddingLeft(1)
+
+	return quickStartModel{
+		screen:    qsScreenMenu,
+		list:      l,
+		viewport:  vp,
+		spinner:   sp,
+		hasConfig: hasConfig,
+		cfgPath:   cfgPath,
+		width:     80,
+		height:    24,
+	}
+}
+
+func (m quickStartModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m quickStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.list.SetSize(msg.Width, msg.Height-2)
+		m.viewport = viewport.New(msg.Width, m.viewportHeight())
+		m.viewport.Style = lipgloss.NewStyle().PaddingLeft(1)
+		return m, nil
+
+	case resultReadyMsg:
+		m.viewport.SetContent(msg.content)
+		m.viewport.GotoTop()
+		m.resultTitle = msg.title
+		m.screen = qsScreenResult
+		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case tea.KeyMsg:
+		switch m.screen {
+		case qsScreenMenu:
+			return m.updateMenu(msg)
+		case qsScreenLoading:
+			// Only allow quit during loading
+			if msg.String() == "ctrl+c" || msg.String() == "ctrl+q" {
+				m.quitting = true
+				return m, tea.Quit
+			}
+			return m, nil
+		case qsScreenResult:
+			return m.updateResult(msg)
+		}
+	}
+
+	// Pass through to viewport in result screen
+	if m.screen == qsScreenResult {
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+	}
+
+	// Pass through to list in menu screen
+	if m.screen == qsScreenMenu {
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m quickStartModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	case "enter":
+		if item, ok := m.list.SelectedItem().(quickStartItem); ok {
+			return m.handleChoice(item.choice)
+		}
+	}
+	var cmd tea.Cmd
+	m.list, cmd = m.list.Update(msg)
+	return m, cmd
+}
+
+func (m quickStartModel) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "backspace":
+		m.screen = qsScreenMenu
+		return m, nil
+	case "ctrl+q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+	}
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// handleChoice processes a menu selection.
+// Launch choices (server/client) quit TUI; view choices load content inline.
+func (m quickStartModel) handleChoice(choice quickStartChoice) (tea.Model, tea.Cmd) {
+	switch choice {
+	case choiceStartServer, choiceStartClient:
+		m.selected = &choice
+		return m, tea.Quit
+
+	case choiceDevices:
+		content := renderDevicesContent(m.width)
+		m.viewport.SetContent(content)
+		m.viewport.GotoTop()
+		m.resultTitle = "Audio Devices"
+		m.screen = qsScreenResult
+		return m, nil
+
+	case choiceConfigShow:
+		content := renderConfigContent(m.cfgPath, m.width)
+		m.viewport.SetContent(content)
+		m.viewport.GotoTop()
+		m.resultTitle = "Configuration"
+		m.screen = qsScreenResult
+		return m, nil
+
+	case choiceHelp:
+		content := renderHelpContent(m.width)
+		m.viewport.SetContent(content)
+		m.viewport.GotoTop()
+		m.resultTitle = "Help"
+		m.screen = qsScreenResult
+		return m, nil
+
+	case choiceDoctor:
+		m.screen = qsScreenLoading
+		cfgPath := m.cfgPath
+		return m, tea.Batch(
+			m.spinner.Tick,
+			func() tea.Msg {
+				var sb strings.Builder
+				RunDoctorToWriter(&sb, "", 4415, "", cfgPath)
+				return resultReadyMsg{title: "Diagnostics", content: sb.String()}
+			},
+		)
+	}
+
+	return m, nil
+}
+
+func (m quickStartModel) viewportHeight() int {
+	// header (3) + footer (2) = 5 lines reserved
+	h := m.height - 5
+	if h < 5 {
+		h = 5
+	}
+	return h
+}
+
+func (m quickStartModel) View() string {
+	if m.quitting {
+		return ""
+	}
+
+	switch m.screen {
+	case qsScreenMenu:
+		menuHelp := resultFooterStyle.Render("↑↓: navigate  enter: select  ^Q: quit")
+		return m.list.View() + "\n" + menuHelp
+
+	case qsScreenLoading:
+		return lipgloss.JoinVertical(lipgloss.Left,
+			resultHeaderStyle.Render(fmt.Sprintf("EchoWarp v%s", version.Version)),
+			"",
+			loadingStyle.Render(fmt.Sprintf("%s Running diagnostics, please wait…", m.spinner.View())),
+		)
+
+	case qsScreenResult:
+		return m.viewResult()
+	}
+
+	return ""
+}
+
+func (m quickStartModel) viewResult() string {
+	titleBar := resultHeaderStyle.Render(
+		fmt.Sprintf("EchoWarp  ›  %s", m.resultTitle),
+	)
+
+	scrollInfo := ""
+	if m.viewport.TotalLineCount() > m.viewport.Height {
+		pct := int(m.viewport.ScrollPercent() * 100)
+		scrollInfo = fmt.Sprintf(" %d%%", pct)
+	}
+
+	footerText := "esc: back  ↑↓: scroll  ^Q: quit" + scrollInfo
+	footer := resultFooterStyle.Render(footerText)
+
+	separator := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("238")).
+		Render(strings.Repeat("─", m.width))
+
+	// Resize viewport to fit available space
+	vpHeight := m.height - lipgloss.Height(titleBar) - lipgloss.Height(separator) - lipgloss.Height(footer) - 1
+	if vpHeight < 3 {
+		vpHeight = 3
+	}
+	m.viewport.Height = vpHeight
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		titleBar,
+		separator,
+		m.viewport.View(),
+		separator,
+		footer,
+	)
+}
+
+func (m quickStartModel) executeChoice(rootCmd *cobra.Command) error {
+	if m.selected == nil {
+		return nil
+	}
+
+	var subcmdName string
+	switch *m.selected {
+	case choiceStartServer:
+		subcmdName = "server"
+	case choiceStartClient:
+		subcmdName = "client"
+	default:
+		return nil
+	}
+
+	// Find the real subcommand and invoke its RunE — identical code path
+	// as running `echowarp server` or `echowarp client` directly.
+	for _, sub := range rootCmd.Commands() {
+		if sub.Name() == subcmdName {
+			if m.hasConfig {
+				_ = sub.Flags().Set("config", m.cfgPath)
+			}
+			return sub.RunE(sub, nil)
+		}
+	}
+	return fmt.Errorf("subcommand %q not found", subcmdName)
+}
+
+// defaultConfigPath returns the platform-default config file path.
+func defaultConfigPath() string {
+	return filepath.Join(config.EchoWarpDir(), "config.yaml")
+}
+
+// shortenHome replaces the user's home directory prefix with "~".
+func shortenHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(home, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return path
+	}
+	return "~/" + rel
+}

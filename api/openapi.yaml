@@ -1,0 +1,883 @@
+openapi: 3.0.3
+info:
+  title: EchoWarp API
+  description: |
+    REST API and WebSocket endpoints for remote EchoWarp audio streaming control.
+    
+    EchoWarp is a network audio streaming tool that uses WebRTC for low-latency audio transmission
+    with ECDH key exchange, HMAC-SHA256 authentication, and DTLS/SRTP encryption.
+    
+    ## Authentication
+    
+    All endpoints (except /healthz) require authentication:
+    - **Bearer Token**: If an API token is configured, include `Authorization: Bearer <token>` header
+    - **Localhost**: If no token is configured, only localhost connections are accepted
+    
+    ## Rate Limiting
+    
+    API requests are rate-limited to 100 requests per minute per IP address.
+    
+    ## Security
+    
+    - Request body limit: 1MB
+    - Security headers (OWASP recommended)
+    - TLS encryption (optional)
+  version: 1.0.0
+  contact:
+    name: EchoWarp Support
+    email: support@example.com
+    url: https://github.com/lHumaNl/echowarp
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://localhost:8080
+    description: Local development server (TLS)
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: health
+    description: Health and readiness checks
+  - name: status
+    description: Node status and version information
+  - name: streaming
+    description: Audio streaming control
+  - name: configuration
+    description: Configuration management
+  - name: monitoring
+    description: Statistics and monitoring
+  - name: websocket
+    description: Real-time event streaming
+  - name: metrics
+    description: Prometheus metrics
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      description: Returns 200 OK if the API server is running. Does not check node status.
+      operationId: getHealth
+      tags:
+        - health
+      security: []
+      responses:
+        '200':
+          description: API server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                  - version
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                    example: ok
+                  version:
+                    type: string
+                    example: "1.0.0"
+
+  /readyz:
+    get:
+      summary: Readiness check
+      description: Returns 200 if the node is ready to accept connections, 503 otherwise.
+      operationId: getReady
+      tags:
+        - health
+      security: []
+      responses:
+        '200':
+          description: Node is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+                    example: ready
+        '503':
+          description: Node is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/status:
+    get:
+      summary: Get node status
+      description: Returns the current operational status and uptime of the node.
+      operationId: getStatus
+      tags:
+        - status
+      responses:
+        '200':
+          description: Node status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+
+  /api/v1/version:
+    get:
+      summary: Get version information
+      description: Returns version, commit, build date, and Go version information.
+      operationId: getVersion
+      tags:
+        - status
+      responses:
+        '200':
+          description: Version information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionResponse'
+
+  /api/v1/stats:
+    get:
+      summary: Get connection statistics
+      description: Returns WebRTC connection statistics including bytes sent/received, latency, and jitter.
+      operationId: getStats
+      tags:
+        - monitoring
+      responses:
+        '200':
+          description: Connection statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionStats'
+
+  /api/v1/devices:
+    get:
+      summary: List audio devices
+      description: Returns a list of all available audio input and output devices on the system.
+      operationId: getDevices
+      tags:
+        - configuration
+      responses:
+        '200':
+          description: List of audio devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AudioDevice'
+        '500':
+          description: Failed to enumerate devices
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/clients:
+    get:
+      summary: List connected clients
+      description: Returns a list of connected clients (server mode only).
+      operationId: getClients
+      tags:
+        - monitoring
+      responses:
+        '200':
+          description: List of connected clients
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientsResponse'
+
+  /api/v1/config:
+    get:
+      summary: Get current configuration
+      description: Returns the current node configuration with sensitive fields redacted (password, TURN credentials).
+      operationId: getConfig
+      tags:
+        - configuration
+      responses:
+        '200':
+          description: Current configuration (redacted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeConfig'
+    post:
+      summary: Update configuration
+      description: |
+        Updates the node configuration. Only non-null fields in the request are updated.
+        Configuration can only be changed when the node is idle or stopped.
+      operationId: updateConfig
+      tags:
+        - configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigRequest'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: configured
+        '400':
+          description: Invalid JSON or malformed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot reconfigure while node is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      summary: Update configuration (alias)
+      description: Alias for POST /api/v1/config
+      operationId: putConfig
+      tags:
+        - configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigRequest'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: configured
+        '400':
+          description: Invalid JSON or malformed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot reconfigure while node is running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/start:
+    post:
+      summary: Start streaming
+      description: |
+        Starts audio streaming. Optionally accepts configuration overrides in the request body.
+        Only works when the node is idle or stopped.
+      operationId: startStreaming
+      tags:
+        - streaming
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigRequest'
+      responses:
+        '200':
+          description: Streaming started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [started]
+                    example: started
+        '400':
+          description: Invalid JSON in request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Node is already running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/stop:
+    post:
+      summary: Stop streaming
+      description: Stops audio streaming gracefully. Only works when the node is streaming or paused.
+      operationId: stopStreaming
+      tags:
+        - streaming
+      responses:
+        '200':
+          description: Streaming stopped successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [stopped]
+                    example: stopped
+        '409':
+          description: Node is not running
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Failed to stop node
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/pause:
+    post:
+      summary: Pause streaming
+      description: Temporarily suspends audio streaming. Only works when the node is streaming.
+      operationId: pauseStreaming
+      tags:
+        - streaming
+      responses:
+        '200':
+          description: Streaming paused successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [paused]
+                    example: paused
+        '409':
+          description: Cannot pause (not streaming)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/resume:
+    post:
+      summary: Resume streaming
+      description: Resumes audio streaming after being paused. Only works when the node is paused.
+      operationId: resumeStreaming
+      tags:
+        - streaming
+      responses:
+        '200':
+          description: Streaming resumed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [streaming]
+                    example: streaming
+        '409':
+          description: Cannot resume (not paused)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/shutdown:
+    post:
+      summary: Graceful shutdown
+      description: Initiates a graceful shutdown of the node and API server. The server will stop accepting new connections and close existing ones.
+      operationId: shutdown
+      tags:
+        - streaming
+      responses:
+        '200':
+          description: Shutdown initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [shutting down]
+                    example: shutting down
+
+  /ws/v1/events:
+    get:
+      summary: WebSocket event stream
+      description: |
+        WebSocket endpoint for real-time event notifications.
+        
+        The server sends JSON-encoded events when various state changes occur:
+        - `connected`: Connection established
+        - `disconnected`: Connection closed
+        - `error`: Error occurred
+        - `reconnecting`: Reconnection attempt
+        - `stats_update`: Periodic statistics update
+        - `client_joined`: New client connected (server mode)
+        - `client_left`: Client disconnected (server mode)
+        
+        ## Event Format
+        
+        All events have the following structure:
+        ```json
+        {
+          "type": "<event_type>",
+          "data": <event_specific_data>
+        }
+        ```
+      operationId: eventStream
+      tags:
+        - websocket
+      responses:
+        '101':
+          description: Switching to WebSocket protocol
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Exposes Prometheus-compatible metrics for monitoring and observability.
+      operationId: getMetrics
+      tags:
+        - metrics
+      responses:
+        '200':
+          description: Prometheus metrics in text format
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP echowarp_connections_total Total number of connections
+                  # TYPE echowarp_connections_total counter
+                  echowarp_connections_total 42
+                  
+                  # HELP echowarp_bytes_sent_bytes Total bytes sent
+                  # TYPE echowarp_bytes_sent_bytes counter
+                  echowarp_bytes_sent_bytes 1048576
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: token
+      description: Bearer token authentication (if configured)
+
+  schemas:
+    StatusResponse:
+      type: object
+      required:
+        - status
+        - uptime
+      properties:
+        status:
+          type: string
+          enum:
+            - idle
+            - connecting
+            - streaming
+            - reconnecting
+            - stopped
+            - paused
+          description: Current node operational status
+          example: streaming
+        uptime:
+          type: integer
+          format: int64
+          description: Uptime in seconds
+          example: 3600
+
+    VersionResponse:
+      type: object
+      required:
+        - version
+        - commit
+        - buildDate
+        - goVersion
+      properties:
+        version:
+          type: string
+          description: EchoWarp version
+          example: "1.0.0"
+        commit:
+          type: string
+          description: Git commit hash
+          example: "a1b2c3d4e5f6g7h8i9j0"
+        buildDate:
+          type: string
+          description: Build timestamp
+          example: "2024-01-15T10:30:00Z"
+        goVersion:
+          type: string
+          description: Go runtime version
+          example: "go1.21.5"
+
+    ConnectionStats:
+      type: object
+      properties:
+        state:
+          type: string
+          description: WebRTC connection state
+          example: connected
+        localAddr:
+          type: string
+          description: Local address
+          example: "192.168.1.100:54321"
+        remoteAddr:
+          type: string
+          description: Remote address
+          example: "192.168.1.200:12345"
+        bytesSent:
+          type: integer
+          format: uint64
+          description: Total bytes sent
+          example: 1048576
+        bytesRecv:
+          type: integer
+          format: uint64
+          description: Total bytes received
+          example: 524288
+        packetsLost:
+          type: integer
+          format: uint32
+          description: Number of lost packets
+          example: 12
+        jitter:
+          type: number
+          format: double
+          description: Jitter in milliseconds
+          example: 5.2
+        roundTrip:
+          type: number
+          format: double
+          description: Round-trip time in milliseconds
+          example: 23.4
+
+    AudioDevice:
+      type: object
+      required:
+        - id
+        - name
+        - isInput
+        - channels
+        - sampleRate
+      properties:
+        id:
+          type: integer
+          format: uint32
+          description: Device ID
+          example: 0
+        name:
+          type: string
+          description: Device name
+          example: "Built-in Microphone"
+        isInput:
+          type: boolean
+          description: True if input device, false if output device
+          example: true
+        channels:
+          type: integer
+          format: uint32
+          description: Number of audio channels
+          example: 1
+        sampleRate:
+          type: integer
+          format: uint32
+          description: Sample rate in Hz
+          example: 48000
+
+    ClientsResponse:
+      type: object
+      required:
+        - clients
+        - count
+        - max
+      properties:
+        clients:
+          type: array
+          description: List of connected clients
+          items:
+            $ref: '#/components/schemas/ClientInfo'
+        count:
+          type: integer
+          description: Current number of connected clients
+          example: 2
+        max:
+          type: integer
+          description: Maximum allowed clients
+          example: 10
+
+    ClientInfo:
+      type: object
+      required:
+        - id
+        - address
+      properties:
+        id:
+          type: string
+          description: Unique client identifier
+          example: "client-abc123"
+        address:
+          type: string
+          description: Client's remote address
+          example: "192.168.1.200:54321"
+
+    NodeConfig:
+      type: object
+      description: Node configuration (sensitive fields redacted in GET responses)
+      properties:
+        mode:
+          type: string
+          enum:
+            - server
+            - client
+          description: Operational mode
+          example: server
+        reverse:
+          type: boolean
+          description: Reverse audio direction (server receives, client sends)
+          example: false
+        port:
+          type: integer
+          description: TCP signaling port
+          example: 8080
+        address:
+          type: string
+          description: Server address (client mode only)
+          example: "server.example.com:8080"
+        deviceId:
+          type: integer
+          format: uint32
+          nullable: true
+          description: Audio device ID
+          example: 0
+        sampleRate:
+          type: integer
+          format: uint32
+          description: Audio sample rate in Hz
+          enum: [8000, 12000, 16000, 24000, 48000]
+          example: 48000
+        channels:
+          type: integer
+          format: uint32
+          description: Number of audio channels (1=mono, 2=stereo)
+          enum: [1, 2]
+          example: 1
+        virtualMic:
+          type: boolean
+          description: Create virtual microphone device
+          example: false
+        opusBitrate:
+          type: integer
+          description: Opus encoder bitrate in bits per second
+          example: 64000
+        opusComplexity:
+          type: integer
+          description: Opus encoder complexity (0-10)
+          example: 5
+        opusApplication:
+          type: string
+          enum:
+            - voip
+            - audio
+            - lowdelay
+          description: Opus application type
+          example: voip
+        opusDtx:
+          type: boolean
+          description: Enable discontinuous transmission
+          example: true
+        opusFec:
+          type: boolean
+          description: Enable in-band forward error correction
+          example: true
+        password:
+          type: string
+          description: Authentication password (redacted in GET responses)
+          example: "********"
+        tls:
+          type: boolean
+          description: Enable TLS for signaling
+          example: false
+        tlsCert:
+          type: string
+          description: Path to TLS certificate file
+          example: "/path/to/cert.pem"
+        tlsKey:
+          type: string
+          description: Path to TLS private key file
+          example: "/path/to/key.pem"
+        tlsInsecure:
+          type: boolean
+          description: Skip certificate verification (insecure)
+          example: false
+        stunServers:
+          type: array
+          description: List of STUN server URLs
+          items:
+            type: string
+          example:
+            - "stun:stun.l.google.com:19302"
+        turnServers:
+          type: array
+          description: List of TURN server configurations
+          items:
+            $ref: '#/components/schemas/TURNServer'
+        maxClients:
+          type: integer
+          description: Maximum concurrent clients (server mode)
+          example: 10
+        maxReconnectAttempts:
+          type: integer
+          description: Maximum reconnection attempts (0 = infinite)
+          example: 5
+        reconnectIntervalSec:
+          type: integer
+          description: Base reconnection interval in seconds
+          example: 5
+        maxFailedAttempts:
+          type: integer
+          description: Failed auth attempts before IP ban (0 = disabled)
+          example: 5
+        banFilePath:
+          type: string
+          description: Path to banned IPs file
+          example: "/var/lib/echowarp/banned_ips.json"
+
+    TURNServer:
+      type: object
+      required:
+        - url
+        - username
+        - credential
+      properties:
+        url:
+          type: string
+          description: TURN server URL
+          example: "turn:turn.example.com:3478"
+        username:
+          type: string
+          description: TURN username
+          example: "user123"
+        credential:
+          type: string
+          description: TURN credential (redacted in GET responses)
+          example: "********"
+
+    ConfigRequest:
+      type: object
+      description: Configuration update request (only non-null fields are updated)
+      properties:
+        mode:
+          type: string
+          enum:
+            - server
+            - client
+          description: Operational mode
+        address:
+          type: string
+          description: Server address (client mode only)
+        port:
+          type: integer
+          description: TCP signaling port
+        deviceId:
+          type: integer
+          format: uint32
+          nullable: true
+          description: Audio device ID
+        reverse:
+          type: boolean
+          nullable: true
+          description: Reverse audio direction
+        password:
+          type: string
+          nullable: true
+          description: Authentication password
+        sampleRate:
+          type: integer
+          format: uint32
+          description: Audio sample rate in Hz
+          enum: [8000, 12000, 16000, 24000, 48000]
+        channels:
+          type: integer
+          format: uint32
+          description: Number of audio channels (1=mono, 2=stereo)
+          enum: [1, 2]
+        virtualMic:
+          type: boolean
+          nullable: true
+          description: Create virtual microphone device
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: "invalid configuration: sample rate must be one of [8000, 12000, 16000, 24000, 48000]"
+
+    Event:
+      type: object
+      description: WebSocket event
+      required:
+        - type
+        - data
+      properties:
+        type:
+          type: string
+          enum:
+            - connected
+            - disconnected
+            - error
+            - reconnecting
+            - stats_update
+            - client_joined
+            - client_left
+          description: Event type
+        data:
+          oneOf:
+            - type: string
+              description: Address or reason (connected, disconnected events)
+            - $ref: '#/components/schemas/ConnectionStats'
+            - type: object
+              description: Reconnection attempt info
+              properties:
+                attempt:
+                  type: integer
+                maxAttempts:
+                  type: integer
+            - type: object
+              description: Client info (client_joined event)
+              properties:
+                id:
+                  type: string
+                addr:
+                  type: string

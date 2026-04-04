@@ -1,0 +1,41 @@
+# Lefthook — Git hooks manager for EchoWarp
+# Install: brew install lefthook
+# Setup:  lefthook install
+
+pre-commit:
+  parallel: true
+  commands:
+    go-fmt:
+      glob: "*.go"
+      run: gofmt -l -w {staged_files} && git add {staged_files}
+
+    go-imports:
+      glob: "*.go"
+      run: goimports -local github.com/lHumaNl/echowarp -w {staged_files} && git add {staged_files}
+
+    go-vet:
+      glob: "*.go"
+      run: go vet ./...
+
+    go-mod-tidy:
+      glob: "{go.mod,go.sum}"
+      run: go mod tidy -v
+
+    golangci-lint:
+      glob: "*.go"
+      run: golangci-lint run --config .golangci.yml --new-from-rev=HEAD
+
+    check-large-files:
+      run: |
+        for f in {staged_files}; do
+          size=$(wc -c < "$f" 2>/dev/null || echo 0)
+          if [ "$size" -gt 1048576 ]; then
+            echo "File $f exceeds 1MB ($size bytes)"
+            exit 1
+          fi
+        done
+
+pre-push:
+  commands:
+    tests:
+      run: go test ./...

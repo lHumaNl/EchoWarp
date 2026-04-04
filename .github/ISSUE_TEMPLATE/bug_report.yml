@@ -1,0 +1,164 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in EchoWarp
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this issue! Please fill out the sections below to help us diagnose and fix the problem.
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you running EchoWarp on?
+      options:
+        - Linux
+        - macOS
+        - Windows
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: EchoWarp Version
+      description: What version of EchoWarp are you using? (run `EchoWarp --version`)
+      placeholder: "e.g., v1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      description: How did you launch EchoWarp?
+      options:
+        - TUI (interactive menu)
+        - CLI (command-line flags)
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Streaming Mode
+      description: What streaming mode was EchoWarp running in?
+      options:
+        - Normal
+        - Reverse
+        - Duplex
+        - Conference
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Role
+      description: Were you running server or client?
+      options:
+        - server
+        - client
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: Architecture
+      description: What CPU architecture?
+      options:
+        - amd64 (x86_64)
+        - arm64 (Apple Silicon / aarch64)
+        - armv7
+        - armv6
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: device-info
+    attributes:
+      label: Audio Device Information
+      description: |
+        Information about your audio device setup (optional but helpful).
+        Run `EchoWarp devices` to list available devices.
+      placeholder: |
+        Input Device: Built-in Microphone (ID: 0)
+        Output Device: Built-in Speakers (ID: 1)
+        Sample Rate: 48000 Hz
+        Channels: 1
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: |
+        Detailed steps to reproduce the issue. The more specific, the better.
+        Include the exact commands you ran.
+      placeholder: |
+        1. Start EchoWarp server: `EchoWarp server --port 8080 --password secret`
+        2. Connect client: `EchoWarp client --address server:8080 --password secret`
+        3. Wait for connection to establish
+        4. Observe error message
+      render: bash
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: The client should connect successfully and audio streaming should begin.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: Connection failed with error "authentication failed" even though password was correct.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant log output. Please run with `--log-level debug` for detailed logs.
+        Remove any sensitive information (passwords, IP addresses, etc.) before posting.
+      render: shell
+      placeholder: |
+        2024-01-15 10:30:45 INFO  Starting EchoWarp server mode=server port=8080
+        2024-01-15 10:30:45 DEBUG Listening on :8080
+        2024-01-15 10:31:02 INFO  Client connected addr=192.168.1.100:54321
+        2024-01-15 10:31:02 ERROR Authentication failed addr=192.168.1.100:54321
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: |
+        Any other relevant information about the problem:
+        - Network setup (NAT, firewall, VPN?)
+        - Previous working version (if regression)
+        - Related issues or pull requests
+        - Any workarounds you've found
+      placeholder: |
+        - Using Docker container on Linux host
+        - Behind corporate firewall with NAT
+        - Was working in v0.9.0 but broke in v1.0.0
+    validations:
+      required: false

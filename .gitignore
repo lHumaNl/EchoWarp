@@ -1,0 +1,85 @@
+# Binaries
+/echowarp
+/echowarp.exe
+/EchoWarp
+/EchoWarp.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.syso
+
+# Build artifacts
+/dist/
+/bin/
+/build/bin/
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config files with sensitive data
+*.local.yaml
+*.local.yml
+config.local.*
+.env
+.env.*
+
+# TLS certificates and keys (security)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Logs
+*.log
+logs/
+
+# Daemon files
+*.pid
+
+# Ban list (runtime data)
+banned_clients.json
+
+# Opus static build dir
+.opus_static/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Distribution archives
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+*.apk
+
+# Debug
+debug
+__debug_bin*
+
+# Profiling
+*.prof
+*.pprof
+cpu.prof
+mem.prof

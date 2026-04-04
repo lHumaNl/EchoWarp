@@ -1,0 +1,120 @@
+//go:build linux
+
+package audio
+
+import (
+	"context"
+	"encoding/binary"
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"syscall"
+	"time"
+)
+
+var virtualMicBufPool = sync.Pool{
+	New: func() interface{} {
+		buf := make([]byte, 0, defaultPCMBufferSize*4)
+		return &buf
+	},
+}
+
+type linuxVirtualMic struct {
+	name       string
+	sampleRate uint32
+	channels   uint32
+	fifoPath   string
+	fifo       *os.File
+	moduleIdx  string
+}
+
+func newLinuxVirtualMic(name string, sampleRate, channels uint32) (*linuxVirtualMic, error) {
+	fifoPath := filepath.Join(os.TempDir(), fmt.Sprintf("echowarp-%s.pcm", name))
+
+	if err := syscall.Mkfifo(fifoPath, 0600); err != nil && !os.IsExist(err) {
+		return nil, fmt.Errorf("create FIFO: %w", err)
+	}
+
+	format := "float32le"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pactl", "load-module", "module-pipe-source",
+		fmt.Sprintf("source_name=%s", name),
+		fmt.Sprintf("file=%s", fifoPath),
+		fmt.Sprintf("format=%s", format),
+		fmt.Sprintf("rate=%d", sampleRate),
+		fmt.Sprintf("channels=%d", channels),
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		_ = os.Remove(fifoPath)
+		return nil, fmt.Errorf("load PulseAudio module: %w", err)
+	}
+	moduleIdx := string(output)
+	for i := 0; i < len(moduleIdx); i++ {
+		if moduleIdx[i] == '\n' {
+			moduleIdx = moduleIdx[:i]
+			break
+		}
+	}
+
+	fifo, err := os.OpenFile(fifoPath, os.O_WRONLY, 0)
+	if err != nil {
+		_ = exec.CommandContext(ctx, "pactl", "unload-module", moduleIdx).Run()
+		_ = os.Remove(fifoPath)
+		return nil, fmt.Errorf("open FIFO: %w", err)
+	}
+
+	return &linuxVirtualMic{
+		name:       name,
+		sampleRate: sampleRate,
+		channels:   channels,
+		fifoPath:   fifoPath,
+		fifo:       fifo,
+		moduleIdx:  moduleIdx,
+	}, nil
+}
+
+func (v *linuxVirtualMic) Write(samples []float32) error {
+	needed := len(samples) * 4
+	bufPtr, ok := virtualMicBufPool.Get().(*[]byte)
+	var buf []byte
+	if ok && bufPtr != nil {
+		buf = *bufPtr
+	}
+	if cap(buf) < needed {
+		buf = make([]byte, needed)
+	} else {
+		buf = buf[:needed]
+	}
+	for i, s := range samples {
+		bits := math.Float32bits(s)
+		binary.LittleEndian.PutUint32(buf[i*4:], bits)
+	}
+	_, err := v.fifo.Write(buf)
+	if ok && bufPtr != nil {
+		*bufPtr = buf[:0]
+		virtualMicBufPool.Put(bufPtr)
+	}
+	return err
+}
+
+func (v *linuxVirtualMic) DeviceName() string {
+	return v.name
+}
+
+func (v *linuxVirtualMic) Close() error {
+	if v.fifo != nil {
+		_ = v.fifo.Close()
+	}
+	if v.moduleIdx != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(ctx, "pactl", "unload-module", v.moduleIdx).Run()
+	}
+	_ = os.Remove(v.fifoPath)
+	return nil
+}

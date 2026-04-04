@@ -1,0 +1,75 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for EchoWarp
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! Please describe your idea in detail so we can understand the use case and evaluate its value.
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: |
+        Describe the problem you're trying to solve or the scenario where this feature would be useful.
+        What are you trying to accomplish that you can't do today?
+      placeholder: |
+        I want to use EchoWarp to stream audio from my home studio to a remote recording session.
+        Currently, I can only stream audio in one direction, but I need bi-directional communication
+        so the remote participant can talk back while I'm streaming.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: |
+        Describe how you think this feature should work.
+        What would the API look like? What command-line flags or configuration options would be needed?
+      placeholder: |
+        Add automatic gain control for conference mode:
+        - Adjust input levels based on number of active speakers
+        - Prevent clipping when multiple participants speak simultaneously
+
+        Example (CLI):
+        ```bash
+        EchoWarp server --mode conference --agc
+        ```
+        Or via TUI: select Conference mode → enable AGC in audio settings.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: |
+        Have you considered any alternative solutions or workarounds?
+        Why don't they meet your needs?
+      placeholder: |
+        - I could run two instances of EchoWarp (one server, one client) on each machine,
+          but this is cumbersome and doesn't handle synchronization well.
+        - I could use other tools like JACK or PulseAudio network streaming,
+          but EchoWarp's WebRTC-based approach has better NAT traversal and lower latency.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: |
+        Any other relevant information:
+        - Related issues or pull requests
+        - Similar features in other tools
+        - Implementation suggestions
+        - Performance considerations
+      placeholder: |
+        - Similar to how Discord or Zoom handle bidirectional audio
+        - Would need to handle echo cancellation
+        - Could leverage existing WebRTC bidirectional capabilities
+        - Related to issue #42 about multi-track support
+    validations:
+      required: false
