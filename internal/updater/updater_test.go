@@ -495,7 +495,7 @@ func TestDownloadRelease(t *testing.T) {
 		t.Fatalf("failed to stat file: %v", err)
 	}
 
-	if info.Mode()&0111 == 0 {
+	if runtime.GOOS != "windows" && info.Mode()&0111 == 0 {
 		t.Error("file should be executable")
 	}
 }
@@ -698,7 +698,7 @@ func TestCopyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat destination: %v", err)
 	}
-	if dstInfo.Mode()&0111 == 0 {
+	if runtime.GOOS != "windows" && dstInfo.Mode()&0111 == 0 {
 		t.Error("destination should be executable")
 	}
 }

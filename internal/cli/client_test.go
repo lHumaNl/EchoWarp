@@ -760,6 +760,9 @@ func TestHandleClientDiscovery_DiscoveryTrueNoAddress(t *testing.T) {
 // TestExecuteClientMode_NilDeviceID tests executeClientMode when DeviceID is nil.
 // This tests the path where interactive mode should be triggered.
 func TestExecuteClientMode_NilDeviceID(t *testing.T) {
+	if os.Getenv("CI") != "" {
+		t.Skip("Skipping interactive test in CI - requires terminal")
+	}
 	cmd := newClientCmd()
 	_ = cmd.ParseFlags([]string{"--address", "192.168.1.1", "--discover=false"})
 
