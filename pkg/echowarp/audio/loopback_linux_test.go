@@ -9,17 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockEnumerator is a test double for DeviceEnumerator.
-type mockEnumerator struct {
+// mockLoopbackEnumerator is a test double for DeviceEnumerator.
+type mockLoopbackEnumerator struct {
 	inputs  []AudioDevice
 	outputs []AudioDevice
 }
 
-func (m *mockEnumerator) ListInputDevices() ([]AudioDevice, error)  { return m.inputs, nil }
-func (m *mockEnumerator) ListOutputDevices() ([]AudioDevice, error) { return m.outputs, nil }
+func (m *mockLoopbackEnumerator) ListInputDevices() ([]AudioDevice, error)  { return m.inputs, nil }
+func (m *mockLoopbackEnumerator) ListOutputDevices() ([]AudioDevice, error) { return m.outputs, nil }
 
 func TestListLoopbackDevices_Linux_FindsMonitorSources(t *testing.T) {
-	dm := &mockEnumerator{
+	dm := &mockLoopbackEnumerator{
 		outputs: []AudioDevice{
 			{ID: 1, Name: "alsa_output.pci-0000_00_1f.3.analog-stereo", IsInput: false, Channels: 2},
 		},
@@ -39,7 +39,7 @@ func TestListLoopbackDevices_Linux_FindsMonitorSources(t *testing.T) {
 }
 
 func TestListLoopbackDevices_Linux_NoMonitor(t *testing.T) {
-	dm := &mockEnumerator{
+	dm := &mockLoopbackEnumerator{
 		outputs: []AudioDevice{
 			{ID: 1, Name: "alsa_output.pci-0000_00_1f.3.analog-stereo", IsInput: false, Channels: 2},
 		},
@@ -55,7 +55,7 @@ func TestListLoopbackDevices_Linux_NoMonitor(t *testing.T) {
 }
 
 func TestListLoopbackDevices_Linux_MultipleOutputs(t *testing.T) {
-	dm := &mockEnumerator{
+	dm := &mockLoopbackEnumerator{
 		outputs: []AudioDevice{
 			{ID: 1, Name: "sink1", IsInput: false, Channels: 2},
 			{ID: 2, Name: "sink2", IsInput: false, Channels: 6},

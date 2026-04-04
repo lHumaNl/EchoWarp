@@ -110,42 +110,6 @@ func TestListLoopbackDevices_ChannelMatching(t *testing.T) {
 	assert.Equal(t, uint32(2), result[1].Channels)
 }
 
-func TestBestBlackHole_ExactMatch(t *testing.T) {
-	blackholes := []AudioDevice{
-		{Name: "BlackHole 2ch", Channels: 2},
-		{Name: "BlackHole 16ch", Channels: 16},
-	}
-	bh := bestBlackHole(blackholes, 2)
-	assert.NotNil(t, bh)
-	assert.Equal(t, "BlackHole 2ch", bh.Name)
-}
-
-func TestBestBlackHole_LargerAvailable(t *testing.T) {
-	blackholes := []AudioDevice{
-		{Name: "BlackHole 2ch", Channels: 2},
-		{Name: "BlackHole 16ch", Channels: 16},
-	}
-	bh := bestBlackHole(blackholes, 16)
-	assert.NotNil(t, bh)
-	assert.Equal(t, "BlackHole 16ch", bh.Name)
-}
-
-func TestBestBlackHole_FallbackToSmallest(t *testing.T) {
-	blackholes := []AudioDevice{
-		{Name: "BlackHole 16ch", Channels: 16},
-		{Name: "BlackHole 64ch", Channels: 64},
-	}
-	// maxCh=2, none fit, fallback to smallest
-	bh := bestBlackHole(blackholes, 2)
-	assert.NotNil(t, bh)
-	assert.Equal(t, "BlackHole 16ch", bh.Name)
-}
-
-func TestBestBlackHole_Empty(t *testing.T) {
-	bh := bestBlackHole(nil, 2)
-	assert.Nil(t, bh)
-}
-
 func TestLoopbackDevice_Types(t *testing.T) {
 	ld := LoopbackDevice{
 		OutputDevice: AudioDevice{Name: "Speakers", Channels: 2},
