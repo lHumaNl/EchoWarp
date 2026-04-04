@@ -51,7 +51,7 @@
 ## 快速开始
 
 1. 从 [Releases](https://github.com/lHumaNl/EchoWarp/releases) 下载预编译二进制文件（无需依赖——opus 已静态链接）
-2. 运行 `EchoWarp server` 或 `EchoWarp client`
+2. 运行 `EchoWarp` — 交互式菜单可选择服务端、客户端、诊断等模式。也可直接指定模式：`EchoWarp server` / `EchoWarp client`
 3. 在交互式 TUI 中完成配置，按回车键开始
 
 > **Windows 用户：** 发布包中包含 `EchoWarp Server.bat` 和 `EchoWarp Client.bat`——双击您需要的即可。无需手动打开 cmd.exe。

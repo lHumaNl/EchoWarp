@@ -51,7 +51,7 @@ Bir makinede sesi yakalayın, başka bir makinede ağ üzerinden gerçek zamanl�
 ## Hızlı Başlangıç
 
 1. [Releases](https://github.com/lHumaNl/EchoWarp/releases) sayfasından önceden derlenmiş bir ikili dosya indirin (bağımlılık yok — opus statik olarak bağlıdır)
-2. `EchoWarp server` veya `EchoWarp client` komutunu çalıştırın
+2. `EchoWarp` çalıştırın — etkileşimli menüden Sunucu, İstemci, Tanılama ve daha fazlasını seçin. Ya da doğrudan bir moda geçin: `EchoWarp server` / `EchoWarp client`
 3. Her şeyi etkileşimli TUI'de yapılandırın ve başlatmak için Enter tuşuna basın
 
 > **Windows kullanıcıları:** Yayın arşivi `EchoWarp Server.bat` ve `EchoWarp Client.bat` dosyalarını içerir — ihtiyacınız olana çift tıklayın. cmd.exe'yi manuel olarak açmanıza gerek yoktur.

@@ -51,7 +51,7 @@ Audio auf einem Rechner aufnehmen und in Echtzeit über das Netzwerk auf einem a
 ## Schnellstart
 
 1. Vorgefertigtes Binary von [Releases](https://github.com/lHumaNl/EchoWarp/releases) herunterladen (keine Abhängigkeiten — Opus ist statisch eingebunden)
-2. `EchoWarp server` oder `EchoWarp client` ausführen
+2. Starten Sie `EchoWarp` — ein interaktives Menü lässt Sie Server, Client, Diagnose und mehr auswählen. Oder springen Sie direkt in einen Modus mit `EchoWarp server` / `EchoWarp client`
 3. Alles im interaktiven TUI konfigurieren und Enter drücken, um zu starten
 
 > **Windows-Benutzer:** Das Release-Archiv enthält `EchoWarp Server.bat` und `EchoWarp Client.bat` — einfach die gewünschte Datei doppelklicken. Es ist nicht nötig, cmd.exe manuell zu öffnen.

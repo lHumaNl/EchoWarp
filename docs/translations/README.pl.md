@@ -51,7 +51,7 @@ Przechwytuj dźwięk na jednej maszynie i odtwarzaj go na drugiej — w czasie r
 ## Szybki start
 
 1. Pobierz gotowy plik binarny ze strony [Releases](https://github.com/lHumaNl/EchoWarp/releases) (brak zależności — opus jest statycznie zlinkowany)
-2. Uruchom `EchoWarp server` lub `EchoWarp client`
+2. Uruchom `EchoWarp` — interaktywne menu pozwala wybrać Serwer, Klient, Diagnostykę i inne. Lub przejdź bezpośrednio do trybu za pomocą `EchoWarp server` / `EchoWarp client`
 3. Skonfiguruj wszystko w interaktywnym interfejsie TUI i naciśnij Enter, aby rozpocząć
 
 > **Użytkownicy Windows:** Archiwum z wydaniem zawiera pliki `EchoWarp Server.bat` i `EchoWarp Client.bat` — wystarczy dwukrotnie kliknąć odpowiedni plik. Nie trzeba ręcznie otwierać cmd.exe.

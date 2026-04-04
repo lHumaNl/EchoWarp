@@ -51,7 +51,7 @@ Capturez l'audio sur une machine, lisez-le sur une autre — en temps réel via 
 ## Démarrage rapide
 
 1. Téléchargez un binaire précompilé depuis la page [Releases](https://github.com/lHumaNl/EchoWarp/releases) (aucune dépendance — opus est lié statiquement)
-2. Exécutez `EchoWarp server` ou `EchoWarp client`
+2. Lancez `EchoWarp` — un menu interactif permet de choisir Serveur, Client, Diagnostics, etc. Ou passez directement à un mode avec `EchoWarp server` / `EchoWarp client`
 3. Configurez tout dans l'interface TUI interactive et appuyez sur Entrée pour démarrer
 
 > **Utilisateurs Windows :** L'archive de la release inclut `EchoWarp Server.bat` et `EchoWarp Client.bat` — double-cliquez sur celui dont vous avez besoin. Pas besoin d'ouvrir cmd.exe manuellement.

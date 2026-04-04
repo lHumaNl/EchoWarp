@@ -51,7 +51,7 @@ Captura audio en una máquina y reprodúcelo en otra — en tiempo real a travé
 ## Inicio rápido
 
 1. Descarga un binario precompilado desde [Releases](https://github.com/lHumaNl/EchoWarp/releases) (sin dependencias — opus está enlazado estáticamente)
-2. Ejecuta `EchoWarp server` o `EchoWarp client`
+2. Ejecute `EchoWarp` — un menú interactivo permite elegir Servidor, Cliente, Diagnóstico y más. O salte directamente a un modo con `EchoWarp server` / `EchoWarp client`
 3. Configura todo en la TUI interactiva y pulsa Enter para iniciar
 
 > **Usuarios de Windows:** El archivo de la release incluye `EchoWarp Server.bat` y `EchoWarp Client.bat` — haz doble clic en el que necesites. No es necesario abrir cmd.exe manualmente.

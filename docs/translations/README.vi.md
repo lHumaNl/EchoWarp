@@ -51,7 +51,7 @@ Thu âm trên một máy, phát lại trên máy khác — theo thời gian th�
 ## Bắt đầu nhanh
 
 1. Tải xuống file nhị phân dựng sẵn từ trang [Releases](https://github.com/lHumaNl/EchoWarp/releases) (không cần phụ thuộc — opus được liên kết tĩnh)
-2. Chạy `EchoWarp server` hoặc `EchoWarp client`
+2. Chạy `EchoWarp` — menu tương tác cho phép chọn Server, Client, Chẩn đoán và hơn thế nữa. Hoặc vào thẳng chế độ với `EchoWarp server` / `EchoWarp client`
 3. Cấu hình mọi thứ trong TUI tương tác và nhấn Enter để bắt đầu
 
 > **Người dùng Windows:** Gói phát hành bao gồm `EchoWarp Server.bat` và `EchoWarp Client.bat` — nhấp đúp vào file bạn cần. Không cần mở cmd.exe thủ công.

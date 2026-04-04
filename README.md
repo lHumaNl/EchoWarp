@@ -51,7 +51,7 @@ Capture audio on one machine, play it on another — in real time over the netwo
 ## Quick Start
 
 1. Download a pre-built binary from [Releases](https://github.com/lHumaNl/EchoWarp/releases) (no dependencies — opus is statically linked)
-2. Run `EchoWarp server` or `EchoWarp client`
+2. Run `EchoWarp` — an interactive menu lets you pick Server, Client, Diagnostics, and more. Or jump straight to a mode with `EchoWarp server` / `EchoWarp client`
 3. Configure everything in the interactive TUI and press Enter to start
 
 > **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/main/build/launchers) and place them next to `EchoWarp.exe`. Double-click `EchoWarp.bat` to launch the TUI menu — no need to open cmd.exe manually.

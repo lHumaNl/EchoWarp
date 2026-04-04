@@ -51,7 +51,7 @@ Acquisisci l'audio su una macchina e riproducilo su un'altra — in tempo reale 
 ## Avvio Rapido
 
 1. Scarica un binario precompilato dalla pagina [Releases](https://github.com/lHumaNl/EchoWarp/releases) (nessuna dipendenza — opus è collegato staticamente)
-2. Esegui `EchoWarp server` o `EchoWarp client`
+2. Esegui `EchoWarp` — un menu interattivo permette di scegliere Server, Client, Diagnostica e altro. Oppure passa direttamente a una modalità con `EchoWarp server` / `EchoWarp client`
 3. Configura tutto nella TUI interattiva e premi Invio per avviare
 
 > **Utenti Windows:** L'archivio della release include `EchoWarp Server.bat` e `EchoWarp Client.bat` — fai doppio clic su quello che ti serve. Non è necessario aprire cmd.exe manualmente.

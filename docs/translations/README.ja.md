@@ -51,7 +51,7 @@
 ## クイックスタート
 
 1. [Releases](https://github.com/lHumaNl/EchoWarp/releases) からビルド済みバイナリをダウンロード（依存関係なし — opusは静的リンク）
-2. `EchoWarp server` または `EchoWarp client` を実行
+2. `EchoWarp` を実行 — インタラクティブメニューでサーバー、クライアント、診断などを選択できます。または `EchoWarp server` / `EchoWarp client` で直接モードを指定
 3. インタラクティブTUIですべての設定を行い、Enterを押してストリーミングを開始
 
 > **Windowsユーザー：** リリースアーカイブには `EchoWarp Server.bat` と `EchoWarp Client.bat` が含まれています — 必要な方をダブルクリックしてください。cmd.exeを手動で開く必要はありません。

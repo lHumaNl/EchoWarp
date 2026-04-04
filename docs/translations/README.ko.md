@@ -51,7 +51,7 @@
 ## 빠른 시작
 
 1. [Releases](https://github.com/lHumaNl/EchoWarp/releases)에서 미리 빌드된 바이너리를 다운로드 (의존성 없음 — opus는 정적으로 링크됨)
-2. `EchoWarp server` 또는 `EchoWarp client` 실행
+2. `EchoWarp` 실행 — 대화형 메뉴에서 서버, 클라이언트, 진단 등을 선택할 수 있습니다. 또는 `EchoWarp server` / `EchoWarp client`로 바로 모드 진입
 3. 대화형 TUI에서 모든 설정을 구성하고 Enter를 눌러 시작
 
 > **Windows 사용자:** 릴리스 아카이브에는 `EchoWarp Server.bat` 및 `EchoWarp Client.bat`이 포함되어 있습니다 — 필요한 것을 더블 클릭하세요. cmd.exe를 수동으로 열 필요가 없습니다.
