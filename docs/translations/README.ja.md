@@ -456,6 +456,7 @@ make build
 
 バーチャルマイク使用時：
 - **macOS**: [BlackHole](https://github.com/ExistentialAudio/BlackHole) オーディオドライバー
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio（`pactl`）
 
 ## ネットワークとファイアウォール

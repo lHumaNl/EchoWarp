@@ -456,6 +456,7 @@ Il binario risultante collega opus staticamente — nessuna dipendenza a runtime
 
 Per il microfono virtuale:
 - **macOS**: driver audio [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Rete & Firewall

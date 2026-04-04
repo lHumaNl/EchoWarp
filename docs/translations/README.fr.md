@@ -456,6 +456,7 @@ Le binaire résultant lie opus statiquement — aucune dépendance d'exécution 
 
 Pour le microphone virtuel :
 - **macOS** : pilote audio [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- **Windows** : [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux** : PulseAudio (`pactl`)
 
 ## Réseau & Pare-feu

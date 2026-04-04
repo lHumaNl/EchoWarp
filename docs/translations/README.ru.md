@@ -456,6 +456,7 @@ make build
 
 Для виртуального микрофона:
 - **macOS**: аудиодрайвер [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Сеть и межсетевой экран

@@ -456,6 +456,7 @@ Wynikowy plik binarny statycznie linkuje opus — brak zależności w czasie wyk
 
 Dla wirtualnego mikrofonu:
 - **macOS**: sterownik audio [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Sieć & Zapora sieciowa

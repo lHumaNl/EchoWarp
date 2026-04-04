@@ -456,6 +456,7 @@ El binario resultante enlaza opus estáticamente — no se necesita ninguna depe
 
 Para el micrófono virtual:
 - **macOS**: controlador de audio [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Red y Firewall

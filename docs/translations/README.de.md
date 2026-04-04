@@ -456,6 +456,7 @@ Das resultierende Binary verknüpft Opus statisch — keine Laufzeitabhängigkei
 
 Für virtuelles Mikrofon:
 - **macOS**: [BlackHole](https://github.com/ExistentialAudio/BlackHole)-Audiotreiber
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Netzwerk & Firewall

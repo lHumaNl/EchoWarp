@@ -456,6 +456,7 @@ File nhị phân kết quả liên kết tĩnh opus — không cần phụ thu�
 
 Đối với micro ảo:
 - **macOS**: Driver âm thanh [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Mạng & Tường lửa

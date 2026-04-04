@@ -456,6 +456,7 @@ O binário resultante vincula o opus estaticamente — nenhuma dependência em t
 
 Para microfone virtual:
 - **macOS**: driver de áudio [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Rede & Firewall

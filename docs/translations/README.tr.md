@@ -456,6 +456,7 @@ Oluşturulan ikili dosya, opus'u statik olarak bağlar — çalışma zamanında
 
 Sanal mikrofon için:
 - **macOS**: [BlackHole](https://github.com/ExistentialAudio/BlackHole) ses sürücüsü
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Ağ & Güvenlik Duvarı

@@ -456,6 +456,7 @@ make build
 
 가상 마이크의 경우:
 - **macOS**: [BlackHole](https://github.com/ExistentialAudio/BlackHole) 오디오 드라이버
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## 네트워크 및 방화벽

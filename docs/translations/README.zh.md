@@ -456,6 +456,7 @@ make build
 
 虚拟麦克风需要：
 - **macOS**：[BlackHole](https://github.com/ExistentialAudio/BlackHole) 音频驱动
+- **Windows**：[VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**：PulseAudio（`pactl`）
 
 ## 网络与防火墙

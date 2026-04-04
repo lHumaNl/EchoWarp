@@ -456,6 +456,7 @@ The resulting binary statically links opus — no runtime dependency needed.
 
 For virtual microphone:
 - **macOS**: [BlackHole](https://github.com/ExistentialAudio/BlackHole) audio driver
+- **Windows**: [VB-Audio Virtual Cable](https://vb-audio.com/Cable/)
 - **Linux**: PulseAudio (`pactl`)
 
 ## Network & Firewall
