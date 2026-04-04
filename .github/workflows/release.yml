@@ -298,6 +298,7 @@ jobs:
 
       - name: Create archive (zip, Windows)
         if: matrix.archive == 'zip' && matrix.goos == 'windows'
+        shell: bash
         run: tar -acf EchoWarp_${{ matrix.suffix }}.zip EchoWarp.exe
 
       - name: Upload artifact
