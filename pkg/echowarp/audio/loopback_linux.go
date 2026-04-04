@@ -4,7 +4,7 @@ package audio
 
 // DetectBlackHole returns nil on Linux — BlackHole is a macOS-only concept.
 // PulseAudio monitor sources serve the same purpose and are discovered automatically.
-func DetectBlackHole(dm DeviceEnumerator) []AudioDevice { return nil }
+func DetectBlackHole(_ DeviceEnumerator) []AudioDevice { return nil }
 
 // ListLoopbackDevices on Linux: for each output device, the corresponding
 // PulseAudio/PipeWire monitor source can be used for loopback capture.

@@ -16,7 +16,7 @@ import (
 // TODO: Implement using CGO + libpulse:
 //   - Load module-echo-cancel via pa_context_load_module()
 //   - Or create a virtual source/sink pair with echo cancellation
-//   - Route capture through the echo-cancelled source
+//   - Route capture through the echo-canceled source
 //   - Alternatively, use PipeWire's built-in echo cancellation filter
 type PulseAudioAEC struct {
 	mu         sync.Mutex
@@ -60,7 +60,7 @@ func (p *PulseAudioAEC) Process(_ context.Context, samples []float32) ([]float32
 		return samples, nil
 	}
 
-	// TODO: Read from echo-cancelled PulseAudio source.
+	// TODO: Read from echo-canceled PulseAudio source.
 	return samples, nil
 }
 

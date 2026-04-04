@@ -1,5 +1,6 @@
 //go:build !darwin
 
+// Package coreaudio provides CoreAudio device management (macOS-only, stubs on other platforms).
 package coreaudio
 
 import "fmt"

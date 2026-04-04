@@ -3,6 +3,7 @@
 package audio
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 )
 
 var virtualSpeakerBufPool = sync.Pool{
@@ -27,7 +29,6 @@ type linuxVirtualSpeaker struct {
 	fifoPath   string
 	fifo       *os.File
 	moduleIdx  string
-	mu         sync.Mutex
 }
 
 func newLinuxVirtualSpeaker(name string, sampleRate, channels uint32) (*linuxVirtualSpeaker, error) {
@@ -38,8 +39,10 @@ func newLinuxVirtualSpeaker(name string, sampleRate, channels uint32) (*linuxVir
 	}
 
 	format := "float32le"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	// Create a null sink that apps can output to, with a monitor we can read from
-	cmd := exec.Command("pactl", "load-module", "module-pipe-sink",
+	cmd := exec.CommandContext(ctx, "pactl", "load-module", "module-pipe-sink",
 		fmt.Sprintf("sink_name=%s", name),
 		fmt.Sprintf("file=%s", fifoPath),
 		fmt.Sprintf("format=%s", format),
@@ -48,7 +51,7 @@ func newLinuxVirtualSpeaker(name string, sampleRate, channels uint32) (*linuxVir
 	)
 	output, err := cmd.Output()
 	if err != nil {
-		os.Remove(fifoPath)
+		_ = os.Remove(fifoPath)
 		return nil, fmt.Errorf("load PulseAudio module: %w", err)
 	}
 	moduleIdx := string(output)
@@ -61,8 +64,8 @@ func newLinuxVirtualSpeaker(name string, sampleRate, channels uint32) (*linuxVir
 
 	fifo, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
 	if err != nil {
-		exec.Command("pactl", "unload-module", moduleIdx).Run()
-		os.Remove(fifoPath)
+		_ = exec.CommandContext(ctx, "pactl", "unload-module", moduleIdx).Run()
+		_ = os.Remove(fifoPath)
 		return nil, fmt.Errorf("open FIFO: %w", err)
 	}
 
@@ -108,11 +111,13 @@ func (v *linuxVirtualSpeaker) DeviceName() string {
 
 func (v *linuxVirtualSpeaker) Close() error {
 	if v.fifo != nil {
-		v.fifo.Close()
+		_ = v.fifo.Close()
 	}
 	if v.moduleIdx != "" {
-		exec.Command("pactl", "unload-module", v.moduleIdx).Run()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(ctx, "pactl", "unload-module", v.moduleIdx).Run()
 	}
-	os.Remove(v.fifoPath)
+	_ = os.Remove(v.fifoPath)
 	return nil
 }
