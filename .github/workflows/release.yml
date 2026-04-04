@@ -197,11 +197,10 @@ jobs:
 
       # ── Windows icon embedding ───────────────────────────────
       - name: Embed Windows icon
-        if: matrix.goos == 'windows' && runner.os == 'Windows'
-        shell: bash
+        if: matrix.goos == 'windows'
         run: |
           go install github.com/akavel/rsrc@latest
-          rsrc -ico build/icons/icon.ico -o cmd/echowarp/rsrc_windows_amd64.syso
+          rsrc -arch ${{ matrix.goarch }} -ico build/icons/icon.ico -o cmd/echowarp/rsrc_windows_${{ matrix.goarch }}.syso
 
       # ── Build ────────────────────────────────────────────────
       - name: Build
