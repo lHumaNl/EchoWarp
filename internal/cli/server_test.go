@@ -538,7 +538,7 @@ func TestSetupBanManager_InvalidPath(t *testing.T) {
 
 func TestRunServer_InvalidConfig(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--port", "-1"})
+	_ = cmd.ParseFlags([]string{"--port", "-1", "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -548,7 +548,7 @@ func TestRunServer_InvalidConfig(t *testing.T) {
 
 func TestRunServer_InvalidPort(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--port", "70000"})
+	_ = cmd.ParseFlags([]string{"--port", "70000", "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -558,7 +558,7 @@ func TestRunServer_InvalidPort(t *testing.T) {
 
 func TestRunServer_MissingConfigFile(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml"})
+	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml", "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -568,7 +568,7 @@ func TestRunServer_MissingConfigFile(t *testing.T) {
 
 func TestRunServer_InvalidSampleRate(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--sample-rate", "12345"})
+	_ = cmd.ParseFlags([]string{"--sample-rate", "12345", "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -578,7 +578,7 @@ func TestRunServer_InvalidSampleRate(t *testing.T) {
 
 func TestRunServer_InvalidChannels(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "3"})
+	_ = cmd.ParseFlags([]string{"--channels", "3", "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -588,7 +588,7 @@ func TestRunServer_InvalidChannels(t *testing.T) {
 
 func TestRunServer_InvalidLogLevel(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--log-level", "invalid"})
+	_ = cmd.ParseFlags([]string{"--log-level", "invalid", "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -604,7 +604,7 @@ func TestRunServer_SaveConfigToInvalidPath(t *testing.T) {
 	invalidPath := filepath.Join(blocker, "sub", "config.yaml")
 
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--device", "0", "--save-config", invalidPath})
+	_ = cmd.ParseFlags([]string{"--device", "0", "--save-config", invalidPath, "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -614,7 +614,7 @@ func TestRunServer_SaveConfigToInvalidPath(t *testing.T) {
 
 func TestRunServer_ZeroChannels(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "0"})
+	_ = cmd.ParseFlags([]string{"--channels", "0", "--no-interactive"})
 
 	err := runServer(cmd, []string{})
 	if err == nil {
@@ -822,21 +822,13 @@ func TestSetupDiscovery_WithAllOptions(t *testing.T) {
 // TestRunServer_NilDeviceID tests runServer when DeviceID is nil.
 func TestRunServer_NilDeviceID(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--no-discovery"})
+	_ = cmd.ParseFlags([]string{"--no-discovery", "--no-interactive"})
 
-	cfg := config.DefaultConfig()
-	cfg.Mode = config.ModeServer
-	cfg.DeviceID = nil // This triggers interactive mode
-	cfg.Password = "test"
-
-	// runServer will try to run interactive mode
-	// which requires audio devices - this will fail on CI without audio
+	// --no-interactive with nil DeviceID should return an error
 	err := runServer(cmd, []string{})
-	// On systems without audio, we expect an error
 	if err == nil {
-		t.Log("runServer succeeded or user quit without error")
+		t.Error("expected error: --no-interactive requires --device")
 	}
-	// Error is acceptable since audio devices may not be available
 }
 
 // TestLoadConfig_EnvVarOverride tests that environment variables override config file values.

@@ -4,7 +4,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/lHumaNl/echowarp/internal/config"
@@ -424,11 +423,8 @@ func TestClientCommand_Long(t *testing.T) {
 }
 
 func TestRunClient_InvalidConfig(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("bubbletea TUI hangs without terminal on Windows CI")
-	}
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--port", "-1", "--discover=false"})
+	_ = cmd.ParseFlags([]string{"--port", "-1", "--discover=false", "--no-interactive"})
 
 	err := runClient(cmd, []string{})
 	if err == nil {
@@ -437,11 +433,8 @@ func TestRunClient_InvalidConfig(t *testing.T) {
 }
 
 func TestRunClient_MissingConfigFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("bubbletea TUI hangs without terminal on Windows CI")
-	}
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml", "--discover=false"})
+	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml", "--discover=false", "--no-interactive"})
 
 	err := runClient(cmd, []string{})
 	if err == nil {
@@ -451,7 +444,7 @@ func TestRunClient_MissingConfigFile(t *testing.T) {
 
 func TestRunClient_InvalidSampleRate(t *testing.T) {
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--sample-rate", "12345", "--discover=false"})
+	_ = cmd.ParseFlags([]string{"--sample-rate", "12345", "--discover=false", "--no-interactive"})
 
 	err := runClient(cmd, []string{})
 	if err == nil {
@@ -461,7 +454,7 @@ func TestRunClient_InvalidSampleRate(t *testing.T) {
 
 func TestRunClient_InvalidChannels(t *testing.T) {
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "3", "--discover=false"})
+	_ = cmd.ParseFlags([]string{"--channels", "3", "--discover=false", "--no-interactive"})
 
 	err := runClient(cmd, []string{})
 	if err == nil {
@@ -471,7 +464,7 @@ func TestRunClient_InvalidChannels(t *testing.T) {
 
 func TestRunClient_ZeroChannels(t *testing.T) {
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "0", "--discover=false"})
+	_ = cmd.ParseFlags([]string{"--channels", "0", "--discover=false", "--no-interactive"})
 
 	err := runClient(cmd, []string{})
 	if err == nil {
@@ -481,7 +474,7 @@ func TestRunClient_ZeroChannels(t *testing.T) {
 
 func TestRunClient_InvalidLogLevel(t *testing.T) {
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--log-level", "invalid", "--discover=false"})
+	_ = cmd.ParseFlags([]string{"--log-level", "invalid", "--discover=false", "--no-interactive"})
 
 	err := runClient(cmd, []string{})
 	if err == nil {
