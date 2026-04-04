@@ -31,7 +31,7 @@ jobs:
             suffix: darwin_arm64
 
           - name: darwin/amd64
-            os: macos-13
+            os: macos-15-intel
             goos: darwin
             goarch: amd64
             archive: zip
@@ -136,11 +136,16 @@ jobs:
           OPUS_VERSION=1.5.2
           curl -sL "https://downloads.xiph.org/releases/opus/opus-${OPUS_VERSION}.tar.gz" | tar xz
           cd "opus-${OPUS_VERSION}"
+          EXTRA_FLAGS=""
+          if [ "${{ matrix.llvm_mingw }}" = "true" ]; then
+            EXTRA_FLAGS="--disable-rtcd"
+          fi
           ./configure \
             --host=${{ matrix.opus_host }} \
             --prefix=/tmp/opus-cross \
             --enable-static --disable-shared \
-            --disable-doc --disable-extra-programs
+            --disable-doc --disable-extra-programs \
+            $EXTRA_FLAGS
           make -j$(nproc)
           make install
 
@@ -293,8 +298,7 @@ jobs:
 
       - name: Create archive (zip, Windows)
         if: matrix.archive == 'zip' && matrix.goos == 'windows'
-        shell: bash
-        run: zip EchoWarp_${{ matrix.suffix }}.zip EchoWarp.exe
+        run: tar -acf EchoWarp_${{ matrix.suffix }}.zip EchoWarp.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
