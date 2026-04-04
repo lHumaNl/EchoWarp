@@ -69,7 +69,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libopus-dev pkg-config
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.4
           args: --build-tags nolibopusfile
