@@ -4,8 +4,9 @@
 //	go build -ldflags "-X main.Version=1.0.0 -X main.Commit=$(git rev-parse HEAD) -X main.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 package version
 
-// Version is the semantic version. Set via ldflags during release builds.
-var Version = "0.9.0"
+// Version is the semantic version. Set via ldflags during builds.
+// Default "dev" is used when building with plain `go install` without ldflags.
+var Version = "dev"
 
 // Commit is the git commit hash. Set via ldflags during builds.
 var Commit = "unknown"

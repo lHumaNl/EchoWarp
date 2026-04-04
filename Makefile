@@ -5,8 +5,10 @@ ifeq ($(OS),Windows_NT)
   BINARY_EXT=.exe
 endif
 BINARY=$(BINARY_NAME)$(BINARY_EXT)
-VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || grep 'Version =' internal/version/version.go | sed 's/.*"\(.*\)"/\1/')
-LDFLAGS=-ldflags "-s -w -X github.com/lHumaNl/echowarp/internal/version.Version=$(VERSION)"
+VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS=-ldflags "-s -w -X github.com/lHumaNl/echowarp/internal/version.Version=$(VERSION) -X github.com/lHumaNl/echowarp/internal/version.Commit=$(COMMIT) -X github.com/lHumaNl/echowarp/internal/version.BuildDate=$(BUILD_DATE)"
 BUILD_TAGS=-tags nolibopusfile
 
 # Static opus linkage: create temp dir with only .a file so linker can't find .dylib/.so
