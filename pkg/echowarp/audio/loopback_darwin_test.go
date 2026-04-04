@@ -8,6 +8,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestListLoopbackDevices_NoBlackHole(t *testing.T) {
+	dm := &mockDeviceEnumerator{
+		inputs:  []AudioDevice{{ID: 0, Name: "Mic", IsInput: true, Channels: 1}},
+		outputs: []AudioDevice{{ID: 0, Name: "Speakers", Channels: 2}},
+	}
+	result, err := ListLoopbackDevices(dm)
+	assert.NoError(t, err)
+	assert.Empty(t, result)
+}
+
 func TestDetectBlackHole_Installed2ch(t *testing.T) {
 	dm := &mockDeviceEnumerator{
 		inputs: []AudioDevice{

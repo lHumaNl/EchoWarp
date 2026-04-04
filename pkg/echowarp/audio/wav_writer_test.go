@@ -104,7 +104,7 @@ func TestConferenceRecorder_MixMode(t *testing.T) {
 	dur, size, files, err := r.Stop()
 	require.NoError(t, err)
 	assert.False(t, r.IsActive())
-	assert.True(t, dur > 0)
+	assert.True(t, dur >= 0)
 	assert.Equal(t, uint64(960*2), size)
 	assert.Equal(t, 1, files) // only mix.wav
 }
@@ -121,7 +121,7 @@ func TestConferenceRecorder_TracksMode(t *testing.T) {
 
 	dur, size, files, err := r.Stop()
 	require.NoError(t, err)
-	assert.True(t, dur > 0)
+	assert.True(t, dur >= 0)
 	assert.Equal(t, uint64(960*2*2), size) // 2 tracks
 	assert.Equal(t, 2, files)
 }

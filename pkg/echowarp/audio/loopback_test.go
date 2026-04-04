@@ -29,15 +29,6 @@ func TestDetectBlackHole_NotInstalled(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-func TestListLoopbackDevices_NoBlackHole(t *testing.T) {
-	dm := &mockDeviceEnumerator{
-		inputs:  []AudioDevice{{ID: 0, Name: "Mic", IsInput: true, Channels: 1}},
-		outputs: []AudioDevice{{ID: 0, Name: "Speakers", Channels: 2}},
-	}
-	result, err := ListLoopbackDevices(dm)
-	assert.NoError(t, err)
-	assert.Empty(t, result)
-}
 
 func TestLoopbackDevice_Types(t *testing.T) {
 	ld := LoopbackDevice{

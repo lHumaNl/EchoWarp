@@ -423,10 +423,10 @@ func TestClientCommand_Long(t *testing.T) {
 }
 
 func TestRunClient_InvalidConfig(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Port = -1
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--port", "-1", "--discover=false", "--no-interactive"})
-
-	err := runClient(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid config")
 	}
@@ -434,49 +434,49 @@ func TestRunClient_InvalidConfig(t *testing.T) {
 
 func TestRunClient_MissingConfigFile(t *testing.T) {
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml", "--discover=false", "--no-interactive"})
+	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml"})
 
-	err := runClient(cmd, []string{})
+	_, err := loadClientConfig(cmd)
 	if err == nil {
 		t.Error("expected error for missing config file")
 	}
 }
 
 func TestRunClient_InvalidSampleRate(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.SampleRate = 12345
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--sample-rate", "12345", "--discover=false", "--no-interactive"})
-
-	err := runClient(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid sample rate")
 	}
 }
 
 func TestRunClient_InvalidChannels(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels = 3
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "3", "--discover=false", "--no-interactive"})
-
-	err := runClient(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid channels")
 	}
 }
 
 func TestRunClient_ZeroChannels(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels = 0
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "0", "--discover=false", "--no-interactive"})
-
-	err := runClient(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for zero channels")
 	}
 }
 
 func TestRunClient_InvalidLogLevel(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.LogLevel = "invalid"
 	cmd := newClientCmd()
-	_ = cmd.ParseFlags([]string{"--log-level", "invalid", "--discover=false", "--no-interactive"})
-
-	err := runClient(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid log level")
 	}

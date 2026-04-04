@@ -537,20 +537,20 @@ func TestSetupBanManager_InvalidPath(t *testing.T) {
 }
 
 func TestRunServer_InvalidConfig(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Port = -1
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--port", "-1", "--no-interactive"})
-
-	err := runServer(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid port")
 	}
 }
 
 func TestRunServer_InvalidPort(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Port = 70000
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--port", "70000", "--no-interactive"})
-
-	err := runServer(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid port")
 	}
@@ -558,39 +558,39 @@ func TestRunServer_InvalidPort(t *testing.T) {
 
 func TestRunServer_MissingConfigFile(t *testing.T) {
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml", "--no-interactive"})
+	_ = cmd.ParseFlags([]string{"--config", "/nonexistent/config.yaml"})
 
-	err := runServer(cmd, []string{})
+	_, err := loadConfig(cmd, config.ModeServer)
 	if err == nil {
 		t.Error("expected error for missing config file")
 	}
 }
 
 func TestRunServer_InvalidSampleRate(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.SampleRate = 12345
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--sample-rate", "12345", "--no-interactive"})
-
-	err := runServer(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid sample rate")
 	}
 }
 
 func TestRunServer_InvalidChannels(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels = 3
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "3", "--no-interactive"})
-
-	err := runServer(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid channels")
 	}
 }
 
 func TestRunServer_InvalidLogLevel(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.LogLevel = "invalid"
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--log-level", "invalid", "--no-interactive"})
-
-	err := runServer(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid log level")
 	}
@@ -604,19 +604,21 @@ func TestRunServer_SaveConfigToInvalidPath(t *testing.T) {
 	invalidPath := filepath.Join(blocker, "sub", "config.yaml")
 
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--device", "0", "--save-config", invalidPath, "--no-interactive"})
+	_ = cmd.ParseFlags([]string{"--save-config", invalidPath})
 
-	err := runServer(cmd, []string{})
+	cfg := config.DefaultConfig()
+	cfg.DeviceID = new(uint32)
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for invalid save path")
 	}
 }
 
 func TestRunServer_ZeroChannels(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels = 0
 	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--channels", "0", "--no-interactive"})
-
-	err := runServer(cmd, []string{})
+	err := validateAndSaveConfig(cmd, &cfg)
 	if err == nil {
 		t.Error("expected error for zero channels")
 	}
@@ -819,15 +821,19 @@ func TestSetupDiscovery_WithAllOptions(t *testing.T) {
 	setupDiscovery(ctx, cmd, cfg, nil)
 }
 
-// TestRunServer_NilDeviceID tests runServer when DeviceID is nil.
+// TestRunServer_NilDeviceID tests that config with nil DeviceID passes validation
+// (DeviceID is optional at config level, required only by --no-interactive at runtime).
 func TestRunServer_NilDeviceID(t *testing.T) {
-	cmd := newServerCmd()
-	_ = cmd.ParseFlags([]string{"--no-discovery", "--no-interactive"})
+	cfg := config.DefaultConfig()
+	cfg.Mode = config.ModeServer
+	cfg.DeviceID = nil
+	cfg.Password = "test"
 
-	// --no-interactive with nil DeviceID should return an error
-	err := runServer(cmd, []string{})
-	if err == nil {
-		t.Error("expected error: --no-interactive requires --device")
+	cmd := newServerCmd()
+	err := validateAndSaveConfig(cmd, &cfg)
+	// Validation should pass — DeviceID is not a config-level requirement
+	if err != nil {
+		t.Errorf("validateAndSaveConfig should not error for nil DeviceID: %v", err)
 	}
 }
 

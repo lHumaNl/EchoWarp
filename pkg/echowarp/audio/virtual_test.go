@@ -13,7 +13,13 @@ func TestNewVirtualMic_ReturnsCorrectImplementation(t *testing.T) {
 
 	if err != nil {
 		assert.Nil(t, vm)
-		assert.Contains(t, err.Error(), "BlackHole", "error should mention BlackHole requirement")
+		errMsg := err.Error()
+		platformMentioned := strings.Contains(errMsg, "BlackHole") ||
+			strings.Contains(errMsg, "PulseAudio") ||
+			strings.Contains(errMsg, "pactl") ||
+			strings.Contains(errMsg, "VB-Audio") ||
+			strings.Contains(errMsg, "not supported")
+		assert.True(t, platformMentioned, "error should mention platform requirement, got: %s", errMsg)
 	} else {
 		require.NotNil(t, vm)
 		defer vm.Close()
