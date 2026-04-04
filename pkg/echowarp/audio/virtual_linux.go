@@ -80,8 +80,11 @@ func newLinuxVirtualMic(name string, sampleRate, channels uint32) (*linuxVirtual
 
 func (v *linuxVirtualMic) Write(samples []float32) error {
 	needed := len(samples) * 4
-	bufPtr := virtualMicBufPool.Get().(*[]byte)
-	buf := *bufPtr
+	bufPtr, ok := virtualMicBufPool.Get().(*[]byte)
+	var buf []byte
+	if ok && bufPtr != nil {
+		buf = *bufPtr
+	}
 	if cap(buf) < needed {
 		buf = make([]byte, needed)
 	} else {
@@ -92,8 +95,10 @@ func (v *linuxVirtualMic) Write(samples []float32) error {
 		binary.LittleEndian.PutUint32(buf[i*4:], bits)
 	}
 	_, err := v.fifo.Write(buf)
-	*bufPtr = buf[:0]
-	virtualMicBufPool.Put(bufPtr)
+	if ok && bufPtr != nil {
+		*bufPtr = buf[:0]
+		virtualMicBufPool.Put(bufPtr)
+	}
 	return err
 }
 

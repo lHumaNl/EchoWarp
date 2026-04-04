@@ -90,7 +90,7 @@ func (v *linuxVirtualSpeaker) Read() ([]float32, error) {
 	}
 
 	numSamples := n / 4
-	samples := virtualSpeakerBufPool.Get().([]float32)
+	samples, _ := virtualSpeakerBufPool.Get().([]float32)
 	if cap(samples) < numSamples {
 		samples = make([]float32, numSamples)
 	} else {
