@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
+  <img src="../../build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
 </p>
 
 <h1 align="center">EchoWarp</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
+  <a href="../../README.md">English</a> |
   <a href="README.ru.md">Русский</a> |
   <a href="README.zh.md">简体中文</a> |
   <a href="README.es.md">Español</a> |
@@ -406,23 +406,13 @@ Xem [Các Chế Độ Truyền Phát](#các-chế-độ-truyền-phát) để bi
 
 Ưu tiên cài đặt: Cờ CLI > biến môi trường (`ECHOWARP_*`) > file cấu hình > mặc định.
 
-```yaml
-# echowarp.yml
-port: 4415
-password: "mypassword"
-sample_rate: 48000
-channels: 2
-max_clients: 4
-log_level: info
-stun_servers:
-  - stun:stun.l.google.com:19302
-```
+Màn hình cài đặt TUI cho phép bạn lưu và tải file cấu hình một cách tương tác. Bạn cũng có thể sử dụng cờ CLI:
 
 ```bash
-# Lưu cài đặt hiện tại
+# Lưu cài đặt hiện tại vào file
 EchoWarp server -d 1 -P pass --channels 2 -s myconfig.yml
 
-# Tải cài đặt
+# Tải cài đặt từ file
 EchoWarp server -c myconfig.yml
 ```
 
@@ -496,4 +486,4 @@ EchoWarp sử dụng máy chủ STUN để thiết lập kết nối qua NAT. N�
 
 ## Giấy phép
 
-[MIT](LICENSE)
+[MIT](../../LICENSE) — xem [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) cho giấy phép của bên thứ ba.

@@ -10,18 +10,18 @@
 
 <p align="center">
   <a href="README.md">English</a> |
-  <a href="README.ru.md">Русский</a> |
-  <a href="README.zh.md">简体中文</a> |
-  <a href="README.es.md">Español</a> |
-  <a href="README.fr.md">Français</a> |
-  <a href="README.it.md">Italiano</a> |
-  <a href="README.ko.md">한국어</a> |
-  <a href="README.ja.md">日本語</a> |
-  <a href="README.de.md">Deutsch</a> |
-  <a href="README.pt.md">Português</a> |
-  <a href="README.tr.md">Türkçe</a> |
-  <a href="README.vi.md">Tiếng Việt</a> |
-  <a href="README.pl.md">Polski</a>
+  <a href="docs/translations/README.ru.md">Русский</a> |
+  <a href="docs/translations/README.zh.md">简体中文</a> |
+  <a href="docs/translations/README.es.md">Español</a> |
+  <a href="docs/translations/README.fr.md">Français</a> |
+  <a href="docs/translations/README.it.md">Italiano</a> |
+  <a href="docs/translations/README.ko.md">한국어</a> |
+  <a href="docs/translations/README.ja.md">日本語</a> |
+  <a href="docs/translations/README.de.md">Deutsch</a> |
+  <a href="docs/translations/README.pt.md">Português</a> |
+  <a href="docs/translations/README.tr.md">Türkçe</a> |
+  <a href="docs/translations/README.vi.md">Tiếng Việт</a> |
+  <a href="docs/translations/README.pl.md">Polski</a>
 </p>
 
 <p align="center">
@@ -402,27 +402,17 @@ See [Streaming Modes](#streaming-modes) for detailed descriptions of each mode.
 | `--loopback` | | Capture system audio (macOS, requires BlackHole) |
 | `--dry-run` | | Validate config and exit |
 
-### Configuration Files
+### Configuration
 
 Settings priority: CLI flags > environment variables (`ECHOWARP_*`) > config file > defaults.
 
-```yaml
-# echowarp.yml
-port: 4415
-password: "mypassword"
-sample_rate: 48000
-channels: 2
-max_clients: 4
-log_level: info
-stun_servers:
-  - stun:stun.l.google.com:19302
-```
+The TUI setup screen allows you to save and load configuration files interactively. You can also use CLI flags:
 
 ```bash
-# Save current settings
+# Save current settings to a file
 EchoWarp server -d 1 -P pass --channels 2 -s myconfig.yml
 
-# Load settings
+# Load settings from a file
 EchoWarp server -c myconfig.yml
 ```
 
@@ -496,4 +486,4 @@ EchoWarp uses STUN servers to establish connections through NAT. If both sides a
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party licenses.

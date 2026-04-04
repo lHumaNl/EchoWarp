@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
+  <img src="../../build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
 </p>
 
 <h1 align="center">EchoWarp</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
+  <a href="../../README.md">English</a> |
   <a href="README.ru.md">Русский</a> |
   <a href="README.zh.md">简体中文</a> |
   <a href="README.es.md">Español</a> |
@@ -406,23 +406,13 @@ EchoWarp devices
 
 설정 우선순위: CLI 플래그 > 환경 변수 (`ECHOWARP_*`) > 설정 파일 > 기본값.
 
-```yaml
-# echowarp.yml
-port: 4415
-password: "mypassword"
-sample_rate: 48000
-channels: 2
-max_clients: 4
-log_level: info
-stun_servers:
-  - stun:stun.l.google.com:19302
-```
+TUI 설정 화면에서 설정 파일을 대화형으로 저장하고 로드할 수 있습니다. CLI 플래그도 사용할 수 있습니다:
 
 ```bash
-# 현재 설정 저장
+# 현재 설정을 파일로 저장
 EchoWarp server -d 1 -P pass --channels 2 -s myconfig.yml
 
-# 설정 로드
+# 파일에서 설정 로드
 EchoWarp server -c myconfig.yml
 ```
 
@@ -496,4 +486,4 @@ EchoWarp는 STUN 서버를 사용하여 NAT를 통한 연결을 설정합니다.
 
 ## 라이선스
 
-[MIT](LICENSE)
+[MIT](../../LICENSE) — 서드파티 라이선스는 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)를 참조하세요.

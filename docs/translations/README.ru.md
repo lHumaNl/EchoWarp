@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
+  <img src="../../build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
 </p>
 
 <h1 align="center">EchoWarp</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
+  <a href="../../README.md">English</a> |
   <a href="README.ru.md">Русский</a> |
   <a href="README.zh.md">简体中文</a> |
   <a href="README.es.md">Español</a> |
@@ -406,23 +406,13 @@ EchoWarp devices
 
 Приоритет настроек: флаги CLI > переменные окружения (`ECHOWARP_*`) > файл конфигурации > значения по умолчанию.
 
-```yaml
-# echowarp.yml
-port: 4415
-password: "mypassword"
-sample_rate: 48000
-channels: 2
-max_clients: 4
-log_level: info
-stun_servers:
-  - stun:stun.l.google.com:19302
-```
+Экран настройки TUI позволяет сохранять и загружать конфигурационные файлы интерактивно. Также можно использовать флаги CLI:
 
 ```bash
-# Сохранить текущие настройки
+# Сохранить текущие настройки в файл
 EchoWarp server -d 1 -P pass --channels 2 -s myconfig.yml
 
-# Загрузить настройки
+# Загрузить настройки из файла
 EchoWarp server -c myconfig.yml
 ```
 
@@ -496,4 +486,4 @@ EchoWarp использует STUN-серверы для установки со
 
 ## Лицензия
 
-[MIT](LICENSE)
+[MIT](../../LICENSE) — см. [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) для лицензий сторонних компонентов.

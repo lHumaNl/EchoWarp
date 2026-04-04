@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
+  <img src="../../build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
 </p>
 
 <h1 align="center">EchoWarp</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
+  <a href="../../README.md">English</a> |
   <a href="README.ru.md">Русский</a> |
   <a href="README.zh.md">简体中文</a> |
   <a href="README.es.md">Español</a> |
@@ -406,23 +406,13 @@ EchoWarp devices
 
 设置优先级：CLI 参数 > 环境变量（`ECHOWARP_*`）> 配置文件 > 默认值。
 
-```yaml
-# echowarp.yml
-port: 4415
-password: "mypassword"
-sample_rate: 48000
-channels: 2
-max_clients: 4
-log_level: info
-stun_servers:
-  - stun:stun.l.google.com:19302
-```
+TUI 设置界面支持交互式保存和加载配置文件。也可以使用 CLI 参数：
 
 ```bash
-# 保存当前设置
+# 将当前设置保存到文件
 EchoWarp server -d 1 -P pass --channels 2 -s myconfig.yml
 
-# 加载设置
+# 从文件加载设置
 EchoWarp server -c myconfig.yml
 ```
 
@@ -496,4 +486,4 @@ EchoWarp 使用 STUN 服务器通过 NAT 建立连接。如果双方都位于对
 
 ## 许可证
 
-[MIT](LICENSE)
+[MIT](../../LICENSE) — 第三方许可证请参阅 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)。

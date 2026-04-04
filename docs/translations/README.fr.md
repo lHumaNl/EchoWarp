@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
+  <img src="../../build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
 </p>
 
 <h1 align="center">EchoWarp</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
+  <a href="../../README.md">English</a> |
   <a href="README.ru.md">Русский</a> |
   <a href="README.zh.md">简体中文</a> |
   <a href="README.es.md">Español</a> |
@@ -406,23 +406,13 @@ Voir [Modes de diffusion](#modes-de-diffusion) pour les descriptions détaillée
 
 Priorité des paramètres : indicateurs CLI > variables d'environnement (`ECHOWARP_*`) > fichier de configuration > valeurs par défaut.
 
-```yaml
-# echowarp.yml
-port: 4415
-password: "mypassword"
-sample_rate: 48000
-channels: 2
-max_clients: 4
-log_level: info
-stun_servers:
-  - stun:stun.l.google.com:19302
-```
+L'écran de configuration du TUI permet de sauvegarder et charger des fichiers de configuration de manière interactive. Vous pouvez également utiliser les indicateurs CLI :
 
 ```bash
-# Enregistrer les paramètres actuels
+# Enregistrer les paramètres actuels dans un fichier
 EchoWarp server -d 1 -P pass --channels 2 -s myconfig.yml
 
-# Charger les paramètres
+# Charger les paramètres depuis un fichier
 EchoWarp server -c myconfig.yml
 ```
 
@@ -496,4 +486,4 @@ EchoWarp utilise des serveurs STUN pour établir des connexions à travers le NA
 
 ## Licence
 
-[MIT](LICENSE)
+[MIT](../../LICENSE) — voir [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) pour les licences tierces.

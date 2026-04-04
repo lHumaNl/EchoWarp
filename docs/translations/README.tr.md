@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
+  <img src="../../build/icons/icon_512.png" alt="EchoWarp Logo" width="128">
 </p>
 
 <h1 align="center">EchoWarp</h1>
@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> |
+  <a href="../../README.md">English</a> |
   <a href="README.ru.md">Русский</a> |
   <a href="README.zh.md">简体中文</a> |
   <a href="README.es.md">Español</a> |
@@ -406,23 +406,13 @@ Her modun ayrıntılı açıklaması için [Akış Modları](#akış-modları) b
 
 Ayar önceliği: CLI bayrakları > ortam değişkenleri (`ECHOWARP_*`) > yapılandırma dosyası > varsayılanlar.
 
-```yaml
-# echowarp.yml
-port: 4415
-password: "mypassword"
-sample_rate: 48000
-channels: 2
-max_clients: 4
-log_level: info
-stun_servers:
-  - stun:stun.l.google.com:19302
-```
+TUI kurulum ekranı, yapılandırma dosyalarını etkileşimli olarak kaydetmenize ve yüklemenize olanak tanır. CLI bayraklarını da kullanabilirsiniz:
 
 ```bash
-# Mevcut ayarları kaydet
+# Mevcut ayarları bir dosyaya kaydet
 EchoWarp server -d 1 -P pass --channels 2 -s myconfig.yml
 
-# Ayarları yükle
+# Bir dosyadan ayarları yükle
 EchoWarp server -c myconfig.yml
 ```
 
@@ -496,4 +486,4 @@ EchoWarp, NAT arkasından bağlantı kurmak için STUN sunucularını kullanır.
 
 ## Lisans
 
-[MIT](LICENSE)
+[MIT](../../LICENSE) — üçüncü taraf lisansları için [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) dosyasına bakın.
