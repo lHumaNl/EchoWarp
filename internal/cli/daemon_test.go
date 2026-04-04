@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/lHumaNl/echowarp/internal/config"
@@ -529,6 +530,9 @@ func TestSetupLogger_DefaultPath(t *testing.T) {
 }
 
 func TestSetupLogger_CustomPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - log file handle prevents TempDir cleanup")
+	}
 	tmpDir := t.TempDir()
 	logFile := filepath.Join(tmpDir, "daemon.log")
 
@@ -725,6 +729,9 @@ func TestSetupDaemon_InvalidConfig(t *testing.T) {
 }
 
 func TestSetupDaemon_AlreadyRunning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - Signal(0) not supported for process detection")
+	}
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "daemon.pid")
 
@@ -741,6 +748,9 @@ func TestSetupDaemon_AlreadyRunning(t *testing.T) {
 }
 
 func TestCheckIfRunning_AlreadyRunning(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping on Windows - Signal(0) not supported for process detection")
+	}
 	tmpDir := t.TempDir()
 	pidFile := filepath.Join(tmpDir, "daemon.pid")
 
