@@ -821,3 +821,34 @@ func TestApplyLoadedConfig_ClientFields(t *testing.T) {
 		}
 	}
 }
+
+func TestNewSetupModel_RecentServerIDPreserved(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	// Save recent servers with ServerID via recent.Save.
+	servers := []recent.Server{
+		{
+			Address:  "192.168.1.50",
+			Port:     4415,
+			Hostname: "MyServer",
+			ServerID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		},
+		{
+			Address:  "10.0.0.1",
+			Port:     4415,
+			Hostname: "OtherServer",
+			// No ServerID — should remain empty.
+		},
+	}
+	require.NoError(t, recent.Save(servers))
+
+	cfg := newTestConfig(config.ModeClient)
+	deviceList := list.New(nil, list.NewDefaultDelegate(), 80, 20)
+	m := NewSetupModel(cfg, deviceList, false, 120, 40)
+
+	entries := m.serverList.Entries()
+	require.Len(t, entries, 2)
+	assert.Equal(t, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", entries[0].ServerID)
+	assert.Equal(t, "", entries[1].ServerID)
+}

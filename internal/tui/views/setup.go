@@ -202,6 +202,7 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 					Address:       rs.Address,
 					Port:          rs.Port,
 					Hostname:      nick,
+					ServerID:      rs.ServerID,
 					Source:        ServerSourceRecent,
 					LastConnected: rs.LastConnected,
 					ProbeStatus:   ServerProbePending,
