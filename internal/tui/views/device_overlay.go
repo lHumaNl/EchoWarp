@@ -131,7 +131,13 @@ func renderDeviceOverlayRow(d DeviceOverlayItem, selected bool) string {
 		prefix = styles.SelectedItem.Render(styles.CursorGlyph + " ")
 	}
 
-	return prefix + icon + " " + d.Name + "  " + styles.Help.Render(info)
+	maxNameW := 56 - 24 // boxWidth minus prefix, icon, info, padding
+	if maxNameW < 12 {
+		maxNameW = 12
+	}
+	name := TruncateToWidth(d.Name, maxNameW)
+
+	return prefix + icon + " " + name + "  " + styles.Help.Render(info)
 }
 
 func formatDeviceOverlayInfo(d DeviceOverlayItem) string {

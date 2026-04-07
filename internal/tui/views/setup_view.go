@@ -550,15 +550,8 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 				}
 				mixName := "    └─ 🎤 " + dev.Name
 				mixNameW := nameW + infoColW // mix items span both name and info columns
+				mixName = TruncateToWidth(mixName, mixNameW)
 				nameVisible := lipgloss.Width(mixName)
-				if nameVisible > mixNameW {
-					runes := []rune(mixName)
-					for len(runes) > 0 && lipgloss.Width(string(runes)) > mixNameW-1 {
-						runes = runes[:len(runes)-1]
-					}
-					mixName = string(runes) + "…"
-					nameVisible = lipgloss.Width(mixName)
-				}
 				padded := mixName + strings.Repeat(" ", mixNameW-nameVisible)
 				if isCursor && isFocused {
 					padded = styles.SelectedItem.Render(padded)
@@ -580,15 +573,8 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 				} else if dev.IsVirtual {
 					name = "⟡ " + name
 				}
+				name = TruncateToWidth(name, nameW)
 				nameVisible := lipgloss.Width(name)
-				if nameVisible > nameW {
-					runes := []rune(name)
-					for len(runes) > 0 && lipgloss.Width(string(runes)) > nameW-1 {
-						runes = runes[:len(runes)-1]
-					}
-					name = string(runes) + "…"
-					nameVisible = lipgloss.Width(name)
-				}
 				namePadded := name + strings.Repeat(" ", nameW-nameVisible)
 
 				info := formatDeviceInfo(dev)

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // formatSampleRate returns a human-readable sample rate string like "48 kHz".
@@ -73,6 +75,21 @@ func formatBitDepth(bd uint32) string {
 		return fmt.Sprintf("%d-bit", bd)
 	}
 	return ""
+}
+
+// TruncateToWidth truncates s to fit within maxWidth visual columns, appending "…" if truncated.
+func TruncateToWidth(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes)) > maxWidth-1 {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "…"
 }
 
 // formatDeviceInfo builds the info string with fixed-width columns for alignment.
