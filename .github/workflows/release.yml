@@ -251,9 +251,24 @@ jobs:
           APP="EchoWarp.app"
           mkdir -p "${APP}/Contents/MacOS"
           mkdir -p "${APP}/Contents/Resources"
-          cp EchoWarp "${APP}/Contents/MacOS/EchoWarp"
+          cp EchoWarp "${APP}/Contents/MacOS/EchoWarp-bin"
           cp build/icons/icon.icns "${APP}/Contents/Resources/icon.icns"
-          cat > "${APP}/Contents/Info.plist" << 'PLIST'
+          cat > "${APP}/Contents/MacOS/EchoWarp" << 'LAUNCHER'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          BIN="${DIR}/EchoWarp-bin"
+          osascript << EOF
+          tell application "Terminal"
+              activate
+              repeat until (count of windows) > 0
+                  delay 0.1
+              end repeat
+              do script "exec \"${BIN}\"" in front window
+          end tell
+          EOF
+          LAUNCHER
+          chmod +x "${APP}/Contents/MacOS/EchoWarp"
+          cat > "${APP}/Contents/Info.plist" << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -269,18 +284,12 @@ jobs:
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-          PLIST
-          echo "  <string>${VERSION}</string>" >> "${APP}/Contents/Info.plist"
-          cat >> "${APP}/Contents/Info.plist" << 'PLIST'
+            <string>${VERSION}</string>
             <key>CFBundleVersion</key>
-          PLIST
-          echo "  <string>${VERSION}</string>" >> "${APP}/Contents/Info.plist"
-          cat >> "${APP}/Contents/Info.plist" << 'PLIST'
+            <string>${VERSION}</string>
             <key>LSMinimumSystemVersion</key>
             <string>11.0</string>
             <key>NSHighResolutionCapable</key>
-            <true/>
-            <key>LSUIElement</key>
             <true/>
           </dict>
           </plist>
