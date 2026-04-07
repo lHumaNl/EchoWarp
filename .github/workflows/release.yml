@@ -341,7 +341,7 @@ jobs:
 
             Each archive contains a single `EchoWarp` binary (or `EchoWarp.exe` on Windows). macOS archives also include an `EchoWarp.app` bundle.
 
-            **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/main/build/launchers) and place next to `EchoWarp.exe` to launch with a double-click.
+            **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/master/build/launchers) and place next to `EchoWarp.exe` to launch with a double-click.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

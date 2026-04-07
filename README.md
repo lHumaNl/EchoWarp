@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -54,7 +54,7 @@ Capture audio on one machine, play it on another — in real time over the netwo
 2. Run `EchoWarp` — an interactive menu lets you pick Server, Client, Diagnostics, and more. Or jump straight to a mode with `EchoWarp server` / `EchoWarp client`
 3. Configure everything in the interactive TUI and press Enter to start
 
-> **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/main/build/launchers) and place them next to `EchoWarp.exe`. Double-click `EchoWarp.bat` to launch the TUI menu — no need to open cmd.exe manually.
+> **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/master/build/launchers) and place them next to `EchoWarp.exe`. Double-click `EchoWarp.bat` to launch the TUI menu — no need to open cmd.exe manually.
 
 ## Interactive TUI
 
