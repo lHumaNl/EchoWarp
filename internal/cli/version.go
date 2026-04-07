@@ -17,7 +17,7 @@ func newVersionCmd() *cobra.Command {
 		Short: "Print the version of EchoWarp",
 		Run: func(cmd *cobra.Command, args []string) {
 			var info strings.Builder
-			fmt.Fprintf(&info, "EchoWarp %s\n", version.Version)
+			fmt.Fprintf(&info, "EchoWarp v%s\n", version.Version)
 			if version.Commit != "unknown" {
 				fmt.Fprintf(&info, "  Commit:    %s\n", version.Commit)
 			}
