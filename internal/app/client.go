@@ -119,6 +119,10 @@ type ClientApp struct {
 
 	// conferencePartsCh sends full participants list updates to TUI.
 	conferencePartsCh chan<- ConferenceParticipantsMsg
+
+	// sessionID stores the server-assigned session UUID for reconnect support.
+	// Persists in memory across reconnect attempts within the same process.
+	sessionID string
 }
 
 // NewClientApp creates a new client application with the given configuration.
@@ -418,6 +422,11 @@ func (c *ClientApp) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Store session ID for reconnect support.
+	if authResult != nil && authResult.SessionID != "" {
+		c.sessionID = authResult.SessionID
+	}
+
 	// Use server-assigned nickname if available, otherwise fall back to config.
 	chatNickname := c.cfg.Nickname
 	if authResult != nil && authResult.Nickname != "" {
@@ -600,7 +609,10 @@ func (c *ClientApp) authenticate(ctx context.Context, signaler transport.Signale
 			meta.HWID = hwid
 		}
 	}
-	// TODO: send SessionID from previous session if we have one (in-memory reconnect).
+	// Send sessionID from previous session for reconnect support.
+	if c.sessionID != "" {
+		meta.SessionID = c.sessionID
+	}
 	if err := protocol.SendClientMeta(signaler, meta); err != nil {
 		c.logger.Warn("Failed to send client meta", "error", err)
 	}
@@ -1033,6 +1045,8 @@ func (c *ClientApp) handleDCControl(raw []byte) bool {
 // closeServerStoppedCh safely closes the serverStoppedCh channel using sync.Once
 // to prevent double-close panics.
 func (c *ClientApp) closeServerStoppedCh() {
+	// Clear session ID on graceful server shutdown — the server will not recognize it after restart.
+	c.sessionID = ""
 	if c.serverStoppedCh != nil {
 		c.serverStoppedOnce.Do(func() { close(c.serverStoppedCh) })
 	}

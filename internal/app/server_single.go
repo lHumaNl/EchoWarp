@@ -151,21 +151,34 @@ func (s *ServerApp) handleOneClient(ctx context.Context, listenAddr string) erro
 
 	// Register single client in s.clients so processCommands (kick/ban/mute) can find it.
 	// Must happen before setupAudioPipeline so the mute filter can reference mc.mutedOutgoing.
+	isCustomNick := meta.Nickname != ""
 	s.mu.Lock()
-	s.clients[clientID] = &multiClient{
-		id:        clientID,
-		nickname:  nickname,
-		hwid:      meta.HWID,
-		sessionID: sessionID,
-		conn:      &remoteAddrConn{addr: remoteAddr, closeFn: signaler.Close},
-		peer:      peer,
-		joinedAt:  connStart,
+	mc := &multiClient{
+		id:           clientID,
+		nickname:     nickname,
+		hwid:         meta.HWID,
+		sessionID:    sessionID,
+		isCustomNick: isCustomNick,
+		conn:         &remoteAddrConn{addr: remoteAddr, closeFn: signaler.Close},
+		peer:         peer,
+		joinedAt:     connStart,
 	}
+	s.clients[clientID] = mc
 	s.notifyClientCount()
 	s.mu.Unlock()
+	singleGraceful := false
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, clientID)
+		if singleGraceful {
+			delete(s.sessions, sessionID)
+		} else {
+			s.sessions[sessionID] = &sessionEntry{
+				clientID:     clientID,
+				nickname:     nickname,
+				isCustomNick: isCustomNick,
+			}
+		}
 		s.notifyClientCount()
 		s.mu.Unlock()
 	}()
@@ -198,7 +211,12 @@ func (s *ServerApp) handleOneClient(ctx context.Context, listenAddr string) erro
 	go s.processCommands(sigCtx)
 	go s.reportMultiStats(sigCtx)
 
-	return s.handleSignalingLoop(sigCtx, signaler, peer, audioDone, connStart, protocol, clientID, nickname, sessionID)
+	loopErr := s.handleSignalingLoop(sigCtx, signaler, peer, audioDone, connStart, protocol, clientID, nickname, sessionID)
+	// nil error means graceful disconnect (client sent stop, or server TUI stop).
+	if loopErr == nil {
+		singleGraceful = true
+	}
+	return loopErr
 }
 
 func (s *ServerApp) createAndStartSignaler(ctx context.Context, listenAddr string) (transport.Signaler, context.Context, context.CancelFunc, error) {

@@ -178,6 +178,7 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 	}
 
 	// Assign nickname and session ID.
+	isCustomNick := meta.Nickname != ""
 	nickname := s.assignNickname(meta.Nickname)
 	if oldNickname != "" {
 		nickname = oldNickname
@@ -198,7 +199,13 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 	mc.nickname = nickname
 	mc.sessionID = sessionID
 	mc.hwid = meta.HWID
-	defer s.unregisterMultiClient(mc, clientID)
+	mc.isCustomNick = isCustomNick
+
+	// Track whether this client disconnected gracefully.
+	gracefulDisconnect := false
+	defer func() {
+		s.unregisterMultiClient(mc, clientID, gracefulDisconnect)
+	}()
 
 	// Register as conference participant if in conference mode.
 	if s.conference != nil {
@@ -257,7 +264,7 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 	if s.conference != nil {
 		s.broadcastParticipantsUpdate(clientID)
 	}
-	s.runMultiClientLoop(sigCtx, signaler, peer, audioDone, clientID, nickname, connStart, protocol)
+	gracefulDisconnect = s.runMultiClientLoop(sigCtx, signaler, peer, audioDone, clientID, nickname, connStart, protocol)
 }
 
 func (s *ServerApp) checkMultiClientAccess(remoteAddr, clientID string) bool {
@@ -283,15 +290,26 @@ func (s *ServerApp) registerMultiClient(conn net.Conn, clientID string) (*multiC
 	return mc, true
 }
 
-func (s *ServerApp) unregisterMultiClient(mc *multiClient, clientID string) {
+func (s *ServerApp) unregisterMultiClient(mc *multiClient, clientID string, graceful bool) {
 	s.mu.Lock()
 	delete(s.clients, clientID)
+	if graceful {
+		// Graceful disconnect: remove session so it cannot be reused.
+		delete(s.sessions, mc.sessionID)
+	} else {
+		// Abnormal disconnect: preserve session for future reconnect.
+		s.sessions[mc.sessionID] = &sessionEntry{
+			clientID:     clientID,
+			nickname:     mc.nickname,
+			isCustomNick: mc.isCustomNick,
+		}
+	}
 	s.notifyClientCount()
 	s.mu.Unlock()
 	if mc.peer != nil {
 		_ = mc.peer.Close() //nolint:errcheck
 	}
-	s.logger.Info("Client disconnected", "clientID", clientID)
+	s.logger.Info("Client disconnected", "clientID", clientID, "graceful", graceful)
 }
 
 func (s *ServerApp) createMultiClientPeer(mc *multiClient, clientID string) (transport.PeerManager, transport.MediaDirection, bool) {
@@ -459,7 +477,9 @@ func (s *ServerApp) runConferenceMixSender(ctx context.Context, sendCh chan<- []
 	}
 }
 
-func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.Signaler, peer transport.PeerManager, audioDone <-chan error, clientID, nickname string, connStart time.Time, protocol *transport.ServerSignalingProtocol) {
+// runMultiClientLoop runs the main event loop for a multi-client connection.
+// Returns true if the disconnect was graceful (client sent stop, or server shutdown).
+func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.Signaler, peer transport.PeerManager, audioDone <-chan error, clientID, nickname string, connStart time.Time, protocol *transport.ServerSignalingProtocol) bool {
 	var statsWg sync.WaitGroup
 	chatRegistered := false
 	defer func() {
@@ -554,17 +574,17 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 			_ = signaler.Close() //nolint:errcheck
 		case raw, ok := <-controlCh:
 			if !ok || len(raw) == 0 {
-				// Channel closed (peer disconnected).
-				return
+				// Channel closed (peer disconnected) — abnormal.
+				return false
 			}
 			if s.handleDCControlMulti(raw, connStart, clientID) {
 				_ = peer.Close() //nolint:errcheck
-				return
+				return true      // Client sent stop — graceful.
 			}
 		case raw, ok := <-chatCh:
 			if !ok || len(raw) == 0 {
-				// Channel closed (peer disconnected).
-				return
+				// Channel closed (peer disconnected) — abnormal.
+				return false
 			}
 			if s.chatHub != nil {
 				s.chatHub.HandleIncoming(clientID, raw)
@@ -577,7 +597,7 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 			}
 			time.Sleep(150 * time.Millisecond)
 			_ = peer.Close() //nolint:errcheck
-			return
+			return true      // Server graceful shutdown.
 		case <-ctx.Done():
 			// Context may be canceled because stopCh fired (race between stopCh and ctx.Done).
 			// Check if this is a graceful stop and notify the client.
@@ -589,13 +609,14 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 				}
 				time.Sleep(150 * time.Millisecond)
 				_ = peer.Close() //nolint:errcheck
+				return true      // Server graceful shutdown.
 			default:
 				// Not a graceful stop — context canceled for other reasons.
 			}
-			return
+			return false
 		case msg := <-receiveCh:
 			if s.handleMultiClientMessage(msg, peer, clientID, connStart, protocol) {
-				return
+				return true // Signaling control stop — graceful.
 			}
 		case err := <-audioDone:
 			if err != nil && ctx.Err() == nil {
@@ -603,7 +624,7 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 			}
 			metrics.ConnectionDuration.Observe(time.Since(connStart).Seconds())
 			metrics.ConnectionsTotal.WithLabelValues(metrics.RoleServer, metrics.StatusSuccess).Inc()
-			return
+			return false
 		}
 	}
 }
@@ -724,8 +745,9 @@ func (s *ServerApp) validateNickname(nickname string) string {
 	return ""
 }
 
-// handleReconnectBySession checks if a session UUID matches an existing client.
-// If found, closes the old session and returns true + the old nickname.
+// handleReconnectBySession checks the sessions map for a previous session with the given UUID.
+// If found, returns the old nickname (only if it was server-assigned) and removes the session entry.
+// Also closes any still-connected client with the same session ID.
 func (s *ServerApp) handleReconnectBySession(sessionID string) (oldNickname string, found bool) {
 	if sessionID == "" {
 		return "", false
@@ -734,6 +756,17 @@ func (s *ServerApp) handleReconnectBySession(sessionID string) (oldNickname stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Check sessions map first (covers abnormal disconnects where session was preserved).
+	if entry, ok := s.sessions[sessionID]; ok {
+		delete(s.sessions, sessionID)
+		if !entry.isCustomNick {
+			return entry.nickname, true
+		}
+		// Custom nickname — don't restore it, but acknowledge the session was found.
+		return "", true
+	}
+
+	// Fallback: check if a still-connected client has this session (e.g. stale connection).
 	for id, mc := range s.clients {
 		if mc.sessionID != sessionID {
 			continue

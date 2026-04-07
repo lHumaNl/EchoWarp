@@ -328,7 +328,7 @@ func TestServerApp_UnregisterMultiClient_Cleanup(t *testing.T) {
 
 	mc, _ := app.registerMultiClient(server, "client-1")
 
-	app.unregisterMultiClient(mc, "client-1")
+	app.unregisterMultiClient(mc, "client-1", false)
 
 	app.mu.RLock()
 	_, exists := app.clients["client-1"]
@@ -710,7 +710,7 @@ func TestServerApp_MultiClientIntegration(t *testing.T) {
 
 			mc, ok := app.registerMultiClient(server, clientID)
 			if ok {
-				app.unregisterMultiClient(mc, clientID)
+				app.unregisterMultiClient(mc, clientID, false)
 			}
 		}(i)
 	}
@@ -803,7 +803,7 @@ func TestServerApp_RegisterAndUnregister_Sequential(t *testing.T) {
 			app.mu.RUnlock()
 			assert.LessOrEqual(t, count, 5)
 
-			app.unregisterMultiClient(mc, clientID)
+			app.unregisterMultiClient(mc, clientID, false)
 		}
 		server.Close()
 	}

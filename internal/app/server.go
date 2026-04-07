@@ -115,6 +115,17 @@ type ServerApp struct {
 	// serverPaused is set when the server operator pauses capture via TUI (ctrl+p).
 	// When true, the server drops outgoing audio frames from its capture device.
 	serverPaused atomic.Bool
+
+	// sessions stores session entries for reconnect support.
+	// Protected by mu (same mutex as clients).
+	sessions map[string]*sessionEntry
+}
+
+// sessionEntry stores data needed to restore a client's identity on reconnect.
+type sessionEntry struct {
+	clientID     string // Last client ID assigned to this session.
+	nickname     string // Nickname at the time of disconnect.
+	isCustomNick bool   // True if the nickname was chosen by the client (not server-assigned).
 }
 
 // multiClient tracks state for a connected client in multi-client mode.
@@ -123,6 +134,7 @@ type multiClient struct {
 	nickname      string                // Display name for chat.
 	hwid          string                // Hardware identifier (for bans, if collected).
 	sessionID     string                // UUID assigned by server (for reconnect).
+	isCustomNick  bool                  // True if nickname was client-chosen (not server-assigned).
 	conn          net.Conn              // TCP signaling connection.
 	peer          transport.PeerManager // WebRTC peer connection (interface for decoupling).
 	joinedAt      time.Time             // Connection timestamp.
@@ -146,6 +158,7 @@ func NewServerApp(cfg config.Config, logger *slog.Logger, banMgr ban.BanManager,
 		signalerFactory: NewTCPSignalerFactory(),
 		peerFactory:     NewWebRTCPeerFactory(),
 		clients:         make(map[string]*multiClient),
+		sessions:        make(map[string]*sessionEntry),
 	}
 }
 
