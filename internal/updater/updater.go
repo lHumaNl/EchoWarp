@@ -300,9 +300,7 @@ func (u *Updater) getLatestRelease(ctx context.Context) (*Release, error) {
 
 // getReleaseByTag fetches a specific release by tag.
 func (u *Updater) getReleaseByTag(ctx context.Context, tag string) (*Release, error) {
-	if !strings.HasPrefix(tag, "v") {
-		tag = "v" + tag
-	}
+	tag = strings.TrimPrefix(tag, "v")
 
 	url := fmt.Sprintf("%s/%s/releases/tags/%s", u.apiBaseURL, u.repo, tag)
 
