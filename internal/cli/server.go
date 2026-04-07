@@ -18,6 +18,7 @@ import (
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/logging"
 	"github.com/lHumaNl/echowarp/internal/tui"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
@@ -75,7 +76,6 @@ func newServerCmd() *cobra.Command {
 	cmd.Flags().Bool("no-simd-optimization", false, "Disable SIMD audio optimizations (use pure Go)")
 	cmd.Flags().Bool("no-pool-warmup", false, "Disable audio buffer pool warmup on startup")
 	cmd.Flags().Int("audio-buffer-frames", 5, "Audio channel buffer size in frames (each frame=20ms). Lower=less latency, higher=more stability")
-	cmd.Flags().StringSlice("trusted-proxies", nil, "Trusted proxy IPs/CIDRs for X-Forwarded-For processing (e.g., \"10.0.0.0/8,192.168.1.1\"). Use \"localhost\" to trust 127.0.0.1 and ::1. Default: none trusted")
 	cmd.Flags().Bool("dry-run", false, "Validate config and check device, then exit without starting")
 	cmd.Flags().Bool("loopback", false, "Enable loopback capture of system audio (macOS, requires BlackHole)")
 	cmd.Flags().Bool("no-interactive", false, "Disable TUI: requires --device, logs to stdout/file")
@@ -91,7 +91,7 @@ func newServerCmd() *cobra.Command {
 
 	applyGroupedUsage(cmd, []flagGroup{
 		{"Audio", []string{"device", "device-name", "capture-device", "playback-device", "sample-rate", "channels", "virtual-mic", "loopback", "aec", "audio-buffer-frames"}},
-		{"Network", []string{"port", "stun-server", "tls-cert", "tls-key", "no-discovery", "server-name", "rate-limit", "trusted-proxies"}},
+		{"Network", []string{"port", "stun-server", "tls-cert", "tls-key", "no-discovery", "server-name", "rate-limit"}},
 		{"Security", []string{"password", "max-auth-failures", "ban-file", "hwid-required"}},
 		{"Conference", []string{"conference", "max-clients", "server-muted", "record"}},
 		{"Mode", []string{"reverse", "duplex"}},
@@ -350,7 +350,10 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 			}
 
 			tlsConfig, _ := setupTLSConfig(&selectedCfg)
-			rateLimiter := setupRateLimiter(cmd)
+			var rateLimiter *auth.IPRateLimiter
+			if selectedCfg.RateLimit > 0 {
+				rateLimiter = auth.NewIPRateLimiter(selectedCfg.RateLimit)
+			}
 			setupDiscovery(ctx, cmd, &selectedCfg, logger)
 			startSessionInfoServer(ctx, selectedCfg, logger, func() int { return int(clientCount.Load()) })
 

@@ -146,6 +146,9 @@ type Config struct {
 	// Server only, default false.
 	HWIDRequired bool `yaml:"hwid_required" json:"hwid_required"`
 
+	// RateLimit is the maximum number of connections per second per IP (0=disabled).
+	RateLimit int `yaml:"rate_limit"`
+
 	NoSIMDOptimization bool `yaml:"no_simd_optimization"`
 	NoPoolWarmup       bool `yaml:"no_pool_warmup"`
 
@@ -292,6 +295,7 @@ func (c Config) toNested() nestedConfig {
 			MaxAuthFailures: c.MaxFailedAttempts,
 			BanFile:         c.BanFilePath,
 			TrustedProxies:  c.TrustedProxies,
+			RateLimit:       c.RateLimit,
 		},
 		Connection: nestedConnectionConfig{
 			MaxClients:            c.MaxClients,
@@ -378,6 +382,7 @@ func fromNested(base Config, n nestedConfig) Config {
 	}
 	base.BanFilePath = n.Security.BanFile
 	base.TrustedProxies = n.Security.TrustedProxies
+	base.RateLimit = n.Security.RateLimit
 
 	// Connection
 	if n.Connection.MaxClients != 0 {

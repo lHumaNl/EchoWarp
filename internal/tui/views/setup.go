@@ -501,6 +501,20 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		fields = append(fields, keyField)
 	}
 
+	// Rate limit (server only)
+	if cfg.Mode == config.ModeServer {
+		rlVal := cfg.RateLimit
+		if rlVal == 0 {
+			rlVal = 5 // CLI default
+		}
+		rlField := NewNumberField("Rate limit", rlVal, 0, 1000)
+		rlField.Hint = "req/s (0=off)"
+		if cfg.RateLimit != 0 && cfg.RateLimit != 5 {
+			rlField.Source = SourceCLI
+		}
+		fields = append(fields, rlField)
+	}
+
 	srOpts := []string{"48 kHz", "24 kHz", "16 kHz", "8 kHz"}
 	srIdx := 0
 	srDisplay := FormatSampleRate(cfg.SampleRate)

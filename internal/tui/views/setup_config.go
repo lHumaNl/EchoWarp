@@ -240,6 +240,8 @@ func (m SetupModel) BuildConfig() config.Config {
 			cfg.NoSIMDOptimization = f.Value == "off"
 		case "HWID collection":
 			cfg.HWIDRequired = f.Value == "on"
+		case "Rate limit":
+			cfg.RateLimit = f.IntValue()
 		}
 	}
 	return cfg
@@ -357,6 +359,8 @@ func (m *SetupModel) applyAllConfigFields(cfg config.Config, defaults config.Con
 		hwidVal = "on"
 	}
 	setField(m.AdvancedFields, "HWID collection", hwidVal, "off")
+
+	setField(m.AdvancedFields, "Rate limit", fmt.Sprintf("%d", cfg.RateLimit), fmt.Sprintf("%d", defaults.RateLimit))
 
 	// Apply device selection from loaded config.
 	m.applyDeviceSelection(cfg.Devices)
