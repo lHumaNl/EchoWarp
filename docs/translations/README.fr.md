@@ -342,6 +342,9 @@ Si aucun pilote audio virtuel n'est trouvé, le doctor affichera les instruction
 **Je veux un appel de groupe avec 3+ machines.**
 → Utilisez le mode Conference. Le serveur agit comme un hub (aucun périphérique nécessaire). Chaque client sélectionne un micro et des haut-parleurs. Tout le monde entend tout le monde, sauf sa propre voix.
 
+**J'utilise Moonlight/Sunshine (ou NVIDIA GameStream) et je veux que mon microphone fonctionne dans les jeux sur l'hôte.**
+→ Lancez `EchoWarp server` en mode Reverse sur l'hôte de jeu (machine Sunshine/GameStream). Lancez `EchoWarp client` sur la machine Moonlight, sélectionnez votre microphone dans Input. Sur le serveur, sélectionnez un périphérique audio virtuel (BlackHole/VB-Cable) dans Output, ou activez `--virtual-mic` pour en créer un automatiquement. Dans votre jeu ou chat vocal sur l'hôte, sélectionnez ce périphérique virtuel comme microphone. Votre voix depuis le client Moonlight apparaîtra comme entrée micro sur l'hôte de jeu.
+
 **Je veux que Discord entende à la fois le flux distant ET ma voix via un seul micro virtuel.**
 → Sur le client, sélectionnez un périphérique virtuel (BlackHole/VB-Cable) dans Output. Une liste de périphériques d'entrée apparaîtra en dessous — cochez votre microphone. EchoWarp mixera le flux et votre micro dans la sortie virtuelle. Dans Discord, sélectionnez le périphérique virtuel comme microphone.
 

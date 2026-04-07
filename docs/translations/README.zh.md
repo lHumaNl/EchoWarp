@@ -342,6 +342,9 @@ Audio
 **我想进行3台及以上设备的群组通话。**
 → 使用会议（Conference）模式。服务端充当集线器（无需配置设备）。每个客户端选择麦克风和扬声器。所有人可以听到彼此的声音，但不会听到自己的回声。
 
+**我使用 Moonlight/Sunshine（或 NVIDIA GameStream），想让麦克风在主机的游戏中正常工作。**
+→ 在游戏主机（Sunshine/GameStream 机器）上以 Reverse 模式运行 `EchoWarp server`。在 Moonlight 机器上运行 `EchoWarp client`，在 Input 中选择您的麦克风。在服务端，于 Output 中选择虚拟音频设备（BlackHole/VB-Cable），或启用 `--virtual-mic` 自动创建。在主机上的游戏或语音聊天中，选择该虚拟设备作为麦克风。您从 Moonlight 客户端发出的声音将作为游戏主机上的麦克风输入出现。
+
 **我想让 Discord 通过一个虚拟麦克风同时听到远端音频流和我的声音。**
 → 在客户端，于输出（Output）中选择一个虚拟设备（BlackHole/VB-Cable）。其下方会显示输入设备列表——勾选您的麦克风。EchoWarp 会将音频流和您的麦克风混合后写入虚拟输出。在 Discord 中，选择该虚拟设备作为麦克风即可。
 

@@ -342,6 +342,9 @@ Wenn kein virtueller Audiotreiber gefunden wird, zeigt der Doctor Installationsa
 **Ich möchte einen Gruppenanruf mit 3+ Geräten.**
 → Conference-Modus verwenden. Der Server fungiert als Hub (keine Geräte erforderlich). Jeder Client wählt ein Mikrofon und Lautsprecher. Alle hören alle anderen, abzüglich der eigenen Stimme.
 
+**Ich verwende Moonlight/Sunshine (oder NVIDIA GameStream) und möchte, dass mein Mikrofon in Spielen auf dem Host funktioniert.**
+→ Starten Sie `EchoWarp server` im Reverse-Modus auf dem Spiele-Host (Sunshine/GameStream-Rechner). Starten Sie `EchoWarp client` auf dem Moonlight-Rechner und wählen Sie Ihr Mikrofon unter Input. Auf dem Server wählen Sie ein virtuelles Audiogerät (BlackHole/VB-Cable) unter Output oder aktivieren Sie `--virtual-mic` zur automatischen Erstellung. Wählen Sie in Ihrem Spiel oder Voice-Chat auf dem Host dieses virtuelle Gerät als Mikrofon aus. Ihre Stimme vom Moonlight-Client erscheint als Mikrofoneingang auf dem Spiele-Host.
+
 **Ich möchte, dass Discord sowohl den Remote-Stream ALS AUCH meine Stimme über ein virtuelles Mikrofon hört.**
 → Auf dem Client ein virtuelles Gerät (BlackHole/VB-Cable) unter Output auswählen. Darunter erscheint eine Liste der Eingabegeräte — das eigene Mikrofon aktivieren. EchoWarp mischt den Stream und das Mikrofon in die virtuelle Ausgabe. In Discord das virtuelle Gerät als Mikrofon auswählen.
 

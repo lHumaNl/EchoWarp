@@ -342,6 +342,9 @@ Sanal ses sürücüsü bulunamazsa, doctor platformunuz için kurulum talimatlar
 **3+ makineyle grup araması yapmak istiyorum.**
 → Conference modunu kullanın. Sunucu hub görevi görür (cihaz gerekmez). Her istemci bir mikrofon ve hoparlör seçer. Herkes kendi sesini duymadan diğerlerini duyar.
 
+**Moonlight/Sunshine (veya NVIDIA GameStream) kullanıyorum ve mikrofonumun ana bilgisayardaki oyunlarda çalışmasını istiyorum.**
+→ Oyun ana bilgisayarında (Sunshine/GameStream makinesi) `EchoWarp server`'ı Reverse modunda çalıştırın. Moonlight makinesinde `EchoWarp client`'ı çalıştırın, Input'ta mikrofonunuzu seçin. Sunucuda, Output'ta bir sanal ses cihazı (BlackHole/VB-Cable) seçin veya otomatik oluşturmak için `--virtual-mic`'i etkinleştirin. Ana bilgisayardaki oyununuzda veya sesli sohbetinizde bu sanal cihazı mikrofon olarak seçin. Moonlight istemcisinden gelen sesiniz, oyun ana bilgisayarında mikrofon girişi olarak görünecektir.
+
 **Discord'un hem uzak akışı HEM DE sesimi tek bir sanal mikrofon üzerinden duymasını istiyorum.**
 → İstemcide Çıkış'ta bir sanal cihaz (BlackHole/VB-Cable) seçin. Altında giriş cihazları listesi görünecektir — mikrofonunuzu işaretleyin. EchoWarp akışı ve mikrofonunuzu sanal çıkışa karıştıracaktır. Discord'da sanal cihazı mikrofon olarak seçin.
 

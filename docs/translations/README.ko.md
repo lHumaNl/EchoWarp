@@ -342,6 +342,9 @@ Audio
 **3대 이상으로 그룹 통화를 하고 싶습니다.**
 → Conference 모드를 사용하십시오. 서버는 허브 역할을 합니다(장치 불필요). 각 클라이언트는 마이크와 스피커를 선택합니다. 모든 참가자가 자신의 목소리를 제외한 다른 모든 소리를 들을 수 있습니다.
 
+**Moonlight/Sunshine(또는 NVIDIA GameStream)을 사용하는데, 호스트의 게임에서 마이크가 작동하게 하고 싶습니다.**
+→ 게임 호스트(Sunshine/GameStream 머신)에서 `EchoWarp server`를 Reverse 모드로 실행하십시오. Moonlight 머신에서 `EchoWarp client`를 실행하고 Input에서 마이크를 선택하십시오. 서버에서 Output에 가상 오디오 장치(BlackHole/VB-Cable)를 선택하거나, `--virtual-mic`를 활성화하여 자동으로 생성하십시오. 호스트의 게임이나 음성 채팅에서 해당 가상 장치를 마이크로 선택하십시오. Moonlight 클라이언트에서 보낸 음성이 게임 호스트의 마이크 입력으로 나타납니다.
+
 **Discord에서 원격 스트림과 내 목소리를 하나의 가상 마이크로 사용하고 싶습니다.**
 → 클라이언트에서 Output에 가상 장치(BlackHole/VB-Cable)를 선택하십시오. 그 아래에 입력 장치 목록이 나타납니다 — 마이크를 체크하십시오. EchoWarp가 스트림과 마이크를 가상 출력으로 믹싱합니다. Discord에서 해당 가상 장치를 마이크로 선택하십시오.
 

@@ -342,6 +342,9 @@ Nếu không tìm thấy driver âm thanh ảo, doctor sẽ hiển thị hướn
 **Tôi muốn cuộc gọi nhóm với 3+ máy.**
 → Dùng chế độ Conference. Máy chủ đóng vai trò hub (không cần thiết bị). Mỗi client chọn mic và loa. Mọi người đều nghe được nhau, trừ giọng của chính mình.
 
+**Tôi sử dụng Moonlight/Sunshine (hoặc NVIDIA GameStream) và muốn microphone hoạt động trong game trên máy host.**
+→ Chạy `EchoWarp server` ở chế độ Reverse trên máy host game (máy Sunshine/GameStream). Chạy `EchoWarp client` trên máy Moonlight, chọn microphone của bạn trong Input. Trên server, chọn thiết bị âm thanh ảo (BlackHole/VB-Cable) trong Output, hoặc bật `--virtual-mic` để tạo tự động. Trong game hoặc voice chat trên máy host, chọn thiết bị ảo đó làm microphone. Giọng nói của bạn từ client Moonlight sẽ xuất hiện như đầu vào mic trên máy host game.
+
 **Tôi muốn Discord nghe cả luồng từ xa VÀ giọng nói của tôi qua một mic ảo.**
 → Trên máy khách, chọn thiết bị ảo (BlackHole/VB-Cable) trong Output. Danh sách thiết bị đầu vào sẽ xuất hiện bên dưới — đánh dấu microphone của bạn. EchoWarp sẽ trộn luồng từ xa và mic của bạn vào đầu ra ảo. Trong Discord, chọn thiết bị ảo đó làm microphone.
 

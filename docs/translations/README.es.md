@@ -342,6 +342,9 @@ Si no se encuentra ningún driver de audio virtual, el doctor mostrará instrucc
 **Quiero una llamada grupal con 3+ máquinas.**
 → Usa el modo Conference. El servidor actúa como hub (no se necesitan dispositivos). Cada cliente selecciona un micrófono y altavoces. Todos escuchan a todos los demás, excepto su propia voz.
 
+**Uso Moonlight/Sunshine (o NVIDIA GameStream) y quiero que mi micrófono funcione en juegos en el host.**
+→ Ejecuta `EchoWarp server` en modo Reverse en el host de juegos (máquina Sunshine/GameStream). Ejecuta `EchoWarp client` en la máquina Moonlight, selecciona tu micrófono en Input. En el servidor, selecciona un dispositivo de audio virtual (BlackHole/VB-Cable) en Output, o habilita `--virtual-mic` para crear uno automáticamente. En tu juego o chat de voz en el host, selecciona ese dispositivo virtual como micrófono. Tu voz desde el cliente Moonlight aparecerá como entrada de micrófono en el host de juegos.
+
 **Quiero que Discord escuche tanto la transmisión remota COMO mi voz a través de un solo micrófono virtual.**
 → En el cliente, selecciona un dispositivo virtual (BlackHole/VB-Cable) en Output. Aparecerá una lista de dispositivos de entrada debajo — marca tu micrófono. EchoWarp mezclará la transmisión y tu micrófono en la salida virtual. En Discord, selecciona el dispositivo virtual como tu micrófono.
 
