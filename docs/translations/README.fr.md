@@ -354,6 +354,20 @@ Si aucun pilote audio virtuel n'est trouvé, le doctor affichera les instruction
 **Le périphérique virtuel affiche "adaptive" à la place d'un taux d'échantillonnage.**
 → C'est normal. Les pilotes audio virtuels (BlackHole, VB-Cable) s'adaptent au taux d'échantillonnage utilisé par l'application — le taux affiché n'est pas significatif.
 
+<details>
+<summary>macOS : « Impossible d'ouvrir EchoWarp » / avertissement Gatekeeper</summary>
+
+macOS bloque les applications non signées. Pour autoriser l'exécution d'EchoWarp :
+
+```bash
+xattr -cr /path/to/EchoWarp       # pour le binaire
+xattr -cr /path/to/EchoWarp.app   # pour le bundle .app
+```
+
+Sinon : **Réglages du système → Confidentialité et sécurité → « Ouvrir quand même »**
+
+</details>
+
 ## Mode CLI
 
 Tous les paramètres disponibles dans l'interface TUI peuvent également être passés en tant qu'indicateurs CLI pour les scripts et l'automatisation :

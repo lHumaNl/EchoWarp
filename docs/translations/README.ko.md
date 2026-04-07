@@ -354,6 +354,20 @@ Audio
 **가상 장치에 샘플 레이트 대신 "adaptive"가 표시됩니다.**
 → 정상입니다. 가상 오디오 드라이버(BlackHole, VB-Cable)는 애플리케이션이 사용하는 샘플 레이트에 자동으로 적응하므로 표시된 레이트는 의미가 없습니다.
 
+<details>
+<summary>macOS: "EchoWarp를 열 수 없습니다" / Gatekeeper 경고</summary>
+
+macOS는 서명되지 않은 애플리케이션을 차단합니다. EchoWarp 실행을 허용하려면:
+
+```bash
+xattr -cr /path/to/EchoWarp       # 바이너리용
+xattr -cr /path/to/EchoWarp.app   # .app 번들용
+```
+
+또는: **시스템 설정 → 개인정보 보호 및 보안 → "확인 없이 열기"**
+
+</details>
+
 ## CLI 모드
 
 TUI에서 사용 가능한 모든 설정은 스크립팅과 자동화를 위한 CLI 플래그로도 전달할 수 있습니다:

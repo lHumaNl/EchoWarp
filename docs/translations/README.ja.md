@@ -354,6 +354,20 @@ Audio
 **バーチャルデバイスにサンプルレートの代わりに「adaptive」と表示される。**
 → これは正常です。バーチャルオーディオドライバー（BlackHole、VB-Cable）はアプリケーションが使用するサンプルレートに適応します — 表示されるレートに意味はありません。
 
+<details>
+<summary>macOS:「EchoWarpを開けません」/ Gatekeeperの警告</summary>
+
+macOSは署名されていないアプリケーションをブロックします。EchoWarpの実行を許可するには：
+
+```bash
+xattr -cr /path/to/EchoWarp       # バイナリ用
+xattr -cr /path/to/EchoWarp.app   # .appバンドル用
+```
+
+または：**システム設定 → プライバシーとセキュリティ →「このまま開く」**
+
+</details>
+
 ## CLIモード
 
 TUIで利用可能なすべての設定は、スクリプトや自動化のためにCLIフラグとして渡すこともできます：

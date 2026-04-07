@@ -354,6 +354,20 @@ Se non viene trovato alcun driver audio virtuale, il doctor mostrerà le istruzi
 **Il dispositivo virtuale mostra "adaptive" invece di una frequenza di campionamento.**
 → È normale. I driver audio virtuali (BlackHole, VB-Cable) si adattano alla frequenza di campionamento utilizzata dall'applicazione — la frequenza visualizzata non è significativa.
 
+<details>
+<summary>macOS: "Impossibile aprire EchoWarp" / avviso Gatekeeper</summary>
+
+macOS blocca le applicazioni non firmate. Per consentire l'esecuzione di EchoWarp:
+
+```bash
+xattr -cr /path/to/EchoWarp       # per il binario
+xattr -cr /path/to/EchoWarp.app   # per il bundle .app
+```
+
+In alternativa: **Impostazioni di Sistema → Privacy e Sicurezza → "Consenti comunque"**
+
+</details>
+
 ## Modalità CLI
 
 Tutte le impostazioni disponibili nella TUI possono essere passate anche come flag CLI per scripting e automazione:

@@ -354,6 +354,20 @@ Audio
 **虚拟设备显示"adaptive"而非采样率。**
 → 这是正常现象。虚拟音频驱动（BlackHole、VB-Cable）会自适应应用程序所使用的采样率——显示的采样率没有实际意义。
 
+<details>
+<summary>macOS："无法打开 EchoWarp" / Gatekeeper 警告</summary>
+
+macOS 会阻止未签名的应用程序。要允许 EchoWarp 运行：
+
+```bash
+xattr -cr /path/to/EchoWarp       # 针对二进制文件
+xattr -cr /path/to/EchoWarp.app   # 针对 .app 包
+```
+
+或者：**系统设置 → 隐私与安全性 → "仍要打开"**
+
+</details>
+
 ## CLI 模式
 
 TUI 中所有可用的设置也可以通过 CLI 参数传入，适用于脚本和自动化场景：

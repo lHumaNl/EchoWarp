@@ -354,6 +354,20 @@ Sanal ses sürücüsü bulunamazsa, doctor platformunuz için kurulum talimatlar
 **Sanal cihaz örnek hız yerine "adaptive" gösteriyor.**
 → Bu normaldir. Sanal ses sürücüleri (BlackHole, VB-Cable) uygulamanın kullandığı örnek hıza uyum sağlar — görüntülenen hızın bir önemi yoktur.
 
+<details>
+<summary>macOS: "EchoWarp açılamıyor" / Gatekeeper uyarısı</summary>
+
+macOS imzalanmamış uygulamaları engeller. EchoWarp'ın çalışmasına izin vermek için:
+
+```bash
+xattr -cr /path/to/EchoWarp       # ikili dosya için
+xattr -cr /path/to/EchoWarp.app   # .app paketi için
+```
+
+Alternatif olarak: **Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de İzin Ver"**
+
+</details>
+
 ## CLI Modu
 
 TUI'de mevcut olan tüm ayarlar, komut dosyası oluşturma ve otomasyon için CLI bayrakları olarak da geçirilebilir:

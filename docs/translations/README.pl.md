@@ -354,6 +354,20 @@ Jeśli żaden wirtualny sterownik audio nie zostanie znaleziony, doctor wyświet
 **Urządzenie wirtualne wyświetla „adaptive" zamiast częstotliwości próbkowania.**
 → To normalne. Wirtualne sterowniki audio (BlackHole, VB-Cable) dostosowują się do częstotliwości próbkowania używanej przez aplikację — wyświetlana wartość nie ma znaczenia.
 
+<details>
+<summary>macOS: „Nie można otworzyć EchoWarp" / ostrzeżenie Gatekeeper</summary>
+
+macOS blokuje niepodpisane aplikacje. Aby zezwolić na uruchomienie EchoWarp:
+
+```bash
+xattr -cr /path/to/EchoWarp       # dla pliku binarnego
+xattr -cr /path/to/EchoWarp.app   # dla pakietu .app
+```
+
+Alternatywnie: **Ustawienia systemowe → Prywatność i bezpieczeństwo → „Zezwól mimo to"**
+
+</details>
+
 ## Tryb CLI
 
 Wszystkie ustawienia dostępne w TUI można również przekazać jako flagi CLI na potrzeby skryptów i automatyzacji:

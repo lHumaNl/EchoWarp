@@ -354,6 +354,20 @@ Wenn kein virtueller Audiotreiber gefunden wird, zeigt der Doctor Installationsa
 **Das virtuelle Gerät zeigt „adaptive" statt einer Abtastrate an.**
 → Das ist normal. Virtuelle Audiotreiber (BlackHole, VB-Cable) passen sich an die Abtastrate der verwendenden Anwendung an — die angezeigte Rate ist nicht aussagekräftig.
 
+<details>
+<summary>macOS: „EchoWarp kann nicht geöffnet werden" / Gatekeeper-Warnung</summary>
+
+macOS blockiert unsignierte Anwendungen. Um EchoWarp auszuführen:
+
+```bash
+xattr -cr /path/to/EchoWarp       # für die Binärdatei
+xattr -cr /path/to/EchoWarp.app   # für das .app-Bundle
+```
+
+Alternativ: **Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem erlauben"**
+
+</details>
+
 ## CLI-Modus
 
 Alle im TUI verfügbaren Einstellungen können auch als CLI-Flags für Skripting und Automatisierung übergeben werden:

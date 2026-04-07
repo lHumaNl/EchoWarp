@@ -354,6 +354,20 @@ Nếu không tìm thấy driver âm thanh ảo, doctor sẽ hiển thị hướn
 **Thiết bị ảo hiển thị "adaptive" thay vì tần số lấy mẫu.**
 → Đây là bình thường. Driver âm thanh ảo (BlackHole, VB-Cable) tự thích nghi với tần số lấy mẫu mà ứng dụng sử dụng — tốc độ hiển thị không có ý nghĩa thực tế.
 
+<details>
+<summary>macOS: "Không thể mở EchoWarp" / cảnh báo Gatekeeper</summary>
+
+macOS chặn các ứng dụng chưa được ký. Để cho phép EchoWarp chạy:
+
+```bash
+xattr -cr /path/to/EchoWarp       # cho tệp nhị phân
+xattr -cr /path/to/EchoWarp.app   # cho gói .app
+```
+
+Hoặc: **Cài đặt Hệ thống → Quyền riêng tư & Bảo mật → "Cho phép"**
+
+</details>
+
 ## Chế độ CLI
 
 Tất cả các cài đặt có trong TUI cũng có thể được truyền dưới dạng cờ CLI để viết script và tự động hóa:

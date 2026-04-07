@@ -295,6 +295,13 @@ jobs:
           </plist>
           PLIST
 
+      # ── Sign macOS binary ──────────────────────────────────────
+      - name: Sign macOS binary
+        if: matrix.goos == 'darwin'
+        run: |
+          codesign -s - --force --deep EchoWarp.app
+          codesign -s - --force EchoWarp
+
       # ── Create archives ──────────────────────────────────────
       - name: Create archive (tar.gz)
         if: matrix.archive == 'tar.gz'

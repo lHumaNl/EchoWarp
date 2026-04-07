@@ -354,6 +354,20 @@ If no virtual audio driver is found, the doctor will show installation instructi
 **The virtual device shows "adaptive" instead of a sample rate.**
 → This is normal. Virtual audio drivers (BlackHole, VB-Cable) adapt to whatever sample rate the application uses — the displayed rate is not meaningful.
 
+<details>
+<summary>macOS: "EchoWarp can't be opened" / Gatekeeper warning</summary>
+
+macOS blocks unsigned applications. To allow EchoWarp to run:
+
+```bash
+xattr -cr /path/to/EchoWarp       # for the binary
+xattr -cr /path/to/EchoWarp.app   # for the .app bundle
+```
+
+Alternatively: **System Settings → Privacy & Security → "Allow Anyway"**
+
+</details>
+
 ## CLI Mode
 
 All settings available in the TUI can also be passed as CLI flags for scripting and automation:

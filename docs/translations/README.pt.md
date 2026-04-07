@@ -354,6 +354,20 @@ Se nenhum driver de áudio virtual for encontrado, o doctor exibirá instruçõe
 **O dispositivo virtual exibe "adaptive" em vez de uma taxa de amostragem.**
 → Isso é normal. Os drivers de áudio virtual (BlackHole, VB-Cable) se adaptam à taxa de amostragem usada pelo aplicativo — a taxa exibida não tem significado prático.
 
+<details>
+<summary>macOS: "Não é possível abrir o EchoWarp" / aviso do Gatekeeper</summary>
+
+O macOS bloqueia aplicativos não assinados. Para permitir a execução do EchoWarp:
+
+```bash
+xattr -cr /path/to/EchoWarp       # para o binário
+xattr -cr /path/to/EchoWarp.app   # para o pacote .app
+```
+
+Alternativamente: **Ajustes do Sistema → Privacidade e Segurança → "Permitir Mesmo Assim"**
+
+</details>
+
 ## Modo CLI
 
 Todas as configurações disponíveis na TUI também podem ser passadas como flags de CLI para scripts e automação:
