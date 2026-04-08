@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	presetpkg "github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
 )
 
@@ -283,4 +284,56 @@ func (m *SetupModel) applyRestore(preset recent.DevicePreset, skipVirtual bool) 
 		return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return FlashDismissMsg{} })
 	}
 	return nil
+}
+
+// restoreServerSettings applies saved server settings to the TUI fields.
+// Fields that have a zero/empty value in the settings are skipped (backward compat).
+func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
+	setIfNonEmpty := func(fields []SetupField, label, value string) {
+		if value == "" {
+			return
+		}
+		for i := range fields {
+			if fields[i].Label == label {
+				fields[i].SetValue(value, SourceConfig)
+				return
+			}
+		}
+	}
+
+	if s.LastMode != "" {
+		// Mode field stores values like "normal (server → client)" — match by prefix.
+		for i := range m.Fields {
+			if m.Fields[i].Label != "Mode" {
+				continue
+			}
+			for _, opt := range m.Fields[i].Options {
+				if strings.SplitN(opt, " ", 2)[0] == s.LastMode {
+					m.Fields[i].SetValue(opt, SourceConfig)
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if s.Port != 0 {
+		setIfNonEmpty(m.Fields, "Port", fmt.Sprintf("%d", s.Port))
+	}
+	setIfNonEmpty(m.Fields, "Password", s.Password)
+	if s.MaxClients != 0 {
+		setIfNonEmpty(m.Fields, "Max clients", fmt.Sprintf("%d", s.MaxClients))
+	}
+
+	tlsVal := "off"
+	if s.TLS {
+		tlsVal = "on"
+	}
+	if s.TLS {
+		setIfNonEmpty(m.AdvancedFields, "TLS", tlsVal)
+	}
+	setIfNonEmpty(m.AdvancedFields, "TLS Cert", s.TLSCert)
+	setIfNonEmpty(m.AdvancedFields, "TLS Key", s.TLSKey)
+
+	m.applyFieldDependencies()
 }

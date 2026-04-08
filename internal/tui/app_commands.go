@@ -255,11 +255,12 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 	}
 }
 
-// saveServerPresetCmd returns a tea.Cmd that persists the server-side device preset to disk.
-func saveServerPresetCmd(devicePreset recent.DevicePreset, mode string) tea.Cmd {
+// saveServerPresetCmd returns a tea.Cmd that persists the server-side device preset and settings to disk.
+func saveServerPresetCmd(devicePreset recent.DevicePreset, mode string, settings preset.ServerSettings) tea.Cmd {
 	return func() tea.Msg {
 		sp := preset.Load()
 		sp.Set(mode, devicePreset)
+		sp.Settings = settings
 		_ = preset.Save(sp) //nolint:errcheck
 		return nil
 	}

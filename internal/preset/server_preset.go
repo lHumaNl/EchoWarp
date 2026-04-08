@@ -13,9 +13,21 @@ import (
 	"github.com/lHumaNl/echowarp/internal/recent"
 )
 
+// ServerSettings stores server configuration values that are saved alongside device presets.
+type ServerSettings struct {
+	LastMode   string `json:"last_mode,omitempty"   yaml:"last_mode,omitempty"`
+	Port       int    `json:"port,omitempty"        yaml:"port,omitempty"`
+	Password   string `json:"password,omitempty"    yaml:"password,omitempty"`
+	TLS        bool   `json:"tls,omitempty"         yaml:"tls,omitempty"`
+	TLSCert    string `json:"tls_cert,omitempty"    yaml:"tls_cert,omitempty"`
+	TLSKey     string `json:"tls_key,omitempty"     yaml:"tls_key,omitempty"`
+	MaxClients int    `json:"max_clients,omitempty" yaml:"max_clients,omitempty"`
+}
+
 // ServerPresets stores device presets for server mode (keyed by audio mode).
 type ServerPresets struct {
-	Presets map[string]recent.DevicePreset `json:"presets" yaml:"presets"`
+	Presets  map[string]recent.DevicePreset `json:"presets"  yaml:"presets"`
+	Settings ServerSettings                 `json:"settings,omitempty" yaml:"settings,omitempty"`
 }
 
 // FilePath returns ~/.config/echowarp/server_presets.yaml.

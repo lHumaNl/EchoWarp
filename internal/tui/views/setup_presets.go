@@ -1,6 +1,11 @@
 package views
 
-import "github.com/lHumaNl/echowarp/internal/recent"
+import (
+	"strings"
+
+	"github.com/lHumaNl/echowarp/internal/preset"
+	"github.com/lHumaNl/echowarp/internal/recent"
+)
 
 // CollectPresetDevices returns a DevicePreset containing all currently selected devices.
 // It iterates over input and output device lists in order, including any device
@@ -62,4 +67,32 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 	}
 
 	return recent.DevicePreset{Devices: devices}
+}
+
+// CollectServerSettings returns the current server configuration from the TUI fields.
+func (m *SetupModel) CollectServerSettings() preset.ServerSettings {
+	var s preset.ServerSettings
+	for _, f := range m.Fields {
+		switch f.Label {
+		case "Mode":
+			s.LastMode = strings.SplitN(f.Value, " ", 2)[0]
+		case "Port":
+			s.Port = f.IntValue()
+		case "Password":
+			s.Password = f.Value
+		case "Max clients":
+			s.MaxClients = f.IntValue()
+		}
+	}
+	for _, f := range m.AdvancedFields {
+		switch f.Label {
+		case "TLS":
+			s.TLS = f.Value == "on"
+		case "TLS Cert":
+			s.TLSCert = f.Value
+		case "TLS Key":
+			s.TLSKey = f.Value
+		}
+	}
+	return s
 }

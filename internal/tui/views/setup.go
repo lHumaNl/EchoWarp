@@ -242,6 +242,7 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 	if cfg.Mode == config.ModeServer {
 		sp := preset.Load()
 		m.serverPresets = &sp
+		m.restoreServerSettings(sp.Settings)
 	}
 
 	// Apply field dependencies on init

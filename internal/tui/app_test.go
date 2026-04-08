@@ -654,7 +654,8 @@ func TestSaveServerPresetCmd_PersistsPreset(t *testing.T) {
 		},
 	}
 
-	cmd := saveServerPresetCmd(devicePreset, "normal")
+	settings := preset.ServerSettings{Port: 9090, LastMode: "normal"}
+	cmd := saveServerPresetCmd(devicePreset, "normal", settings)
 	require.NotNil(t, cmd)
 	msg := cmd()
 	assert.Nil(t, msg)
@@ -664,6 +665,8 @@ func TestSaveServerPresetCmd_PersistsPreset(t *testing.T) {
 	require.NotNil(t, p)
 	require.Len(t, p.Devices, 1)
 	assert.Equal(t, "Speaker", p.Devices[0].Name)
+	assert.Equal(t, 9090, sp.Settings.Port)
+	assert.Equal(t, "normal", sp.Settings.LastMode)
 }
 
 func TestSaveServerPresetCmd_PreservesOtherModes(t *testing.T) {
@@ -680,7 +683,7 @@ func TestSaveServerPresetCmd_PreservesOtherModes(t *testing.T) {
 	// Now save a "normal" preset.
 	cmd := saveServerPresetCmd(recent.DevicePreset{
 		Devices: []recent.PresetDevice{{ID: 1, Name: "NewMic"}},
-	}, "normal")
+	}, "normal", preset.ServerSettings{})
 	_ = cmd()
 
 	sp2 := preset.Load()
