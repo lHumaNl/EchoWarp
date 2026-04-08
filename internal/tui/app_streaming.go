@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -113,13 +114,11 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 				cid := m.multiStats.Clients[m.selectedClient].ClientID
 				switch {
 				case msg.String() == "+" || msg.String() == "=":
-					vol := m.perClientVolumes[cid]
-					if vol == 0 && m.perClientVolumes != nil {
-						if _, ok := m.perClientVolumes[cid]; !ok {
-							vol = 1.0
-						}
+					vol, ok := m.perClientVolumes[cid]
+					if !ok {
+						vol = 1.0
 					}
-					vol += 0.1
+					vol = math.Round((vol+0.1)*10) / 10
 					if vol > 1.5 {
 						vol = 1.5
 					}
@@ -127,13 +126,11 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 					m.cmdCh <- ClientCommand{Action: ActionVolumeUp, ClientID: cid}
 					return m, nil
 				case msg.String() == "-":
-					vol := m.perClientVolumes[cid]
-					if vol == 0 && m.perClientVolumes != nil {
-						if _, ok := m.perClientVolumes[cid]; !ok {
-							vol = 1.0
-						}
+					vol, ok := m.perClientVolumes[cid]
+					if !ok {
+						vol = 1.0
 					}
-					vol -= 0.1
+					vol = math.Round((vol-0.1)*10) / 10
 					if vol < 0 {
 						vol = 0
 					}
@@ -153,7 +150,7 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 				return m, nil
 			case msg.String() == "+" || msg.String() == "=":
 				dev := m.deviceStates[m.selectedDevice2]
-				dev.Volume += 0.1
+				dev.Volume = math.Round((dev.Volume+0.1)*10) / 10
 				if dev.Volume > 1.5 {
 					dev.Volume = 1.5
 				}
@@ -162,7 +159,7 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 				return m, nil
 			case msg.String() == "-":
 				dev := m.deviceStates[m.selectedDevice2]
-				dev.Volume -= 0.1
+				dev.Volume = math.Round((dev.Volume-0.1)*10) / 10
 				if dev.Volume < 0 {
 					dev.Volume = 0
 				}
@@ -1263,7 +1260,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ds := currentList[m.deviceOverlayIndex]
 			for i := range m.deviceStates {
 				if m.deviceStates[i].ID == ds.ID {
-					m.deviceStates[i].Volume += 0.1
+					m.deviceStates[i].Volume = math.Round((m.deviceStates[i].Volume+0.1)*10) / 10
 					if m.deviceStates[i].Volume > 1.5 {
 						m.deviceStates[i].Volume = 1.5
 					}
@@ -1279,7 +1276,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			ds := currentList[m.deviceOverlayIndex]
 			for i := range m.deviceStates {
 				if m.deviceStates[i].ID == ds.ID {
-					m.deviceStates[i].Volume -= 0.1
+					m.deviceStates[i].Volume = math.Round((m.deviceStates[i].Volume-0.1)*10) / 10
 					if m.deviceStates[i].Volume < 0 {
 						m.deviceStates[i].Volume = 0
 					}

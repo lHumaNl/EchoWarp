@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 )
@@ -32,7 +33,7 @@ func HandleDeviceCommands(ctx context.Context, cmdCh <-chan DeviceCommand, mixer
 				logger.Info("Global mute toggled", "muted", !current)
 			case DeviceVolumeUp:
 				vol := mixer.GetSourceVolume(sourceID)
-				vol += 0.1
+				vol = float32(math.Round(float64(vol+0.1)*10) / 10)
 				if vol > 1.5 {
 					vol = 1.5
 				}
@@ -40,7 +41,7 @@ func HandleDeviceCommands(ctx context.Context, cmdCh <-chan DeviceCommand, mixer
 				logger.Info("Device volume up", "device", cmd.DeviceID, "volume", vol)
 			case DeviceVolumeDown:
 				vol := mixer.GetSourceVolume(sourceID)
-				vol -= 0.1
+				vol = float32(math.Round(float64(vol-0.1)*10) / 10)
 				if vol < 0 {
 					vol = 0
 				}

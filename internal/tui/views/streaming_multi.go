@@ -13,7 +13,7 @@ import (
 
 // Layout constants for master-detail view.
 const (
-	leftColumnWidth    = 26 // width of master column
+	leftColumnWidth    = 36 // width of master column (wider for volume bars)
 	leftColumnWidthMin = 20 // minimum at narrow terminals
 	minDetailWidth     = 30 // minimum for detail panel
 	minTerminalWidth   = 50 // absolute minimum terminal width
