@@ -31,18 +31,24 @@ func TestSetLanguage_Russian(t *testing.T) {
 	assert.Equal(t, Russian, CurrentLanguage())
 }
 
-func TestSaveLoadLanguage(t *testing.T) {
-	// Use a temp dir to avoid touching real config.
+// withTempSettingsPath overrides settingsPathFn for the duration of the test.
+func withTempSettingsPath(t *testing.T) string {
+	t.Helper()
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Setenv("HOME", tmpDir)
-	defer func() { _ = os.Setenv("HOME", origHome) }()
+	path := filepath.Join(tmpDir, "settings.yaml")
+	orig := settingsPathFn
+	settingsPathFn = func() string { return path }
+	t.Cleanup(func() { settingsPathFn = orig })
+	return path
+}
+
+func TestSaveLoadLanguage(t *testing.T) {
+	path := withTempSettingsPath(t)
 
 	// Save Russian.
 	require.NoError(t, SaveLanguage(Russian))
 
 	// Verify file exists.
-	path := filepath.Join(tmpDir, ".config", "echowarp", "settings.yaml")
 	_, err := os.Stat(path)
 	require.NoError(t, err)
 
@@ -56,8 +62,7 @@ func TestSaveLoadLanguage(t *testing.T) {
 }
 
 func TestDefaultLanguageIsEnglish(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
+	withTempSettingsPath(t)
 
 	// No settings file exists → default to English.
 	assert.Equal(t, English, LoadLanguage())

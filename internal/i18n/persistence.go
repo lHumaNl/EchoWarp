@@ -12,8 +12,15 @@ type Settings struct {
 	Language string `yaml:"language,omitempty"`
 }
 
+// settingsPathFn can be overridden in tests.
+var settingsPathFn = defaultSettingsPath
+
 // settingsPath returns the path to the settings file.
 func settingsPath() string {
+	return settingsPathFn()
+}
+
+func defaultSettingsPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
