@@ -35,6 +35,45 @@
 
 Capturez l'audio sur une machine, lisez-le sur une autre — en temps réel via le réseau. EchoWarp utilise WebRTC pour le transport et Opus pour la compression, offrant un audio à faible latence avec chiffrement de bout en bout.
 
+## Table des matières
+
+- [Fonctionnalités](#fonctionnalités)
+- [Démarrage rapide](#démarrage-rapide)
+- [Interface TUI interactive](#interface-tui-interactive)
+  - [Écran de configuration](#écran-de-configuration)
+  - [Découverte LAN](#découverte-lan)
+  - [Profils de périphériques](#profils-de-périphériques)
+  - [Écran de diffusion](#écran-de-diffusion)
+  - [Raccourcis clavier de l'interface TUI](#raccourcis-clavier-de-linterface-tui)
+- [Modes de diffusion](#modes-de-diffusion)
+  - [Normal — Sens unique : Serveur vers Clients](#normal-sens-unique-serveur-vers-clients)
+  - [Inversé — Sens unique : Clients vers Serveur](#inversé-sens-unique-clients-vers-serveur)
+  - [Duplex — Bidirectionnel](#duplex-bidirectionnel)
+  - [Conférence — Mixage multi-utilisateurs (N:N)](#conférence-mixage-multi-utilisateurs-nn)
+  - [Résumé des modes](#résumé-des-modes)
+- [Guide de routage audio](#guide-de-routage-audio)
+  - [Cas d'utilisation](#cas-dutilisation)
+  - [Loopback — Capturer l'audio système](#loopback-capturer-laudio-système)
+  - [Microphone virtuel — Router l'audio vers d'autres applications](#microphone-virtuel-router-laudio-vers-dautres-applications)
+  - [Mixage du microphone local dans la sortie virtuelle](#mixage-du-microphone-local-dans-la-sortie-virtuelle)
+  - [Sections de périphériques](#sections-de-périphériques)
+  - [Diagnostics](#diagnostics)
+  - [FAQ](#faq)
+- [Mode CLI](#mode-cli)
+  - [Modes](#modes)
+  - [Indicateurs communs](#indicateurs-communs)
+  - [Fichiers de configuration](#fichiers-de-configuration)
+- [Installation](#installation)
+  - [Binaires précompilés](#binaires-précompilés)
+  - [Compilation depuis les sources](#compilation-depuis-les-sources)
+- [Configuration requise](#configuration-requise)
+- [Réseau & Pare-feu](#réseau-pare-feu)
+  - [Serveur — ports à ouvrir](#serveur-ports-à-ouvrir)
+  - [Client — aucun port entrant requis](#client-aucun-port-entrant-requis)
+  - [Découverte LAN](#découverte-lan-1)
+  - [Traversée de NAT (STUN / TURN)](#traversée-de-nat-stun-turn)
+- [Licence](#licence)
+
 ## Fonctionnalités
 
 - **Diffusion 1:1** — le serveur capture, le client lit (ou inversement)

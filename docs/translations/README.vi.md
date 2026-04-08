@@ -35,6 +35,45 @@
 
 Thu âm trên một máy, phát lại trên máy khác — theo thời gian thực qua mạng. EchoWarp sử dụng WebRTC để truyền tải và Opus để nén, cung cấp âm thanh độ trễ thấp với mã hóa đầu cuối.
 
+## Mục lục
+
+- [Tính năng](#tính-năng)
+- [Bắt đầu nhanh](#bắt-đầu-nhanh)
+- [TUI Tương tác](#tui-tương-tác)
+  - [Màn hình thiết lập](#màn-hình-thiết-lập)
+  - [Khám phá LAN](#khám-phá-lan)
+  - [Hồ sơ thiết bị](#hồ-sơ-thiết-bị)
+  - [Màn hình truyền phát](#màn-hình-truyền-phát)
+  - [Phím tắt TUI](#phím-tắt-tui)
+- [Các Chế Độ Truyền Phát](#các-chế-độ-truyền-phát)
+  - [Normal — Một Chiều: Máy Chủ Đến Máy Khách](#normal-một-chiều-máy-chủ-đến-máy-khách)
+  - [Reverse — Một Chiều: Máy Khách Đến Máy Chủ](#reverse-một-chiều-máy-khách-đến-máy-chủ)
+  - [Duplex — Hai Chiều](#duplex-hai-chiều)
+  - [Conference — Trộn Đa Người Dùng (N:N)](#conference-trộn-đa-người-dùng-nn)
+  - [Tóm Tắt Chế Độ](#tóm-tắt-chế-độ)
+- [Hướng Dẫn Định Tuyến Âm Thanh](#hướng-dẫn-định-tuyến-âm-thanh)
+  - [Các Trường Hợp Sử Dụng](#các-trường-hợp-sử-dụng)
+  - [Loopback — Ghi Lại Âm Thanh Hệ Thống](#loopback-ghi-lại-âm-thanh-hệ-thống)
+  - [Microphone Ảo — Định Tuyến Âm Thanh Đến Các Ứng Dụng Khác](#microphone-ảo-định-tuyến-âm-thanh-đến-các-ứng-dụng-khác)
+  - [Trộn Microphone Cục Bộ Vào Đầu Ra Ảo](#trộn-microphone-cục-bộ-vào-đầu-ra-ảo)
+  - [Các Phần Thiết Bị](#các-phần-thiết-bị)
+  - [Chẩn Đoán](#chẩn-đoán)
+  - [Câu Hỏi Thường Gặp](#câu-hỏi-thường-gặp)
+- [Chế độ CLI](#chế-độ-cli)
+  - [Các chế độ](#các-chế-độ)
+  - [Các cờ thông dụng](#các-cờ-thông-dụng)
+  - [File cấu hình](#file-cấu-hình)
+- [Cài đặt](#cài-đặt)
+  - [File nhị phân dựng sẵn](#file-nhị-phân-dựng-sẵn)
+  - [Xây dựng từ mã nguồn](#xây-dựng-từ-mã-nguồn)
+- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
+- [Mạng & Tường lửa](#mạng-tường-lửa)
+  - [Máy chủ — các cổng cần mở](#máy-chủ-các-cổng-cần-mở)
+  - [Máy khách — không cần mở cổng đến](#máy-khách-không-cần-mở-cổng-đến)
+  - [Khám phá mạng LAN](#khám-phá-mạng-lan)
+  - [Xuyên NAT (STUN / TURN)](#xuyên-nat-stun-turn)
+- [Giấy phép](#giấy-phép)
+
 ## Tính năng
 
 - **Truyền phát 1:1** — máy chủ thu âm, máy khách phát (hoặc ngược lại)

@@ -35,6 +35,45 @@
 
 Audio auf einem Rechner aufnehmen und in Echtzeit über das Netzwerk auf einem anderen wiedergeben. EchoWarp nutzt WebRTC für den Transport und Opus für die Komprimierung und liefert latenzarmes Audio mit Ende-zu-Ende-Verschlüsselung.
 
+## Inhaltsverzeichnis
+
+- [Funktionen](#funktionen)
+- [Schnellstart](#schnellstart)
+- [Interaktives TUI](#interaktives-tui)
+  - [Einrichtungsbildschirm](#einrichtungsbildschirm)
+  - [LAN-Erkennung](#lan-erkennung)
+  - [Geräteprofile](#geräteprofile)
+  - [Streaming-Bildschirm](#streaming-bildschirm)
+  - [TUI-Tastaturkürzel](#tui-tastaturkürzel)
+- [Streaming-Modi](#streaming-modi)
+  - [Normal — Einweg: Server zu Clients](#normal-einweg-server-zu-clients)
+  - [Umgekehrt — Einweg: Clients zu Server](#umgekehrt-einweg-clients-zu-server)
+  - [Duplex — Bidirektional](#duplex-bidirektional)
+  - [Konferenz — Mehrbenutzer-Mixing (N:N)](#konferenz-mehrbenutzer-mixing-nn)
+  - [Modusübersicht](#modusübersicht)
+- [Audio-Routing-Leitfaden](#audio-routing-leitfaden)
+  - [Anwendungsfälle](#anwendungsfälle)
+  - [Loopback — Systemaudio aufnehmen](#loopback-systemaudio-aufnehmen)
+  - [Virtuelles Mikrofon — Audio an andere Apps weiterleiten](#virtuelles-mikrofon-audio-an-andere-apps-weiterleiten)
+  - [Lokales Mikrofon in die virtuelle Ausgabe mischen](#lokales-mikrofon-in-die-virtuelle-ausgabe-mischen)
+  - [Geräteabschnitte](#geräteabschnitte)
+  - [Diagnose](#diagnose)
+  - [FAQ](#faq)
+- [CLI-Modus](#cli-modus)
+  - [Modi](#modi)
+  - [Allgemeine Flags](#allgemeine-flags)
+  - [Konfigurationsdateien](#konfigurationsdateien)
+- [Installation](#installation)
+  - [Vorgefertigte Binaries](#vorgefertigte-binaries)
+  - [Aus dem Quellcode bauen](#aus-dem-quellcode-bauen)
+- [Systemanforderungen](#systemanforderungen)
+- [Netzwerk & Firewall](#netzwerk-firewall)
+  - [Server — zu öffnende Ports](#server-zu-öffnende-ports)
+  - [Client — keine eingehenden Ports erforderlich](#client-keine-eingehenden-ports-erforderlich)
+  - [LAN-Erkennung](#lan-erkennung-1)
+  - [NAT-Traversal (STUN / TURN)](#nat-traversal-stun-turn)
+- [Lizenz](#lizenz)
+
 ## Funktionen
 
 - **1:1-Streaming** — Server nimmt auf, Client gibt wieder (oder umgekehrt)

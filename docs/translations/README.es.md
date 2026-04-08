@@ -35,6 +35,45 @@
 
 Captura audio en una máquina y reprodúcelo en otra — en tiempo real a través de la red. EchoWarp utiliza WebRTC para el transporte y Opus para la compresión, ofreciendo audio de baja latencia con cifrado de extremo a extremo.
 
+## Tabla de Contenidos
+
+- [Características](#características)
+- [Inicio rápido](#inicio-rápido)
+- [TUI interactiva](#tui-interactiva)
+  - [Pantalla de configuración](#pantalla-de-configuración)
+  - [Descubrimiento en LAN](#descubrimiento-en-lan)
+  - [Perfiles de dispositivo](#perfiles-de-dispositivo)
+  - [Pantalla de transmisión](#pantalla-de-transmisión)
+  - [Atajos de teclado de la TUI](#atajos-de-teclado-de-la-tui)
+- [Modos de Transmisión](#modos-de-transmisión)
+  - [Normal — Unidireccional: Servidor a Clientes](#normal-unidireccional-servidor-a-clientes)
+  - [Inverso — Unidireccional: Clientes a Servidor](#inverso-unidireccional-clientes-a-servidor)
+  - [Dúplex — Bidireccional](#dúplex-bidireccional)
+  - [Conferencia — Mezcla Multiusuario (N:N)](#conferencia-mezcla-multiusuario-nn)
+  - [Resumen de Modos](#resumen-de-modos)
+- [Guía de Enrutamiento de Audio](#guía-de-enrutamiento-de-audio)
+  - [Casos de Uso](#casos-de-uso)
+  - [Loopback — Capturar Audio del Sistema](#loopback-capturar-audio-del-sistema)
+  - [Micrófono Virtual — Enrutar Audio a Otras Aplicaciones](#micrófono-virtual-enrutar-audio-a-otras-aplicaciones)
+  - [Mezcla del Micrófono Local en la Salida Virtual](#mezcla-del-micrófono-local-en-la-salida-virtual)
+  - [Secciones de Dispositivos](#secciones-de-dispositivos)
+  - [Diagnóstico](#diagnóstico)
+  - [Preguntas Frecuentes](#preguntas-frecuentes)
+- [Modo CLI](#modo-cli)
+  - [Modos](#modos)
+  - [Flags comunes](#flags-comunes)
+  - [Archivos de configuración](#archivos-de-configuración)
+- [Instalación](#instalación)
+  - [Binarios precompilados](#binarios-precompilados)
+  - [Compilar desde el código fuente](#compilar-desde-el-código-fuente)
+- [Requisitos del sistema](#requisitos-del-sistema)
+- [Red y Firewall](#red-y-firewall)
+  - [Servidor — puertos a abrir](#servidor-puertos-a-abrir)
+  - [Cliente — no se requieren puertos de entrada](#cliente-no-se-requieren-puertos-de-entrada)
+  - [Descubrimiento en LAN](#descubrimiento-en-lan-1)
+  - [Traversal de NAT (STUN / TURN)](#traversal-de-nat-stun-turn)
+- [Licencia](#licencia)
+
 ## Características
 
 - **Transmisión 1:1** — el servidor captura, el cliente reproduce (o a la inversa)

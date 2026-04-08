@@ -35,6 +35,45 @@
 
 Capture audio on one machine, play it on another — in real time over the network. EchoWarp uses WebRTC for transport and Opus for compression, delivering low-latency audio with end-to-end encryption.
 
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Interactive TUI](#interactive-tui)
+  - [Setup Screen](#setup-screen)
+  - [LAN Discovery](#lan-discovery)
+  - [Device Profiles](#device-profiles)
+  - [Streaming Screen](#streaming-screen)
+  - [TUI Keyboard Shortcuts](#tui-keyboard-shortcuts)
+- [Streaming Modes](#streaming-modes)
+  - [Normal — One-Way: Server to Clients](#normal-one-way-server-to-clients)
+  - [Reverse — One-Way: Clients to Server](#reverse-one-way-clients-to-server)
+  - [Duplex — Two-Way](#duplex-two-way)
+  - [Conference — Multi-User Mixing (N:N)](#conference-multi-user-mixing-nn)
+  - [Mode Summary](#mode-summary)
+- [Audio Routing Guide](#audio-routing-guide)
+  - [Use Cases](#use-cases)
+  - [Loopback — Capture System Audio](#loopback-capture-system-audio)
+  - [Virtual Microphone — Route Audio to Other Apps](#virtual-microphone-route-audio-to-other-apps)
+  - [Mixing Local Microphone into Virtual Output](#mixing-local-microphone-into-virtual-output)
+  - [Device Sections](#device-sections)
+  - [Diagnostics](#diagnostics)
+  - [FAQ](#faq)
+- [CLI Mode](#cli-mode)
+  - [Modes](#modes)
+  - [Common Flags](#common-flags)
+  - [Configuration](#configuration)
+- [Installation](#installation)
+  - [Pre-built binaries](#pre-built-binaries)
+  - [Build from source](#build-from-source)
+- [System Requirements](#system-requirements)
+- [Network & Firewall](#network-firewall)
+  - [Server — ports to open](#server-ports-to-open)
+  - [Client — no inbound ports required](#client-no-inbound-ports-required)
+  - [LAN discovery](#lan-discovery-1)
+  - [NAT traversal (STUN / TURN)](#nat-traversal-stun-turn)
+- [License](#license)
+
 ## Features
 
 - **1:1 streaming** — server captures, client plays (or reverse)

@@ -35,6 +35,45 @@
 
 Acquisisci l'audio su una macchina e riproducilo su un'altra — in tempo reale attraverso la rete. EchoWarp utilizza WebRTC per il trasporto e Opus per la compressione, offrendo audio a bassa latenza con crittografia end-to-end.
 
+## Indice
+
+- [Funzionalità](#funzionalità)
+- [Avvio Rapido](#avvio-rapido)
+- [TUI Interattiva](#tui-interattiva)
+  - [Schermata di Configurazione](#schermata-di-configurazione)
+  - [Rilevamento LAN](#rilevamento-lan)
+  - [Profili Dispositivo](#profili-dispositivo)
+  - [Schermata di Streaming](#schermata-di-streaming)
+  - [Scorciatoie Tastiera TUI](#scorciatoie-tastiera-tui)
+- [Modalità di Streaming](#modalità-di-streaming)
+  - [Normale — Unidirezionale: Server verso Client](#normale-unidirezionale-server-verso-client)
+  - [Inversa — Unidirezionale: Client verso Server](#inversa-unidirezionale-client-verso-server)
+  - [Duplex — Bidirezionale](#duplex-bidirezionale)
+  - [Conferenza — Mixaggio Multi-Utente (N:N)](#conferenza-mixaggio-multi-utente-nn)
+  - [Riepilogo delle Modalità](#riepilogo-delle-modalità)
+- [Guida al Routing Audio](#guida-al-routing-audio)
+  - [Casi d'uso](#casi-duso)
+  - [Loopback — Cattura l'audio di sistema](#loopback-cattura-laudio-di-sistema)
+  - [Microfono virtuale — Instrada l'audio verso altre app](#microfono-virtuale-instrada-laudio-verso-altre-app)
+  - [Mixaggio del microfono locale nell'uscita virtuale](#mixaggio-del-microfono-locale-nelluscita-virtuale)
+  - [Sezioni dei dispositivi](#sezioni-dei-dispositivi)
+  - [Diagnostica](#diagnostica)
+  - [FAQ](#faq)
+- [Modalità CLI](#modalità-cli)
+  - [Modalità](#modalità)
+  - [Flag Comuni](#flag-comuni)
+  - [File di Configurazione](#file-di-configurazione)
+- [Installazione](#installazione)
+  - [Binari Precompilati](#binari-precompilati)
+  - [Compilazione dal Sorgente](#compilazione-dal-sorgente)
+- [Requisiti di Sistema](#requisiti-di-sistema)
+- [Rete & Firewall](#rete-firewall)
+  - [Server — porte da aprire](#server-porte-da-aprire)
+  - [Client — nessuna porta in ingresso necessaria](#client-nessuna-porta-in-ingresso-necessaria)
+  - [Scoperta nella rete locale](#scoperta-nella-rete-locale)
+  - [Attraversamento NAT (STUN / TURN)](#attraversamento-nat-stun-turn)
+- [Licenza](#licenza)
+
 ## Funzionalità
 
 - **Streaming 1:1** — il server acquisisce, il client riproduce (o viceversa)

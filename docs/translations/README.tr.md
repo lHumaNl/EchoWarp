@@ -35,6 +35,45 @@
 
 Bir makinede sesi yakalayın, başka bir makinede ağ üzerinden gerçek zamanlı olarak oynatın. EchoWarp, taşıma için WebRTC ve sıkıştırma için Opus kullanarak uçtan uca şifreleme ile düşük gecikmeli ses iletimi sağlar.
 
+## İçindekiler
+
+- [Özellikler](#özellikler)
+- [Hızlı Başlangıç](#hızlı-başlangıç)
+- [Etkileşimli TUI](#etkileşimli-tui)
+  - [Kurulum Ekranı](#kurulum-ekranı)
+  - [LAN Keşfi](#lan-keşfi)
+  - [Cihaz Profilleri](#cihaz-profilleri)
+  - [Akış Ekranı](#akış-ekranı)
+  - [TUI Klavye Kısayolları](#tui-klavye-kısayolları)
+- [Akış Modları](#akış-modları)
+  - [Normal — Tek Yön: Sunucudan İstemcilere](#normal-tek-yön-sunucudan-istemcilere)
+  - [Ters — Tek Yön: İstemcilerden Sunucuya](#ters-tek-yön-istemcilerden-sunucuya)
+  - [Çift Yönlü — İki Yönlü](#çift-yönlü-iki-yönlü)
+  - [Konferans — Çok Kullanıcılı Karıştırma (N:N)](#konferans-çok-kullanıcılı-karıştırma-nn)
+  - [Mod Özeti](#mod-özeti)
+- [Ses Yönlendirme Kılavuzu](#ses-yönlendirme-kılavuzu)
+  - [Kullanım Senaryoları](#kullanım-senaryoları)
+  - [Loopback — Sistem Sesini Yakala](#loopback-sistem-sesini-yakala)
+  - [Sanal Mikrofon — Sesi Diğer Uygulamalara Yönlendir](#sanal-mikrofon-sesi-diğer-uygulamalara-yönlendir)
+  - [Yerel Mikrofonu Sanal Çıkışa Karıştırma](#yerel-mikrofonu-sanal-çıkışa-karıştırma)
+  - [Cihaz Bölümleri](#cihaz-bölümleri)
+  - [Tanılama](#tanılama)
+  - [SSS](#sss)
+- [CLI Modu](#cli-modu)
+  - [Modlar](#modlar)
+  - [Yaygın Bayraklar](#yaygın-bayraklar)
+  - [Yapılandırma Dosyaları](#yapılandırma-dosyaları)
+- [Kurulum](#kurulum)
+  - [Önceden Derlenmiş İkililer](#önceden-derlenmiş-ikililer)
+  - [Kaynak Koddan Derleme](#kaynak-koddan-derleme)
+- [Sistem Gereksinimleri](#sistem-gereksinimleri)
+- [Ağ & Güvenlik Duvarı](#ağ-güvenlik-duvarı)
+  - [Sunucu — açılması gereken portlar](#sunucu-açılması-gereken-portlar)
+  - [İstemci — gelen port gerekmez](#istemci-gelen-port-gerekmez)
+  - [Yerel ağ keşfi](#yerel-ağ-keşfi)
+  - [NAT geçişi (STUN / TURN)](#nat-geçişi-stun-turn)
+- [Lisans](#lisans)
+
 ## Özellikler
 
 - **1:1 akış** — sunucu yakalar, istemci oynatır (ya da tersi)

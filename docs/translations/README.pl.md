@@ -35,6 +35,45 @@
 
 Przechwytuj dźwięk na jednej maszynie i odtwarzaj go na drugiej — w czasie rzeczywistym przez sieć. EchoWarp używa WebRTC do transportu i Opus do kompresji, zapewniając audio o niskich opóźnieniach z szyfrowaniem end-to-end.
 
+## Spis treści
+
+- [Funkcje](#funkcje)
+- [Szybki start](#szybki-start)
+- [Interaktywny interfejs TUI](#interaktywny-interfejs-tui)
+  - [Ekran konfiguracji](#ekran-konfiguracji)
+  - [Odkrywanie w sieci LAN](#odkrywanie-w-sieci-lan)
+  - [Profile urządzeń](#profile-urządzeń)
+  - [Ekran strumieniowania](#ekran-strumieniowania)
+  - [Skróty klawiszowe TUI](#skróty-klawiszowe-tui)
+- [Tryby strumieniowania](#tryby-strumieniowania)
+  - [Normalny — jednokierunkowy: serwer do klientów](#normalny-jednokierunkowy-serwer-do-klientów)
+  - [Odwrotny — jednokierunkowy: klienci do serwera](#odwrotny-jednokierunkowy-klienci-do-serwera)
+  - [Dupleks — dwukierunkowy](#dupleks-dwukierunkowy)
+  - [Konferencja — miksowanie wieloużytkownikowe (N:N)](#konferencja-miksowanie-wieloużytkownikowe-nn)
+  - [Podsumowanie trybów](#podsumowanie-trybów)
+- [Przewodnik po routingu audio](#przewodnik-po-routingu-audio)
+  - [Przypadki użycia](#przypadki-użycia)
+  - [Loopback — przechwytywanie dźwięku systemowego](#loopback-przechwytywanie-dźwięku-systemowego)
+  - [Wirtualny mikrofon — kierowanie dźwięku do innych aplikacji](#wirtualny-mikrofon-kierowanie-dźwięku-do-innych-aplikacji)
+  - [Miksowanie lokalnego mikrofonu do wyjścia wirtualnego](#miksowanie-lokalnego-mikrofonu-do-wyjścia-wirtualnego)
+  - [Sekcje urządzeń](#sekcje-urządzeń)
+  - [Diagnostyka](#diagnostyka)
+  - [FAQ](#faq)
+- [Tryb CLI](#tryb-cli)
+  - [Tryby](#tryby)
+  - [Popularne flagi](#popularne-flagi)
+  - [Pliki konfiguracyjne](#pliki-konfiguracyjne)
+- [Instalacja](#instalacja)
+  - [Gotowe pliki binarne](#gotowe-pliki-binarne)
+  - [Kompilacja ze źródeł](#kompilacja-ze-źródeł)
+- [Wymagania systemowe](#wymagania-systemowe)
+- [Sieć & Zapora sieciowa](#sieć-zapora-sieciowa)
+  - [Serwer — porty do otwarcia](#serwer-porty-do-otwarcia)
+  - [Klient — nie wymaga portów przychodzących](#klient-nie-wymaga-portów-przychodzących)
+  - [Wykrywanie w sieci lokalnej](#wykrywanie-w-sieci-lokalnej)
+  - [Przechodzenie przez NAT (STUN / TURN)](#przechodzenie-przez-nat-stun-turn)
+- [Licencja](#licencja)
+
 ## Funkcje
 
 - **Strumieniowanie 1:1** — serwer przechwytuje, klient odtwarza (lub odwrotnie)
