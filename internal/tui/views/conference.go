@@ -512,9 +512,13 @@ func renderConferenceDetailPanel(p ConferenceParams, entries []conferenceListEnt
 
 // renderConferenceMasterDetail joins left master column and right detail column with │ separator.
 func renderConferenceMasterDetail(p ConferenceParams) string {
-	colWidth := leftColumnWidth
-	if p.Width < 80 {
+	// 30% of terminal width, clamped to [min, max]
+	colWidth := p.Width * 30 / 100
+	if colWidth < leftColumnWidthMin {
 		colWidth = leftColumnWidthMin
+	}
+	if colWidth > leftColumnWidthMax {
+		colWidth = leftColumnWidthMax
 	}
 
 	detailWidth := p.Width - colWidth - 3 // 3 for " │ "

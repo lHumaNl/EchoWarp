@@ -274,6 +274,7 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 	appRecordingCmdCh := make(chan app.RecordingCommand, 4)
 	chatMsgCh := make(chan app.ChatMessage, 32)
 	serverPauseCh := make(chan bool, 4)
+	deviceCmdCh := make(chan tui.DeviceCommand, 16)
 	var chatServerApp *app.ServerApp
 
 	// clientCount tracks connected clients for session info server probe response.
@@ -397,6 +398,10 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 				serverApp.WithServerPauseChannel(serverPauseCh)
 			}
 
+			// TODO: wire deviceCmdCh to HandleDeviceCommands with the mixer and AGC processors
+			// once ServerApp exposes them. For now, drain the channel so the TUI doesn't block.
+			go drainDeviceCommands(ctx, deviceCmdCh, logger)
+
 			if runErr := serverApp.Run(ctx); runErr != nil && ctx.Err() == nil {
 				sendError(errCh, runErr, logger)
 			}
@@ -427,7 +432,8 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 			if chatServerApp != nil {
 				chatServerApp.SendChatMessage(text, to)
 			}
-		})
+		}).
+		WithDeviceCommandChannel(deviceCmdCh)
 
 	// Always wire multi-client/conference channels — the TUI dynamically enables
 	// these modes in SetupDoneMsg based on the user's config selection.

@@ -47,43 +47,46 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 
 	var sections []string
 
-	// Input section
-	inputHeader := "🎤 Input"
-	if p.Section == 0 {
-		inputHeader = styles.SelectedItem.Render(inputHeader)
-	} else {
-		inputHeader = styles.Help.Render(inputHeader)
-	}
-	sections = append(sections, inputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
-
-	if len(inputs) == 0 {
-		sections = append(sections, styles.Help.Render("  (none)"))
-	} else {
+	// Input section (hidden when no input devices)
+	if len(inputs) > 0 {
+		inputHeader := "🎤 Input"
+		if p.Section == 0 {
+			inputHeader = styles.SelectedItem.Render(inputHeader)
+		} else {
+			inputHeader = styles.Help.Render(inputHeader)
+		}
+		sections = append(sections, inputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
 		for i, d := range inputs {
 			sections = append(sections, renderDeviceOverlayRow(d, p.Section == 0 && i == p.Selected))
 		}
 	}
 
-	sections = append(sections, "")
-
-	// Output section
-	outputHeader := "🔊 Output"
-	if p.Section == 1 {
-		outputHeader = styles.SelectedItem.Render(outputHeader)
-	} else {
-		outputHeader = styles.Help.Render(outputHeader)
+	// Spacer between sections when both are present.
+	if len(inputs) > 0 && len(outputs) > 0 {
+		sections = append(sections, "")
 	}
-	sections = append(sections, outputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
 
-	if len(outputs) == 0 {
-		sections = append(sections, styles.Help.Render("  (none)"))
-	} else {
+	// Output section (hidden when no output devices)
+	if len(outputs) > 0 {
+		outputHeader := "🔊 Output"
+		if p.Section == 1 {
+			outputHeader = styles.SelectedItem.Render(outputHeader)
+		} else {
+			outputHeader = styles.Help.Render(outputHeader)
+		}
+		sections = append(sections, outputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
 		for i, d := range outputs {
 			sections = append(sections, renderDeviceOverlayRow(d, p.Section == 1 && i == p.Selected))
 		}
 	}
 
-	help := styles.Help.Render("↑↓: select  +/-: volume  space: AGC  enter: mute  Tab: section  Esc: close")
+	// Build help line — only show Tab when both sections have devices.
+	helpParts := "↑↓: select  +/-: volume  space: AGC  enter: mute"
+	if len(inputs) > 0 && len(outputs) > 0 {
+		helpParts += "  Tab: section"
+	}
+	helpParts += "  Esc: close"
+	help := styles.Help.Render(helpParts)
 
 	content := title + "\n\n" + strings.Join(sections, "\n") + "\n\n" + help
 

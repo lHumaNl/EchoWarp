@@ -13,8 +13,9 @@ import (
 
 // Layout constants for master-detail view.
 const (
-	leftColumnWidth    = 36 // width of master column (wider for volume bars)
-	leftColumnWidthMin = 20 // minimum at narrow terminals
+	leftColumnWidth    = 36 // width for fixed-width sidebars (participant list, single-client)
+	leftColumnWidthMin = 24 // minimum at narrow terminals
+	leftColumnWidthMax = 50 // maximum for multi-client master column
 	minDetailWidth     = 30 // minimum for detail panel
 	minTerminalWidth   = 50 // absolute minimum terminal width
 )
@@ -413,9 +414,13 @@ func renderDetailPanel(p MultiClientParams, detailWidth int) string {
 
 // renderMasterDetail joins left master column and right detail column with │ separator.
 func renderMasterDetail(p MultiClientParams) string {
-	colWidth := leftColumnWidth
-	if p.Width < 80 {
+	// 30% of terminal width, clamped to [min, max]
+	colWidth := p.Width * 30 / 100
+	if colWidth < leftColumnWidthMin {
 		colWidth = leftColumnWidthMin
+	}
+	if colWidth > leftColumnWidthMax {
+		colWidth = leftColumnWidthMax
 	}
 
 	detailWidth := p.Width - colWidth - 3 // 3 for " │ "

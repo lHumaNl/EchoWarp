@@ -930,12 +930,39 @@ func (m Model) proceedWithStart(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		// Populate deviceStates for Ctrl+D overlay
+		states := make([]DeviceState, 0, len(m.config.Devices))
+		for _, d := range m.config.Devices {
+			role := "playback"
+			if d.Role == config.RoleCapture {
+				role = "capture"
+			}
+			states = append(states, DeviceState{
+				ID:     d.ID,
+				Name:   d.Name,
+				Role:   role,
+				Volume: d.Volume,
+				AGC:    d.AGC,
+			})
+		}
+		m = m.WithDeviceStates(states)
 	} else if m.config.Conference && m.config.ServerMuted {
 		m.deviceName = "Hub (no audio)"
 	} else if selectedItem, ok := m.setupModel.DeviceList.SelectedItem().(deviceItem); ok {
 		m.selectedDevice = &selectedItem.device
 		m.deviceName = selectedItem.device.Name
 		m.config.DeviceID = &selectedItem.device.ID
+		// Single device — populate deviceStates for Ctrl+D overlay
+		role := "capture"
+		if !selectedItem.device.IsInput {
+			role = "playback"
+		}
+		m = m.WithDeviceStates([]DeviceState{{
+			ID:     selectedItem.device.ID,
+			Name:   selectedItem.device.Name,
+			Role:   role,
+			Volume: 1.0,
+		}})
 	} else {
 		return m, tea.Batch(cmds...)
 	}

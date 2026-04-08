@@ -1218,15 +1218,17 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyEnter:
-		if m.deviceOverlayIndex < len(currentList) && m.deviceCmdCh != nil {
+		if m.deviceOverlayIndex < len(currentList) {
 			ds := currentList[m.deviceOverlayIndex]
-			m.deviceCmdCh <- DeviceCommand{Action: DeviceToggleMute, DeviceID: ds.ID}
 			// Update local state immediately for responsive UI.
 			for i := range m.deviceStates {
 				if m.deviceStates[i].ID == ds.ID {
 					m.deviceStates[i].Muted = !m.deviceStates[i].Muted
 					break
 				}
+			}
+			if m.deviceCmdCh != nil {
+				m.deviceCmdCh <- DeviceCommand{Action: DeviceToggleMute, DeviceID: ds.ID}
 			}
 		}
 		return m, nil

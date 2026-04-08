@@ -230,6 +230,7 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 	appRecordingCmdCh := make(chan app.RecordingCommand, 4)
 	serverMuteCh := make(chan bool, 4)
 	pauseCh := make(chan bool, 4)
+	deviceCmdCh := make(chan tui.DeviceCommand, 16)
 	// Playback (decode/incoming) spectrum and level meter.
 	spectrum := audio.NewSpectrumAnalyzer(cfg.SampleRate, audio.DefaultBands)
 	levelMeter := audio.NewLevelMeter(cfg.Channels)
@@ -371,6 +372,10 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 				}
 			}()
 
+			// TODO: wire deviceCmdCh to HandleDeviceCommands with the mixer and AGC processors
+			// once ClientApp exposes them. For now, drain the channel so the TUI doesn't block.
+			go drainDeviceCommands(ctx, deviceCmdCh, logger)
+
 			runErr := app.RunWithReconnect(
 				ctx, logger,
 				selectedCfg.MaxReconnectAttempts,
@@ -408,7 +413,8 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 		WithParticipantsChannel(participantsCh).
 		WithServerStoppedChannel(serverStoppedCh).
 		WithParticipantPauseChannel(participantPauseCh).
-		WithConferenceParticipantsChannel(conferencePartsCh)
+		WithConferenceParticipantsChannel(conferencePartsCh).
+		WithDeviceCommandChannel(deviceCmdCh)
 	// Wire both channels unconditionally — mode may change after probe in TUI setup.
 	tuiModel = tuiModel.WithPauseChannel(pauseCh).WithServerMuteChannel(serverMuteCh)
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())

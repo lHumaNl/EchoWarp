@@ -187,6 +187,24 @@ func bridgeClientCommands(ctx context.Context, src <-chan tui.ClientCommand, dst
 	}
 }
 
+// drainDeviceCommands reads and discards device commands until ctx is canceled or
+// the channel is closed. This prevents the TUI from blocking on sends while backend
+// wiring to the audio mixer is not yet implemented.
+// TODO: replace with bridgeDeviceCommands once ServerApp/ClientApp expose the mixer.
+func drainDeviceCommands(ctx context.Context, ch <-chan tui.DeviceCommand, logger *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case cmd, ok := <-ch:
+			if !ok {
+				return
+			}
+			logger.Debug("Device command received (not yet wired to mixer)", "action", cmd.Action, "device", cmd.DeviceID)
+		}
+	}
+}
+
 // injectVirtualMicDevice detects a virtual audio device and appends it to cfg.Devices
 // as a playback entry. Called for CLI (non-TUI) flows when --virtual-mic is set.
 // Logs a warning and returns without error if no virtual device is found.
