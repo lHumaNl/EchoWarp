@@ -625,6 +625,63 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 	)
 }
 
+// setupConferenceReceiver sets up the receive-only pipeline for conference mode:
+// decode client audio → submit to conference mixer. No JitterBuffer, no audio player.
+// This prevents the server from playing client audio through its speakers (feedback loop).
+func (s *ServerApp) setupConferenceReceiver(ctx context.Context, peer transport.PeerManager, audioDone chan<- error, clientID string, muteIncomingFlag *atomic.Bool) {
+	bufFrames := s.cfg.EffectiveAudioBufferFrames()
+	decodeCh := make(chan []float32, bufFrames)
+
+	// Spectrum/level fed after mute check when muteIncomingFlag is present.
+	var decSpectrum *audio.SpectrumAnalyzer
+	var decLevel *audio.LevelMeter
+	if muteIncomingFlag == nil {
+		decSpectrum = s.spectrum
+		decLevel = s.levelMeter
+	}
+	setupAudioDecoder(s.logger, peer, s.cfg.SampleRate, s.cfg.Channels, decodeCh, decSpectrum, decLevel)
+
+	// Intercept goroutine: decode → muteIncoming check → AEC/conference submit.
+	go func() {
+		defer func() {
+			audioDone <- nil
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case samples, ok := <-decodeCh:
+				if !ok {
+					return
+				}
+				if muteIncomingFlag != nil && muteIncomingFlag.Load() {
+					continue
+				}
+				if muteIncomingFlag != nil {
+					if s.spectrum != nil {
+						s.spectrum.Feed(samples)
+					}
+					if s.levelMeter != nil {
+						s.levelMeter.Feed(samples)
+					}
+				}
+				if s.aec != nil {
+					s.aec.FeedReference(samples)
+				}
+				if s.conference != nil && clientID != "" {
+					s.conference.SubmitAudio(clientID, samples)
+				}
+			}
+		}
+	}()
+
+	s.logger.Info("Conference receiver started (no local playback)",
+		"clientID", clientID,
+		"aec", s.aec != nil,
+		"muteIncoming", muteIncomingFlag != nil,
+	)
+}
+
 func (s *ServerApp) setupConnectionStateCallback(peer transport.PeerManager, cancel context.CancelFunc) {
 	peer.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		s.logger.Info("Connection state changed", "state", state.String())

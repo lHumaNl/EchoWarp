@@ -420,8 +420,9 @@ func (s *ServerApp) setupConferenceAudioPipeline(ctx context.Context, peer trans
 		audioDone <- s.runConferenceMixSender(ctx, sendCh, clientID)
 	}()
 
-	// Receive track: decode → conference mixer submit (+ AEC reference)
-	s.setupReverseAudioMuted(ctx, peer, audioDone, clientID, muteIncomingFlag)
+	// Receive track: decode → conference mixer submit (+ AEC reference).
+	// No local playback — prevents echo/feedback loop on the server.
+	s.setupConferenceReceiver(ctx, peer, audioDone, clientID, muteIncomingFlag)
 
 	return audioDone, nil
 }

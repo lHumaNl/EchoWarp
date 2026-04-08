@@ -208,3 +208,41 @@ func BenchmarkConferenceMixer_SubmitOnly_10(b *testing.B) {
 		}
 	}
 }
+
+func TestConferenceMixer_DoubleGetPersonalMix(t *testing.T) {
+	cm := newTestMixer()
+	addParticipantNoAGC(cm, "A")
+	addParticipantNoAGC(cm, "B")
+
+	cm.SubmitAudio("A", makeFrame(0.5))
+	cm.SubmitAudio("B", makeFrame(0.3))
+
+	// First call should contain B's audio for A's personal mix.
+	mix1 := cm.GetPersonalMix("A")
+	require.NotNil(t, mix1)
+	assert.InDelta(t, float64(0.3), float64(mix1[0]), 0.05, "first mix should contain B's audio")
+	cm.ReturnBuffer(mix1)
+
+	// Second call without new SubmitAudio — should be silent (dirty cleared).
+	mix2 := cm.GetPersonalMix("A")
+	require.NotNil(t, mix2)
+	for i := range mix2 {
+		assert.Equal(t, float32(0), mix2[i], "second mix should be zero (no new audio submitted)")
+	}
+	cm.ReturnBuffer(mix2)
+}
+
+func TestConferenceMixer_SingleParticipant_SilentMix(t *testing.T) {
+	cm := newTestMixer()
+	addParticipantNoAGC(cm, "A")
+
+	cm.SubmitAudio("A", makeFrame(0.5))
+
+	// A's personal mix excludes A's own audio; no other participants → silence.
+	mix := cm.GetPersonalMix("A")
+	require.NotNil(t, mix)
+	for i := range mix {
+		assert.Equal(t, float32(0), mix[i], "single participant should get silent personal mix")
+	}
+	cm.ReturnBuffer(mix)
+}

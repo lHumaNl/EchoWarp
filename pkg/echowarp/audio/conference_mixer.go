@@ -33,10 +33,12 @@ type ConferenceMixer struct {
 
 // participantData is internal per-participant storage.
 type participantData struct {
-	mu      sync.Mutex // guards samples, raw, and mutable fields of state
+	mu      sync.Mutex // guards samples, raw, readBy and mutable fields of state
 	state   ParticipantState
-	samples []float32 // latest submitted frame (already volume-scaled)
-	raw     []float32 // latest submitted frame (before volume, for subtraction)
+	samples []float32       // latest submitted frame (already volume-scaled)
+	raw     []float32       // latest submitted frame (before volume, for subtraction)
+	dirty   bool            // true after SubmitAudio; used by GetTotalMix
+	readBy  map[string]bool // tracks which readers have consumed this frame
 }
 
 // NewConferenceMixer creates a mixer for the given frame size and sample rate.
@@ -90,6 +92,7 @@ func (cm *ConferenceMixer) AddParticipant(id string) {
 		},
 		samples: make([]float32, cm.frameSize),
 		raw:     make([]float32, cm.frameSize),
+		readBy:  make(map[string]bool),
 	}
 }
 
@@ -166,6 +169,11 @@ func (cm *ConferenceMixer) SubmitAudio(participantID string, samples []float32) 
 	} else if pd.state.Volume != 1.0 {
 		MixGain(pd.samples, pd.state.Volume)
 	}
+	pd.dirty = true
+	// Reset per-reader tracking so all readers see this new frame.
+	for k := range pd.readBy {
+		delete(pd.readBy, k)
+	}
 }
 
 // ReturnBuffer returns a buffer obtained from GetPersonalMix back to the pool.
@@ -200,9 +208,12 @@ func (cm *ConferenceMixer) GetPersonalMix(participantID string) []float32 {
 
 	for _, pd := range pds {
 		pd.mu.Lock()
-		MixAccumulate(total, pd.samples)
-		if pd == self {
-			copy(selfSamples, pd.samples)
+		if !pd.readBy[participantID] && pd.dirty {
+			MixAccumulate(total, pd.samples)
+			if pd == self {
+				copy(selfSamples, pd.samples)
+			}
+			pd.readBy[participantID] = true
 		}
 		pd.mu.Unlock()
 	}
@@ -237,9 +248,10 @@ func (cm *ConferenceMixer) GetTotalMix() []float32 {
 	hasAudio := false
 	for _, pd := range pds {
 		pd.mu.Lock()
-		if pd.samples != nil {
+		if pd.dirty && pd.samples != nil {
 			MixAccumulate(total, pd.samples)
 			hasAudio = true
+			pd.dirty = false
 		}
 		pd.mu.Unlock()
 	}
