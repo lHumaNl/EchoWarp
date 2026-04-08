@@ -288,6 +288,23 @@ func matchPresetDevices(preset recent.DevicePreset, inputDevices, outputDevices 
 
 	for _, pd := range preset.Devices {
 		found := false
+
+		// Virtual sink: match by sink name (ID is unstable across reboots).
+		if pd.VirtualSink != nil {
+			sinkLower := strings.ToLower(pd.VirtualSink.SinkName)
+			for _, d := range allDevices {
+				if d.IsInput == pd.IsInput && strings.Contains(strings.ToLower(d.Name), sinkLower) {
+					matched = append(matched, d)
+					found = true
+					break
+				}
+			}
+			if !found {
+				unmatched = append(unmatched, pd.Name)
+			}
+			continue
+		}
+
 		// 1. Exact match: ID + Name + IsInput
 		for _, d := range allDevices {
 			if d.ID == pd.ID && d.Name == pd.Name && d.IsInput == pd.IsInput {

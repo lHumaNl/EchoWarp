@@ -27,6 +27,23 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 				IsInput: false,
 				Virtual: d.IsVirtual,
 			}
+			// Save virtual sink preset for virtual output devices.
+			if d.IsVirtual {
+				onStop := m.virtualSinkOnStop
+				if onStop == "" {
+					onStop = recent.SinkDelete
+				}
+				onStart := m.virtualSinkOnStart
+				if onStart == "" {
+					onStart = recent.SinkRecreate
+				}
+				pd.VirtualSink = &recent.VirtualSinkPreset{
+					ModuleType: "module-null-sink",
+					SinkName:   echowarpSinkName,
+					OnStop:     onStop,
+					OnStart:    onStart,
+				}
+			}
 			// Save mix input for virtual output devices.
 			if d.IsVirtual {
 				if mixSet, ok := m.mixInputs[d.selectKey()]; ok {

@@ -270,6 +270,80 @@ func TestLoadPrefersYAMLOverJSON(t *testing.T) {
 	assert.Equal(t, "FromYAML", loaded[0].Hostname, "YAML should be preferred over JSON")
 }
 
+func TestVirtualSinkPresetYAMLRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	id := uint32(42)
+	servers := []Server{
+		{
+			Address: "10.0.0.1", Port: 4415, Hostname: "A",
+			LastConnected: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Presets: map[string]DevicePreset{
+				"normal": {Devices: []PresetDevice{
+					{
+						ID: 99, Name: "EchoWarp", Virtual: true,
+						VirtualSink: &VirtualSinkPreset{
+							ModuleType: "module-null-sink",
+							SinkName:   "EchoWarp",
+							OnStop:     SinkDelete,
+							OnStart:    SinkRecreate,
+						},
+					},
+					{ID: 1, Name: "Mic", IsInput: true, MixInputID: &id, MixInputName: "Mic"},
+				}},
+			},
+		},
+	}
+	require.NoError(t, Save(servers))
+
+	loaded, err := Load()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+
+	preset := loaded[0].Presets["normal"]
+	require.Len(t, preset.Devices, 2)
+
+	// Virtual device with VirtualSinkPreset
+	vd := preset.Devices[0]
+	require.NotNil(t, vd.VirtualSink)
+	assert.Equal(t, "module-null-sink", vd.VirtualSink.ModuleType)
+	assert.Equal(t, "EchoWarp", vd.VirtualSink.SinkName)
+	assert.Equal(t, SinkDelete, vd.VirtualSink.OnStop)
+	assert.Equal(t, SinkRecreate, vd.VirtualSink.OnStart)
+
+	// Non-virtual device: VirtualSink should be nil
+	assert.Nil(t, preset.Devices[1].VirtualSink)
+}
+
+func TestVirtualSinkPresetYAML_BackwardCompat_NoVirtualSink(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	// Old-format YAML without virtual_sink field
+	yamlData := `- address: "10.0.0.1"
+  port: 4415
+  hostname: "A"
+  last_connected: 2026-01-01T00:00:00Z
+  presets:
+    normal:
+      devices:
+        - id: 5
+          name: "Speaker"
+          is_input: false
+          virtual: true
+`
+	p := filepath.Join(dir, "recent_servers.yaml")
+	require.NoError(t, os.WriteFile(p, []byte(yamlData), 0600))
+
+	loaded, err := Load()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	d := loaded[0].Presets["normal"].Devices[0]
+	assert.True(t, d.Virtual)
+	assert.Nil(t, d.VirtualSink, "old presets without virtual_sink should deserialize with nil")
+}
+
 func TestLoadJSONFallbackWithNickname(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ECHOWARP_CONFIG_DIR", dir)

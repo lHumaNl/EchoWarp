@@ -11,6 +11,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/probe"
+	"github.com/lHumaNl/echowarp/internal/recent"
 	"github.com/lHumaNl/echowarp/internal/tui/views"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
@@ -591,11 +592,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(batchCmds...)
 
 	case streamingEndedMsg:
+		m.cleanupVirtualSinks()
 		m.quitting = true
 		return m, tea.Quit
 
 	case ServerStoppedMsg:
-		// Server sent ActionStop — transition to server-stopped screen.
+		// Server sent ActionStop — clean up virtual sinks and transition.
+		m.cleanupVirtualSinks()
 		m.screen = ScreenServerStopped
 		m.autoReconnect = m.config.AutoReconnect
 		m.autoReconnectAttempts = m.config.AutoReconnectAttempts
@@ -1076,5 +1079,19 @@ func (m *Model) setDefaultFocus() {
 		m.focusedArea = FocusClientList
 	} else {
 		m.focusedArea = FocusLogs
+	}
+}
+
+// cleanupVirtualSinks removes virtual sinks that have OnStop == SinkDelete.
+func (m *Model) cleanupVirtualSinks() {
+	moduleID := m.setupModel.VirtualMicModule()
+	if moduleID == "" {
+		return
+	}
+	for _, vs := range m.setupModel.SelectedVirtualSinkPresets() {
+		if vs.OnStop == recent.SinkDelete {
+			_ = views.RemovePulseAudioSink(moduleID)
+			return
+		}
 	}
 }

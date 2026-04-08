@@ -178,7 +178,8 @@ func runClientInteractive(_ *cobra.Command, cfg *config.Config) error {
 		return err
 	}
 
-	tuiModel := tui.NewModel(*cfg, devices)
+	tuiModel := tui.NewModel(*cfg, devices).
+		WithDeviceEnumerator(dm)
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
@@ -214,15 +215,13 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("audio init: %w", err)
 	}
+	defer dm.Close() //nolint:errcheck
 	devices, err := listAllDevices(dm)
 	if err != nil {
-		_ = dm.Close()
 		return err
 	}
 	// Always load loopback devices — mode may change after probe (reverse/duplex).
 	devices, loopbackMap := appendLoopbackDevices(dm, devices, true)
-
-	_ = dm.Close()
 
 	statsCh := make(chan transport.ConnectionStats, 4)
 	errCh := make(chan error, 4)
@@ -390,6 +389,7 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 		cliLogFile = logging.GetDefaultLogFile("client")
 	}
 	tuiModel := tui.NewModelWithOutputDevices(cfg, devices, nil).
+		WithDeviceEnumerator(dm).
 		WithStartFunc(startFunc).
 		WithLogChannel(logCh).
 		WithLogFile(cliLogFile).

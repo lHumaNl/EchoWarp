@@ -434,7 +434,7 @@ func (m Model) viewStreaming() string {
 		if m.participantOverlay.Visible {
 			body = m.participantOverlay.Render(m.width, m.height-2)
 		} else if m.recordingOverlay.Visible {
-			body = m.recordingOverlay.Render(m.width)
+			body = m.recordingOverlay.Render(m.width, m.height-2)
 		}
 		return body
 	}
@@ -533,7 +533,7 @@ func (m Model) viewStreaming() string {
 		}
 		body := views.MultiClientView(multiParams)
 		if m.recordingOverlay.Visible {
-			body = m.recordingOverlay.Render(m.width)
+			body = m.recordingOverlay.Render(m.width, m.height-2)
 		}
 		return body
 	}
@@ -592,7 +592,7 @@ func (m Model) viewStreaming() string {
 
 	body := views.StreamingView(params)
 	if m.recordingOverlay.Visible {
-		body = m.recordingOverlay.Render(m.width)
+		body = m.recordingOverlay.Render(m.width, m.height-2)
 	}
 	return body
 }

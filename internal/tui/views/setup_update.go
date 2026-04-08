@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/recent"
 )
 
 // Update handles input for the setup screen.
@@ -592,24 +593,31 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				}
 				m.virtualMicCreated = true
 				m.virtualMicModule = moduleID
-				m.overlay = SetupOverlayNone
 				m.virtualDeviceOverlay = nil
 				// Update field label
 				m.updateVirtualMicField(true)
+				// Re-enumerate devices from OS (PulseAudio needs time to register)
+				time.Sleep(200 * time.Millisecond)
+				m.refreshDevicesFromOS()
 				// Refresh device list and auto-select
 				m.rebuildDeviceGroups()
 				m.autoSelectVirtualDevice("EchoWarp")
-				flashCmd := m.SetFlash("✓ Virtual mic created — EchoWarp", 3*time.Second)
-				return m, flashCmd
+				// Show lifecycle options overlay
+				m.virtualSinkLifecycleOverlay = NewVirtualSinkLifecycleOverlay()
+				m.overlay = SetupOverlayVirtualSinkLifecycle
+				return m, nil
 			case VirtualActionRemove:
 				if m.virtualMicModule != "" {
-					_ = removePulseAudioSink(m.virtualMicModule)
+					_ = RemovePulseAudioSink(m.virtualMicModule)
 				}
 				m.virtualMicCreated = false
 				m.virtualMicModule = ""
 				m.overlay = SetupOverlayNone
 				m.virtualDeviceOverlay = nil
 				m.updateVirtualMicField(false)
+				// Re-enumerate devices from OS after sink removal
+				time.Sleep(200 * time.Millisecond)
+				m.refreshDevicesFromOS()
 				m.rebuildDeviceGroups()
 				flashCmd := m.SetFlash("Virtual mic removed", 3*time.Second)
 				return m, flashCmd
@@ -695,6 +703,28 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			case ConfigLoadCancelled:
 				m.overlay = SetupOverlayNone
 				m.configLoadOverlay = nil
+			}
+		}
+
+	case SetupOverlayVirtualSinkLifecycle:
+		if m.virtualSinkLifecycleOverlay != nil {
+			action := m.virtualSinkLifecycleOverlay.Update(msg)
+			switch action {
+			case VSLifecycleSave:
+				m.virtualSinkOnStop = m.virtualSinkLifecycleOverlay.OnStop()
+				m.virtualSinkOnStart = m.virtualSinkLifecycleOverlay.OnStart()
+				m.overlay = SetupOverlayNone
+				m.virtualSinkLifecycleOverlay = nil
+				flashCmd := m.SetFlash("✓ Virtual mic created — EchoWarp", 3*time.Second)
+				return m, flashCmd
+			case VSLifecycleCancel:
+				// Use defaults
+				m.virtualSinkOnStop = recent.SinkDelete
+				m.virtualSinkOnStart = recent.SinkRecreate
+				m.overlay = SetupOverlayNone
+				m.virtualSinkLifecycleOverlay = nil
+				flashCmd := m.SetFlash("✓ Virtual mic created — EchoWarp", 3*time.Second)
+				return m, flashCmd
 			}
 		}
 

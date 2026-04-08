@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/recent"
@@ -149,4 +150,84 @@ func TestCollectPresetDevices_SameNameDifferentType(t *testing.T) {
 	assert.Len(t, p.Devices, 1)
 	assert.Equal(t, "BlackHole 2ch", p.Devices[0].Name)
 	assert.False(t, p.Devices[0].IsInput, "should be output device only")
+}
+
+func TestCollectPresetDevices_VirtualOutputHasVirtualSinkPreset(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{},
+		[]deviceRow{{ID: 99, Name: "EchoWarp", IsVirtual: true}},
+		map[string]DeviceRoleSet{
+			selectKeyFor(99, "EchoWarp", false): {Playback: true},
+		},
+	)
+
+	p := m.CollectPresetDevices()
+
+	require.Len(t, p.Devices, 1)
+	d := p.Devices[0]
+	assert.True(t, d.Virtual)
+	require.NotNil(t, d.VirtualSink, "virtual output should have VirtualSinkPreset")
+	assert.Equal(t, "module-null-sink", d.VirtualSink.ModuleType)
+	assert.Equal(t, "EchoWarp", d.VirtualSink.SinkName)
+	assert.Equal(t, recent.SinkDelete, d.VirtualSink.OnStop)
+	assert.Equal(t, recent.SinkRecreate, d.VirtualSink.OnStart)
+}
+
+func TestCollectPresetDevices_NonVirtualOutputHasNoVirtualSinkPreset(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{},
+		[]deviceRow{{ID: 1, Name: "Speaker", IsVirtual: false}},
+		map[string]DeviceRoleSet{
+			selectKeyFor(1, "Speaker", false): {Playback: true},
+		},
+	)
+
+	p := m.CollectPresetDevices()
+
+	require.Len(t, p.Devices, 1)
+	assert.Nil(t, p.Devices[0].VirtualSink, "non-virtual output should not have VirtualSinkPreset")
+}
+
+func TestMatchPresetDevices_VirtualSinkMatchesByName(t *testing.T) {
+	preset := recent.DevicePreset{
+		Devices: []recent.PresetDevice{
+			{
+				ID: 42, Name: "EchoWarp", Virtual: true,
+				VirtualSink: &recent.VirtualSinkPreset{
+					ModuleType: "module-null-sink",
+					SinkName:   "EchoWarp",
+					OnStop:     recent.SinkDelete,
+					OnStart:    recent.SinkRecreate,
+				},
+			},
+		},
+	}
+
+	// Different ID but name contains "EchoWarp"
+	outputs := []deviceRow{
+		{ID: 999, Name: "EchoWarp", IsVirtual: true},
+	}
+
+	matched, unmatched := matchPresetDevices(preset, nil, outputs)
+	assert.Len(t, matched, 1)
+	assert.Equal(t, uint32(999), matched[0].ID)
+	assert.Empty(t, unmatched)
+}
+
+func TestMatchPresetDevices_OldPresetWithoutVirtualSinkStillWorks(t *testing.T) {
+	// Backward compat: old preset has Virtual=true but no VirtualSink field
+	preset := recent.DevicePreset{
+		Devices: []recent.PresetDevice{
+			{ID: 5, Name: "Speaker", IsInput: false, Virtual: false},
+		},
+	}
+
+	outputs := []deviceRow{
+		{ID: 5, Name: "Speaker"},
+	}
+
+	matched, unmatched := matchPresetDevices(preset, nil, outputs)
+	assert.Len(t, matched, 1)
+	assert.Equal(t, uint32(5), matched[0].ID)
+	assert.Empty(t, unmatched)
 }

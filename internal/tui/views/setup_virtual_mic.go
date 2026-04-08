@@ -38,8 +38,8 @@ func createPulseAudioSink(name string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// removePulseAudioSink unloads a PulseAudio module by ID.
-func removePulseAudioSink(moduleID string) error {
+// RemovePulseAudioSink unloads a PulseAudio module by ID.
+func RemovePulseAudioSink(moduleID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return exec.CommandContext(ctx, "pactl", "unload-module", moduleID).Run()

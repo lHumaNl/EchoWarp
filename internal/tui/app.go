@@ -521,6 +521,30 @@ func (m *Model) SetMultiClientChannels(
 	m.recordingCmdCh = recordingCmdCh
 }
 
+// WithDeviceEnumerator sets a device enumerator for refreshing the device list
+// after creating/removing virtual audio sinks.
+func (m Model) WithDeviceEnumerator(enum audio.DeviceEnumerator) Model {
+	m.setupModel = m.setupModel.WithDeviceRefreshFunc(func() ([]list.Item, error) {
+		inputs, err := enum.ListInputDevices()
+		if err != nil {
+			return nil, err
+		}
+		outputs, err := enum.ListOutputDevices()
+		if err != nil {
+			return nil, err
+		}
+		all := make([]list.Item, 0, len(inputs)+len(outputs))
+		for _, dev := range inputs {
+			all = append(all, deviceItem{device: dev})
+		}
+		for _, dev := range outputs {
+			all = append(all, deviceItem{device: dev})
+		}
+		return all, nil
+	})
+	return m
+}
+
 // WithLogFile sets the log file path for display in the exit summary.
 func (m Model) WithLogFile(path string) Model {
 	m.logFile = path

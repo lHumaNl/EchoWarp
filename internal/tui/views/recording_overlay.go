@@ -360,15 +360,32 @@ func (o *RecordingOverlay) Down() {
 }
 
 // Render draws the recording overlay centered within the given width.
-func (o *RecordingOverlay) Render(width int) string {
+func (o *RecordingOverlay) Render(width, height int) string {
 	if !o.Visible {
 		return ""
 	}
 
+	var box string
 	if o.State == recordingOverlayStatus {
-		return o.renderStatus(width)
+		box = o.renderStatus(width)
+	} else {
+		box = o.renderStart(width)
 	}
-	return o.renderStart(width)
+
+	// Center vertically.
+	boxH := lipgloss.Height(box)
+	padY := (height - boxH) / 2
+	if padY < 0 {
+		padY = 0
+	}
+
+	var result strings.Builder
+	for i := 0; i < padY; i++ {
+		result.WriteString("\n")
+	}
+	result.WriteString(box)
+
+	return result.String()
 }
 
 func (o *RecordingOverlay) renderStart(width int) string {
@@ -515,20 +532,40 @@ func checkbox(selected bool) string {
 }
 
 func (o *RecordingOverlay) wrapBox(content, title string, width int) string {
-	box := styles.OverlayBorder.Width(overlayWidth).Render(content)
+	borderColor := lipgloss.Color("205")
+	border := lipgloss.RoundedBorder()
 
-	// Inject title into the top border.
-	boxLines := strings.Split(box, "\n")
-	if len(boxLines) > 0 {
-		topBorder := boxLines[0]
-		runes := []rune(topBorder)
-		titleRunes := []rune(title)
-		if len(runes) > len(titleRunes)+2 {
-			copy(runes[2:2+len(titleRunes)], titleRunes)
-			boxLines[0] = string(runes)
-		}
+	// Build top border with embedded title manually to avoid ANSI escape issues.
+	innerW := overlayWidth
+	titleLen := lipgloss.Width(title)
+	dashesAfter := innerW - titleLen - 1
+	if dashesAfter < 1 {
+		dashesAfter = 1
 	}
-	box = strings.Join(boxLines, "\n")
+	topLine := lipgloss.NewStyle().Foreground(borderColor).Render(
+		string(border.TopLeft)+string(border.Top)+title+strings.Repeat(string(border.Top), dashesAfter)+string(border.TopRight))
+
+	// Render content with side borders and padding.
+	padded := lipgloss.NewStyle().Padding(1, 2).Width(innerW).Render(content)
+	paddedLines := strings.Split(padded, "\n")
+
+	var boxLines []string
+	boxLines = append(boxLines, topLine)
+	for _, line := range paddedLines {
+		lineW := lipgloss.Width(line)
+		rightPad := innerW - lineW
+		if rightPad < 0 {
+			rightPad = 0
+		}
+		left := lipgloss.NewStyle().Foreground(borderColor).Render(string(border.Left))
+		right := lipgloss.NewStyle().Foreground(borderColor).Render(string(border.Right))
+		boxLines = append(boxLines, left+line+strings.Repeat(" ", rightPad)+right)
+	}
+	bottomLine := lipgloss.NewStyle().Foreground(borderColor).Render(
+		string(border.BottomLeft)+strings.Repeat(string(border.Bottom), innerW)+string(border.BottomRight))
+	boxLines = append(boxLines, bottomLine)
+
+	box := strings.Join(boxLines, "\n")
 
 	// Center horizontally.
 	boxW := lipgloss.Width(box)

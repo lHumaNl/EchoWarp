@@ -103,6 +103,36 @@ func (m *SetupModel) tryShowServerRestoreOverlay() tea.Cmd {
 
 // autoRestore silently restores matched devices and shows overlay only for missing virtual devices.
 func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cmd {
+	// Auto-create virtual sinks with OnStart == SinkRecreate before matching.
+	for _, pd := range preset.Devices {
+		if pd.VirtualSink == nil || pd.VirtualSink.OnStart != recent.SinkRecreate {
+			continue
+		}
+		// Check if already present by name.
+		sinkLower := strings.ToLower(pd.VirtualSink.SinkName)
+		alreadyExists := false
+		allDevs := append(append([]deviceRow{}, m.inputDevices...), m.outputDevices...)
+		for _, d := range allDevs {
+			if strings.Contains(strings.ToLower(d.Name), sinkLower) {
+				alreadyExists = true
+				break
+			}
+		}
+		if alreadyExists {
+			continue
+		}
+		// Create the virtual sink.
+		moduleID, err := createPulseAudioSink(pd.VirtualSink.SinkName)
+		if err == nil {
+			m.virtualMicCreated = true
+			m.virtualMicModule = moduleID
+			// Wait for PulseAudio and refresh device list.
+			time.Sleep(200 * time.Millisecond)
+			m.refreshDevicesFromOS()
+			m.rebuildDeviceGroups()
+		}
+	}
+
 	matched, unmatched := matchPresetDevices(preset, m.inputDevices, m.outputDevices)
 
 	if len(matched) == 0 && len(unmatched) == 0 {

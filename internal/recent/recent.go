@@ -21,14 +21,36 @@ type DevicePreset struct {
 	Devices []PresetDevice `json:"devices" yaml:"devices"`
 }
 
+// SinkLifecycle controls virtual sink behavior on start/stop.
+type SinkLifecycle string
+
+const (
+	// SinkKeep leaves the virtual sink as-is.
+	SinkKeep SinkLifecycle = "keep"
+	// SinkDelete removes the virtual sink.
+	SinkDelete SinkLifecycle = "delete"
+	// SinkRecreate removes and re-creates the virtual sink.
+	SinkRecreate SinkLifecycle = "recreate"
+)
+
+// VirtualSinkPreset stores parameters for a PulseAudio virtual sink
+// that was created alongside a device preset.
+type VirtualSinkPreset struct {
+	ModuleType string        `json:"module_type" yaml:"module_type"`
+	SinkName   string        `json:"sink_name" yaml:"sink_name"`
+	OnStop     SinkLifecycle `json:"on_stop" yaml:"on_stop"`
+	OnStart    SinkLifecycle `json:"on_start" yaml:"on_start"`
+}
+
 // PresetDevice represents a single device in a preset.
 type PresetDevice struct {
-	ID           uint32  `json:"id" yaml:"id"`
-	Name         string  `json:"name" yaml:"name"`
-	IsInput      bool    `json:"is_input" yaml:"is_input"`
-	Virtual      bool    `json:"virtual" yaml:"virtual"`
-	MixInputID   *uint32 `json:"mix_input_id,omitempty" yaml:"mix_input_id,omitempty"`
-	MixInputName string  `json:"mix_input_name,omitempty" yaml:"mix_input_name,omitempty"`
+	ID           uint32             `json:"id" yaml:"id"`
+	Name         string             `json:"name" yaml:"name"`
+	IsInput      bool               `json:"is_input" yaml:"is_input"`
+	Virtual      bool               `json:"virtual" yaml:"virtual"`
+	MixInputID   *uint32            `json:"mix_input_id,omitempty" yaml:"mix_input_id,omitempty"`
+	MixInputName string             `json:"mix_input_name,omitempty" yaml:"mix_input_name,omitempty"`
+	VirtualSink  *VirtualSinkPreset `json:"virtual_sink,omitempty" yaml:"virtual_sink,omitempty"`
 }
 
 // Server represents a recently connected server.

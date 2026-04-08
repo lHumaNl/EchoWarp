@@ -34,6 +34,7 @@ const (
 	SetupOverlayRestore
 	SetupOverlayConfigSave
 	SetupOverlayConfigLoad
+	SetupOverlayVirtualSinkLifecycle
 )
 
 // SetupDoneMsg is sent when the user confirms setup and is ready to start.
@@ -106,12 +107,13 @@ type SetupModel struct {
 	height int
 
 	// Overlays
-	overlay              SetupOverlay
-	summaryOverlay       *SummaryOverlay
-	virtualDeviceOverlay *VirtualDeviceOverlay
-	restoreOverlay       *RestoreOverlay
-	configSaveOverlay    *ConfigSaveOverlay
-	configLoadOverlay    *ConfigLoadOverlay
+	overlay                     SetupOverlay
+	summaryOverlay              *SummaryOverlay
+	virtualDeviceOverlay        *VirtualDeviceOverlay
+	restoreOverlay              *RestoreOverlay
+	configSaveOverlay           *ConfigSaveOverlay
+	configLoadOverlay           *ConfigLoadOverlay
+	virtualSinkLifecycleOverlay *VirtualSinkLifecycleOverlay
 
 	// Config save/load state
 	lastLoadedConfigName string
@@ -156,9 +158,17 @@ type SetupModel struct {
 	virtualMicCreated bool   // true when pactl sink was created this session
 	virtualMicModule  string // PulseAudio module ID for cleanup
 
+	// Virtual sink lifecycle preferences (set via overlay after creation)
+	virtualSinkOnStop  recent.SinkLifecycle // default: SinkDelete
+	virtualSinkOnStart recent.SinkLifecycle // default: SinkRecreate
+
 	// Mix input: maps virtual output device selectKey → set of input device selectKeys
 	// whose audio should be mixed into that output.
 	mixInputs map[string]map[string]bool
+
+	// refreshDevicesFn re-enumerates audio devices from the OS.
+	// Set via WithDeviceRefreshFunc. Used after creating a virtual sink.
+	refreshDevicesFn func() ([]list.Item, error)
 }
 
 // InputMode tracks the current keyboard input routing priority.
@@ -276,6 +286,53 @@ func (m SetupModel) WithUnifiedDeviceList(isDuplex bool) SetupModel {
 	}
 
 	return m
+}
+
+// WithDeviceRefreshFunc sets a callback that re-enumerates audio devices from the OS.
+// The callback should return list items for all devices (input + output).
+func (m SetupModel) WithDeviceRefreshFunc(fn func() ([]list.Item, error)) SetupModel {
+	m.refreshDevicesFn = fn
+	return m
+}
+
+// VirtualMicModule returns the PulseAudio module ID of the virtual mic created
+// this session (empty string if none). Used by the TUI to clean up on stop.
+func (m SetupModel) VirtualMicModule() string {
+	return m.virtualMicModule
+}
+
+// SelectedVirtualSinkPresets returns VirtualSinkPreset entries for all currently
+// selected output devices that have a virtual sink preset.
+func (m SetupModel) SelectedVirtualSinkPresets() []recent.VirtualSinkPreset {
+	var result []recent.VirtualSinkPreset
+	for _, d := range m.outputDevices {
+		if _, ok := m.multiSelect[d.selectKey()]; !ok {
+			continue
+		}
+		if !d.IsVirtual {
+			continue
+		}
+		// Collect from the current device preset.
+		devPreset := m.CollectPresetDevices()
+		for _, pd := range devPreset.Devices {
+			if pd.VirtualSink != nil && pd.Name == d.Name {
+				result = append(result, *pd.VirtualSink)
+			}
+		}
+	}
+	return result
+}
+
+// refreshDevicesFromOS re-enumerates devices and updates the device list.
+func (m *SetupModel) refreshDevicesFromOS() {
+	if m.refreshDevicesFn == nil {
+		return
+	}
+	items, err := m.refreshDevicesFn()
+	if err != nil {
+		return
+	}
+	m.DeviceList.SetItems(items)
 }
 
 // visibleSections returns which device sections should be shown based on mode.

@@ -158,7 +158,8 @@ func runServerInteractive(_ *cobra.Command, cfg *config.Config) error {
 		return err
 	}
 
-	tuiModel := tui.NewModel(*cfg, devices)
+	tuiModel := tui.NewModel(*cfg, devices).
+		WithDeviceEnumerator(dm)
 	p := tea.NewProgram(tuiModel, tea.WithAltScreen())
 	finalModel, err := p.Run()
 	if err != nil {
@@ -245,15 +246,13 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("audio init: %w", err)
 	}
+	defer dm.Close() //nolint:errcheck
 	devices, err := listAllDevices(dm)
 	if err != nil {
-		_ = dm.Close()
 		return err
 	}
 	needsInput := cfg.Duplex || !cfg.Reverse
 	devices, loopbackMap := appendLoopbackDevices(dm, devices, needsInput)
-
-	_ = dm.Close()
 
 	statsCh := make(chan transport.ConnectionStats, 4)
 	errCh := make(chan error, 4)
@@ -410,6 +409,7 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 		srvLogFile = logging.GetDefaultLogFile("server")
 	}
 	tuiModel := tui.NewModelWithOutputDevices(cfg, devices, nil).
+		WithDeviceEnumerator(dm).
 		WithStartFunc(startFunc).
 		WithLogChannel(logCh).
 		WithLogFile(srvLogFile).

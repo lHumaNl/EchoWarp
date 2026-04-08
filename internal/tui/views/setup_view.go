@@ -49,6 +49,10 @@ func (m SetupModel) viewOverlay() string {
 		if m.configLoadOverlay != nil {
 			return m.configLoadOverlay.View(m.width)
 		}
+	case SetupOverlayVirtualSinkLifecycle:
+		if m.virtualSinkLifecycleOverlay != nil {
+			return m.virtualSinkLifecycleOverlay.View(m.width)
+		}
 	}
 	return ""
 }
@@ -357,6 +361,8 @@ func (m SetupModel) HelpKeys() string {
 			return "enter: save  esc: cancel"
 		case SetupOverlayConfigLoad:
 			return "↑↓: browse  enter: load  ^D: delete  esc: cancel"
+		case SetupOverlayVirtualSinkLifecycle:
+			return "↑↓: navigate  ←→/space: toggle  enter: save  esc: defaults"
 		}
 	}
 	if m.inputMode == ModeEditing {
