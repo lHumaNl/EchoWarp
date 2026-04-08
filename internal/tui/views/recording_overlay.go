@@ -543,26 +543,26 @@ func (o *RecordingOverlay) wrapBox(content, title string, width int) string {
 		dashesAfter = 1
 	}
 	topLine := lipgloss.NewStyle().Foreground(borderColor).Render(
-		string(border.TopLeft)+string(border.Top)+title+strings.Repeat(string(border.Top), dashesAfter)+string(border.TopRight))
+		border.TopLeft+border.Top+title+strings.Repeat(border.Top, dashesAfter)+border.TopRight)
 
 	// Render content with side borders and padding.
 	padded := lipgloss.NewStyle().Padding(1, 2).Width(innerW).Render(content)
 	paddedLines := strings.Split(padded, "\n")
 
-	var boxLines []string
+	boxLines := make([]string, 0, 1+len(paddedLines)+1)
 	boxLines = append(boxLines, topLine)
+	left := lipgloss.NewStyle().Foreground(borderColor).Render(border.Left)
+	right := lipgloss.NewStyle().Foreground(borderColor).Render(border.Right)
 	for _, line := range paddedLines {
 		lineW := lipgloss.Width(line)
 		rightPad := innerW - lineW
 		if rightPad < 0 {
 			rightPad = 0
 		}
-		left := lipgloss.NewStyle().Foreground(borderColor).Render(string(border.Left))
-		right := lipgloss.NewStyle().Foreground(borderColor).Render(string(border.Right))
 		boxLines = append(boxLines, left+line+strings.Repeat(" ", rightPad)+right)
 	}
 	bottomLine := lipgloss.NewStyle().Foreground(borderColor).Render(
-		string(border.BottomLeft)+strings.Repeat(string(border.Bottom), innerW)+string(border.BottomRight))
+		border.BottomLeft+strings.Repeat(border.Bottom, innerW)+border.BottomRight)
 	boxLines = append(boxLines, bottomLine)
 
 	box := strings.Join(boxLines, "\n")
