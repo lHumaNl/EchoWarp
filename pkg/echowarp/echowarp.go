@@ -92,12 +92,13 @@ const (
 
 // DeviceEntry represents a single audio device in a multi-device configuration.
 type DeviceEntry struct {
-	ID     uint32     `yaml:"id"     json:"id"`               // Audio device ID.
-	Name   string     `yaml:"name"   json:"name,omitempty"`   // Human-readable device name. Used as fallback when IDs change across reboots.
-	Type   DeviceType `yaml:"type"   json:"type,omitempty"`   // Hardware type: input or output. Used to disambiguate overlapping IDs.
-	Role   DeviceRole `yaml:"role"   json:"role,omitempty"`   // Device role: capture or playback. Empty = inferred from mode.
-	Volume float64    `yaml:"volume" json:"volume,omitempty"` // Volume multiplier 0.0-2.0 (default 1.0).
-	Muted  bool       `yaml:"muted"  json:"muted,omitempty"`  // If true, device is muted (capture paused / playback silent).
+	ID     uint32     `yaml:"id"     json:"id"`                   // Audio device ID.
+	Name   string     `yaml:"name"   json:"name,omitempty"`       // Human-readable device name. Used as fallback when IDs change across reboots.
+	Type   DeviceType `yaml:"type"   json:"type,omitempty"`       // Hardware type: input or output. Used to disambiguate overlapping IDs.
+	Role   DeviceRole `yaml:"role"   json:"role,omitempty"`       // Device role: capture or playback. Empty = inferred from mode.
+	Volume float64    `yaml:"volume" json:"volume,omitempty"`     // Volume multiplier 0.0-1.5 (default 1.0).
+	Muted  bool       `yaml:"muted"  json:"muted,omitempty"`      // If true, device is muted (capture paused / playback silent).
+	AGC    bool       `yaml:"agc,omitempty" json:"agc,omitempty"` // Automatic Gain Control enabled for this device.
 
 	// MixInputID, when set, specifies a local input device whose audio is mixed into
 	// this playback device's output stream. Used to combine a local microphone with

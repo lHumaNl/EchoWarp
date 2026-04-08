@@ -992,6 +992,7 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			BufferFrames:  s.cfg.EffectiveAudioBufferFrames(),
 			Spectrum:      captureSpectrum,
 			LevelMeter:    captureLevel,
+			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
 		}, s.logger)
 		return pipeline.Run(ctx, sendCh)
 	}
@@ -1009,6 +1010,13 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		deviceID = *s.cfg.DeviceID
 	}
 
+	// Build AGC processor for single-device capture if AGC is enabled.
+	var agcProc *audio.AGCProcessor
+	agcMap := buildAGCProcessors(captureDevices, s.cfg.SampleRate)
+	if agcMap != nil {
+		agcProc = agcMap[deviceID]
+	}
+
 	pipeline := NewServerCapturePipeline(CapturePipelineConfig{
 		SampleRate:           s.cfg.SampleRate,
 		Channels:             s.cfg.Channels,
@@ -1019,6 +1027,7 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		LoopbackBlackHole:    s.cfg.LoopbackBlackHole,
 		EncoderConfig:        encCfg,
 		AEC:                  s.aec,
+		AGC:                  agcProc,
 		Spectrum:             captureSpectrum,
 		LevelMeter:           captureLevel,
 	}, s.logger)

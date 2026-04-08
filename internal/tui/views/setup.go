@@ -89,6 +89,7 @@ type SetupModel struct {
 	deviceCursor  int // row index within current section
 	inputScroll   int // scroll offset for input section
 	outputScroll  int // scroll offset for output section
+	deviceColumn  int // 0 = device select, 1 = AGC column
 
 	// Right column — settings fields
 	Fields       []SetupField

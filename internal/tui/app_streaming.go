@@ -107,6 +107,43 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 
 		// Mute incoming / mute outgoing for clients is handled via popup (Enter on client list).
 
+		// Multi-client per-client volume control (+/-).
+		if m.multiClient && !m.conference && m.cmdCh != nil && len(m.multiStats.Clients) > 0 {
+			if m.selectedClient >= 0 && m.selectedClient < len(m.multiStats.Clients) {
+				cid := m.multiStats.Clients[m.selectedClient].ClientID
+				switch {
+				case msg.String() == "+" || msg.String() == "=":
+					vol := m.perClientVolumes[cid]
+					if vol == 0 && m.perClientVolumes != nil {
+						if _, ok := m.perClientVolumes[cid]; !ok {
+							vol = 1.0
+						}
+					}
+					vol += 0.1
+					if vol > 1.5 {
+						vol = 1.5
+					}
+					m.perClientVolumes[cid] = vol
+					m.cmdCh <- ClientCommand{Action: ActionVolumeUp, ClientID: cid}
+					return m, nil
+				case msg.String() == "-":
+					vol := m.perClientVolumes[cid]
+					if vol == 0 && m.perClientVolumes != nil {
+						if _, ok := m.perClientVolumes[cid]; !ok {
+							vol = 1.0
+						}
+					}
+					vol -= 0.1
+					if vol < 0 {
+						vol = 0
+					}
+					m.perClientVolumes[cid] = vol
+					m.cmdCh <- ClientCommand{Action: ActionVolumeDown, ClientID: cid}
+					return m, nil
+				}
+			}
+		}
+
 		// Device control keys (only when devices panel is available)
 		if m.deviceCmdCh != nil && len(m.deviceStates) > 0 {
 			switch {
@@ -117,8 +154,8 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 			case msg.String() == "+" || msg.String() == "=":
 				dev := m.deviceStates[m.selectedDevice2]
 				dev.Volume += 0.1
-				if dev.Volume > 2.0 {
-					dev.Volume = 2.0
+				if dev.Volume > 1.5 {
+					dev.Volume = 1.5
 				}
 				m.deviceStates[m.selectedDevice2] = dev
 				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeUp, DeviceID: dev.ID}
@@ -1196,6 +1233,21 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case tea.KeySpace:
+		// Toggle AGC for the selected device.
+		if m.deviceOverlayIndex < len(currentList) {
+			ds := currentList[m.deviceOverlayIndex]
+			for i := range m.deviceStates {
+				if m.deviceStates[i].ID == ds.ID {
+					m.deviceStates[i].AGC = !m.deviceStates[i].AGC
+					break
+				}
+			}
+			if m.deviceCmdCh != nil {
+				m.deviceCmdCh <- DeviceCommand{Action: DeviceToggleAGC, DeviceID: ds.ID}
+			}
+		}
+		return m, nil
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
 		if m.stopCh != nil {
 			m.stopOnce.Do(func() { close(m.stopCh) })
@@ -1203,6 +1255,44 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 	}
+
+	// Handle +/- for volume in device overlay (rune keys not matched by tea.KeyType).
+	if msg.Type == tea.KeyRunes {
+		key := msg.String()
+		if (key == "+" || key == "=") && m.deviceOverlayIndex < len(currentList) {
+			ds := currentList[m.deviceOverlayIndex]
+			for i := range m.deviceStates {
+				if m.deviceStates[i].ID == ds.ID {
+					m.deviceStates[i].Volume += 0.1
+					if m.deviceStates[i].Volume > 1.5 {
+						m.deviceStates[i].Volume = 1.5
+					}
+					break
+				}
+			}
+			if m.deviceCmdCh != nil {
+				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeUp, DeviceID: ds.ID}
+			}
+			return m, nil
+		}
+		if key == "-" && m.deviceOverlayIndex < len(currentList) {
+			ds := currentList[m.deviceOverlayIndex]
+			for i := range m.deviceStates {
+				if m.deviceStates[i].ID == ds.ID {
+					m.deviceStates[i].Volume -= 0.1
+					if m.deviceStates[i].Volume < 0 {
+						m.deviceStates[i].Volume = 0
+					}
+					break
+				}
+			}
+			if m.deviceCmdCh != nil {
+				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeDown, DeviceID: ds.ID}
+			}
+			return m, nil
+		}
+	}
+
 	return m, nil
 }
 

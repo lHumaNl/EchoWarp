@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -554,9 +555,10 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 			end = len(flatRows)
 		}
 
+		volAGCAreaW := 22 // "████████░░ 100%  ◇ AGC"
 		checkboxAreaW := 8
 		infoColW := 26
-		nameW := width - 4 - infoColW - checkboxAreaW
+		nameW := width - 4 - infoColW - checkboxAreaW - volAGCAreaW
 		if nameW < 10 {
 			nameW = 10
 		}
@@ -618,7 +620,13 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 				selected := roles.Capture || roles.Playback
 				checkboxes := "   " + m.renderCheckbox(selected, isFocused && isCursor)
 
-				body.WriteString(cursorGlyph + namePadded + infoPadded + checkboxes)
+				// Volume bar + AGC indicator (only for selected devices)
+				volAGC := strings.Repeat(" ", volAGCAreaW)
+				if selected {
+					volAGC = m.renderDeviceVolAGC(dev, isFocused && isCursor)
+				}
+
+				body.WriteString(cursorGlyph + namePadded + infoPadded + checkboxes + volAGC)
 			}
 
 			if i < end-1 {
@@ -703,4 +711,39 @@ func (m SetupModel) renderDuplexDeviceLists(width int) string {
 	}
 	return inputHeader + "\n" + sep + "\n" + flashLine + inputBody + "\n\n" +
 		outputHeader + "\n" + sep + "\n" + outputBody
+}
+
+// renderDeviceVolAGC renders an inline volume bar + AGC indicator for a selected device row.
+func (m SetupModel) renderDeviceVolAGC(dev deviceRow, isCursor bool) string {
+	const barLen = 10
+	filled := int(dev.Volume / 1.5 * float64(barLen))
+	if filled > barLen {
+		filled = barLen
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
+	pct := int(dev.Volume*100 + 0.5)
+
+	var volStr string
+	if dev.Volume > 1.0 {
+		volStr = styles.StatValueWarn.Render(bar) + styles.StatValueWarn.Render(fmt.Sprintf(" %3d%%", pct))
+	} else {
+		volStr = styles.StatValueGood.Render(bar) + fmt.Sprintf(" %3d%%", pct)
+	}
+
+	// AGC indicator
+	agcGlyph := "◇ AGC"
+	agcStyle := styles.SetupDimValue
+	if dev.AGC {
+		agcGlyph = "◆ AGC"
+		agcStyle = styles.StatValueGood
+	}
+	// Highlight AGC when cursor is on AGC column
+	if isCursor && m.deviceColumn == 1 {
+		agcStyle = styles.SetupColumnTitle
+		if dev.AGC {
+			agcStyle = styles.StatValueGood.Bold(true)
+		}
+	}
+
+	return " " + volStr + "  " + agcStyle.Render(agcGlyph)
 }

@@ -346,6 +346,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.perClientBitrateDown = make(map[string]float64)
 			m.perClientPrevBytesSent = make(map[string]uint64)
 			m.perClientPrevBytesRecv = make(map[string]uint64)
+			m.perClientVolumes = make(map[string]float64)
 		}
 
 		// Build set of active client IDs.

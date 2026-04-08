@@ -175,6 +175,9 @@ func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cm
 	// Restore mix inputs from preset data
 	m.restoreMixInputsFromPreset(preset, matched)
 
+	// Restore volume and AGC from preset to deviceRow slices
+	m.restoreVolumeAGCFromPreset(preset, matched)
+
 	// Build flash message
 	var restoredNames []string
 	for _, d := range matched {
@@ -274,6 +277,9 @@ func (m *SetupModel) applyRestore(preset recent.DevicePreset, skipVirtual bool) 
 
 	// Restore mix inputs from preset data
 	m.restoreMixInputsFromPreset(filteredPreset, matched)
+
+	// Restore volume and AGC from preset to deviceRow slices
+	m.restoreVolumeAGCFromPreset(filteredPreset, matched)
 
 	if len(unmatched) > 0 {
 		m.flashMsg = "⚠ Device '" + unmatched[0] + "' not found, skipped"

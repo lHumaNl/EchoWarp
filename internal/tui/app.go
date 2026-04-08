@@ -128,6 +128,7 @@ type Model struct {
 	perClientBitrateDown   map[string]float64
 	perClientPrevBytesSent map[string]uint64
 	perClientPrevBytesRecv map[string]uint64
+	perClientVolumes       map[string]float64 // per-client volume (0.0–1.5), default 1.0
 
 	// Participants sidebar (client-side, from ChatActionParticipants)
 	participantsCh <-chan app.ChatParticipantsPayload

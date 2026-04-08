@@ -20,6 +20,8 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 				Name:    d.Name,
 				IsInput: true,
 				Virtual: d.IsVirtual,
+				Volume:  d.Volume,
+				AGC:     d.AGC,
 			})
 		}
 	}
@@ -31,6 +33,8 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 				Name:    d.Name,
 				IsInput: false,
 				Virtual: d.IsVirtual,
+				Volume:  d.Volume,
+				AGC:     d.AGC,
 			}
 			// Save virtual sink preset for virtual output devices.
 			if d.IsVirtual {

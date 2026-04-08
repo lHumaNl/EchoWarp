@@ -144,6 +144,10 @@ func (s *ServerApp) processCommands(ctx context.Context) {
 				s.toggleMuteOutgoing(cmd.ClientID)
 			case ActionMuteIncoming:
 				s.toggleMuteIncoming(cmd.ClientID)
+			case ActionVolumeUp:
+				s.adjustClientVolume(cmd.ClientID, 0.1)
+			case ActionVolumeDown:
+				s.adjustClientVolume(cmd.ClientID, -0.1)
 			}
 		}
 	}
@@ -277,6 +281,46 @@ func (s *ServerApp) toggleMuteIncoming(clientID string) {
 		_ = mc.peer.SendControl(action, nil) //nolint:errcheck
 	}
 	s.logger.Info("Toggled incoming mute", "clientID", clientID, "nickname", nick, "mutedIncoming", newVal)
+}
+
+// adjustClientVolume adjusts the per-client volume in the conference mixer by delta (±0.1).
+// In conference mode, uses the ConferenceMixer's per-participant volume control.
+func (s *ServerApp) adjustClientVolume(clientID string, delta float64) {
+	s.mu.RLock()
+	mc, ok := s.clients[clientID]
+	s.mu.RUnlock()
+	if !ok {
+		s.logger.Warn("AdjustVolume: client not found", "clientID", clientID)
+		return
+	}
+	nick := mc.nickname
+	if nick == "" {
+		nick = clientID
+	}
+
+	if s.conference != nil {
+		// Use conference mixer per-participant volume.
+		states := s.conference.GetParticipantStates()
+		for _, st := range states {
+			if st.ID != clientID {
+				continue
+			}
+			newVol := st.Volume + float32(delta)
+			if newVol > 2.0 {
+				newVol = 2.0
+			}
+			if newVol < 0 {
+				newVol = 0
+			}
+			s.conference.mixer.SetParticipantVolume(clientID, newVol)
+			s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", newVol)
+			return
+		}
+		s.logger.Warn("AdjustVolume: participant not found in conference", "clientID", clientID)
+		return
+	}
+
+	s.logger.Info("Client volume adjusted (no conference mixer)", "clientID", clientID, "nickname", nick, "delta", delta)
 }
 
 // processRecordingCommands handles recording start/stop commands from TUI.

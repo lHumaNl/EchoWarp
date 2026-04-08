@@ -258,6 +258,8 @@ func (m Model) View() string {
 				SampleRate: sampleRate,
 				BitDepth:   bitDepth,
 				Muted:      ds.Muted,
+				Volume:     ds.Volume,
+				AGC:        ds.AGC,
 			})
 		}
 		body = views.RenderDeviceOverlay(views.DeviceOverlayParams{
@@ -517,6 +519,7 @@ func (m Model) viewStreaming() string {
 			AggBitrateUp:        aggUp,
 			AggBitrateDown:      aggDown,
 			ClientQualities:     qualities,
+			ClientVolumes:       m.perClientVolumes,
 			SpectrumBands:       m.effectiveSpectrumBands(),
 			VULevels:            m.effectiveVULevels(),
 			ChatView:            m.chatPanelView(),
@@ -546,6 +549,7 @@ func (m Model) viewStreaming() string {
 			Role:         ds.Role,
 			Volume:       ds.Volume,
 			Muted:        ds.Muted,
+			AGC:          ds.AGC,
 			Selected:     i == m.selectedDevice2,
 			Disconnected: ds.Disconnected,
 		})

@@ -2,10 +2,13 @@ package views
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/lHumaNl/echowarp/internal/recent"
 )
 
 // DeviceRoleSet tracks assigned roles for a device in multi-select mode.
@@ -24,6 +27,8 @@ type deviceRow struct {
 	Channels   uint32
 	SampleRate uint32
 	BitDepth   uint32
+	Volume     float64
+	AGC        bool
 }
 
 // selectKey returns a unique key for this device in the multiSelect map,
@@ -109,6 +114,7 @@ func (m *SetupModel) rebuildDeviceGroups() {
 			Channels:   ch,
 			SampleRate: sr,
 			BitDepth:   bd,
+			Volume:     1.0,
 		}
 		if isInput {
 			m.inputDevices = append(m.inputDevices, row)
@@ -199,4 +205,94 @@ func (m SetupModel) currentSectionRowCount() int {
 		return len(m.buildOutputRows())
 	}
 	return len(m.inputDevices)
+}
+
+// currentCursorDevice returns a pointer to the deviceRow at the current cursor position,
+// or nil if the cursor is out of range or points to a mix sub-item.
+func (m *SetupModel) currentCursorDevice() *deviceRow {
+	if m.DeviceSection == SectionOutput {
+		rows := m.buildOutputRows()
+		if m.deviceCursor >= 0 && m.deviceCursor < len(rows) && !rows[m.deviceCursor].isMixItem {
+			// Find the actual device in outputDevices slice (mutable)
+			key := rows[m.deviceCursor].device.selectKey()
+			for i := range m.outputDevices {
+				if m.outputDevices[i].selectKey() == key {
+					return &m.outputDevices[i]
+				}
+			}
+		}
+		return nil
+	}
+	if m.deviceCursor >= 0 && m.deviceCursor < len(m.inputDevices) {
+		return &m.inputDevices[m.deviceCursor]
+	}
+	return nil
+}
+
+// handleVolumeAdjust changes the volume of the currently selected device by ±0.1.
+func (m SetupModel) handleVolumeAdjust(decrease bool) (SetupModel, tea.Cmd) {
+	dev := m.currentCursorDevice()
+	if dev == nil {
+		return m, nil
+	}
+	if _, ok := m.multiSelect[dev.selectKey()]; !ok {
+		return m, nil
+	}
+	step := 0.1
+	if decrease {
+		step = -0.1
+	}
+	dev.Volume = math.Round((dev.Volume+step)*10) / 10
+	if dev.Volume < 0 {
+		dev.Volume = 0
+	}
+	if dev.Volume > 1.5 {
+		dev.Volume = 1.5
+	}
+	return m, nil
+}
+
+// handleAGCToggle toggles AGC on the currently selected device.
+func (m SetupModel) handleAGCToggle() (SetupModel, tea.Cmd) {
+	dev := m.currentCursorDevice()
+	if dev == nil {
+		return m, nil
+	}
+	if _, ok := m.multiSelect[dev.selectKey()]; !ok {
+		return m, nil
+	}
+	dev.AGC = !dev.AGC
+	return m, nil
+}
+
+// restoreVolumeAGCFromPreset applies Volume and AGC from preset devices
+// to the matching deviceRow entries in inputDevices/outputDevices.
+func (m *SetupModel) restoreVolumeAGCFromPreset(preset recent.DevicePreset, matched []deviceRow) {
+	// Build map from matched device name+isInput → preset device for fast lookup
+	type devKey struct {
+		name    string
+		isInput bool
+	}
+	presetByKey := make(map[devKey]recent.PresetDevice, len(preset.Devices))
+	for _, pd := range preset.Devices {
+		presetByKey[devKey{pd.Name, pd.IsInput}] = pd
+	}
+
+	applyToSlice := func(devices []deviceRow) {
+		for i := range devices {
+			for _, md := range matched {
+				if devices[i].selectKey() == md.selectKey() {
+					if pd, ok := presetByKey[devKey{md.Name, md.IsInput}]; ok {
+						if pd.Volume > 0 {
+							devices[i].Volume = pd.Volume
+						}
+						devices[i].AGC = pd.AGC
+					}
+					break
+				}
+			}
+		}
+	}
+	applyToSlice(m.inputDevices)
+	applyToSlice(m.outputDevices)
 }

@@ -51,6 +51,9 @@ type MultiClientParams struct {
 	// Per-client quality for list badges
 	ClientQualities []QualityLevel
 
+	// Per-client volumes (keyed by ClientID, 0.0–1.5, default 1.0)
+	ClientVolumes map[string]float64
+
 	// Visualization
 	SpectrumBands []float64
 	VULevels      []float64
@@ -192,15 +195,24 @@ func renderLeftColumn(p MultiClientParams, colWidth int) []string {
 			if i < len(p.ClientQualities) {
 				q = p.ClientQualities[i]
 			}
-			lines = append(lines, renderClientListItem(c, q, i == p.SelectedIndex, colWidth))
+			vol := -1.0 // no volume bar by default
+			if p.ClientVolumes != nil {
+				if v, ok := p.ClientVolumes[c.ClientID]; ok {
+					vol = v
+				} else {
+					vol = 1.0 // default volume
+				}
+			}
+			lines = append(lines, renderClientListItem(c, q, i == p.SelectedIndex, colWidth, vol))
 		}
 	}
 
 	return lines
 }
 
-// renderClientListItem renders a single client in the master list: "▸ Nick  🟢  HH:MM:SS"
-func renderClientListItem(c transport.ClientInfo, q QualityLevel, selected bool, maxWidth int) string {
+// renderClientListItem renders a single client in the master list: "▸ Nick  🟢  ████░░ 100%  6s"
+// volume < 0 means no volume bar is shown.
+func renderClientListItem(c transport.ClientInfo, q QualityLevel, selected bool, maxWidth int, volume float64) string {
 	prefix := "  "
 	if selected {
 		prefix = styles.SelectedItem.Render(styles.CursorGlyph) + " "
@@ -229,23 +241,32 @@ func renderClientListItem(c transport.ClientInfo, q QualityLevel, selected bool,
 	}
 	badge = strings.TrimSpace(badge)
 
+	// Volume bar (compact: 6 chars + space + 4 chars for pct)
+	volStr := ""
+	if volume >= 0 {
+		volStr = renderCompactVolumeBar(volume)
+	}
+
 	dur := c.Duration
 	durW := runewidth.StringWidth(dur)
 
 	// Drop badge entirely if terminal is too narrow to show it alongside a minimum nick (4 chars).
 	// Minimum viable row: prefix(2) + nick(4) + space(1) + badge + space(1) + dur
+	volW := runewidth.StringWidth(volStr)
 	if badge != "" {
-		minWithBadge := 2 + 4 + 1 + runewidth.StringWidth(badge) + 1 + durW
+		minWithBadge := 2 + 4 + 1 + runewidth.StringWidth(badge) + 1 + volW + 1 + durW
 		if minWithBadge > maxWidth {
 			badge = ""
 		}
 	}
 
-	// Build: prefix + nick + "  " + badge + gap + dur
-	// Reserve space: prefix(2) + spaces(3) + dur
+	// Build: prefix + nick + "  " + badge + "  " + volBar + gap + dur
 	reserved := 2 + 3 + durW
 	if badge != "" {
 		reserved += runewidth.StringWidth(badge) + 1
+	}
+	if volW > 0 {
+		reserved += volW + 1
 	}
 	nickMax := maxWidth - reserved
 	if nickMax < 4 {
@@ -255,15 +276,27 @@ func renderClientListItem(c transport.ClientInfo, q QualityLevel, selected bool,
 		nick = runewidth.Truncate(nick, nickMax-1, "…")
 	}
 
-	var item string
+	// Assemble the middle part (badge + volume)
+	middle := ""
 	if badge != "" {
+		middle += badge
+	}
+	if volStr != "" {
+		if middle != "" {
+			middle += " "
+		}
+		middle += volStr
+	}
+
+	var item string
+	if middle != "" {
 		nickW := runewidth.StringWidth(nick)
-		badgeW := runewidth.StringWidth(badge)
-		gap := maxWidth - 2 - nickW - badgeW - durW - 3 // 3 for spacing chars
+		middleW := runewidth.StringWidth(middle)
+		gap := maxWidth - 2 - nickW - middleW - durW - 3
 		if gap < 1 {
 			gap = 1
 		}
-		item = prefix + styles.ClientListItem.Render(nick) + "  " + badge + strings.Repeat(" ", gap) + styles.StatLabel.Render(dur)
+		item = prefix + styles.ClientListItem.Render(nick) + "  " + middle + strings.Repeat(" ", gap) + styles.StatLabel.Render(dur)
 	} else {
 		nickW := runewidth.StringWidth(nick)
 		gap := maxWidth - 2 - nickW - durW - 2
@@ -447,7 +480,15 @@ func renderStackedLayout(p MultiClientParams) string {
 			if i < len(p.ClientQualities) {
 				q = p.ClientQualities[i]
 			}
-			lines = append(lines, renderClientListItem(c, q, i == p.SelectedIndex, w))
+			vol := -1.0
+			if p.ClientVolumes != nil {
+				if v, ok := p.ClientVolumes[c.ClientID]; ok {
+					vol = v
+				} else {
+					vol = 1.0
+				}
+			}
+			lines = append(lines, renderClientListItem(c, q, i == p.SelectedIndex, w, vol))
 		}
 	}
 

@@ -129,8 +129,9 @@ type DeviceState struct {
 	ID           uint32
 	Name         string
 	Role         string  // "capture" or "playback"
-	Volume       float64 // 0.0–2.0
+	Volume       float64 // 0.0–1.5
 	Muted        bool
+	AGC          bool
 	Disconnected bool
 }
 

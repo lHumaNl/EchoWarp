@@ -51,6 +51,8 @@ type PresetDevice struct {
 	MixInputID   *uint32            `json:"mix_input_id,omitempty" yaml:"mix_input_id,omitempty"`
 	MixInputName string             `json:"mix_input_name,omitempty" yaml:"mix_input_name,omitempty"`
 	VirtualSink  *VirtualSinkPreset `json:"virtual_sink,omitempty" yaml:"virtual_sink,omitempty"`
+	Volume       float64            `json:"volume,omitempty" yaml:"volume,omitempty"`
+	AGC          bool               `json:"agc,omitempty" yaml:"agc,omitempty"`
 }
 
 // Server represents a recently connected server.
@@ -133,6 +135,7 @@ func Load() ([]Server, error) {
 		if err := json.Unmarshal(data, &servers); err != nil {
 			return nil, nil //nolint:nilerr
 		}
+		defaultPresetVolumes(servers)
 		return filterValid(servers), nil
 	}
 
@@ -141,7 +144,23 @@ func Load() ([]Server, error) {
 	if err := yaml.Unmarshal(data, &servers); err != nil {
 		return nil, nil //nolint:nilerr
 	}
+	defaultPresetVolumes(servers)
 	return filterValid(servers), nil
+}
+
+// defaultPresetVolumes sets Volume to 1.0 for any PresetDevice where it is zero
+// (backward compatibility with presets saved before the Volume field existed).
+func defaultPresetVolumes(servers []Server) {
+	for i := range servers {
+		for k, preset := range servers[i].Presets {
+			for j := range preset.Devices {
+				if preset.Devices[j].Volume == 0 {
+					preset.Devices[j].Volume = 1.0
+				}
+			}
+			servers[i].Presets[k] = preset
+		}
+	}
 }
 
 // filterValid removes entries with empty address or zero port.

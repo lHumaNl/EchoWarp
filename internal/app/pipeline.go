@@ -34,6 +34,9 @@ type CapturePipelineConfig struct {
 	// AEC: acoustic echo cancellation processor (optional, injected externally).
 	AEC *audio.AECProcessor
 
+	// AGC: automatic gain control processor (optional, injected externally).
+	AGC *audio.AGCProcessor
+
 	// Spectrum analyzer fed from capture PCM (optional).
 	Spectrum *audio.SpectrumAnalyzer
 	// Level meter fed from capture PCM (optional).
@@ -119,6 +122,13 @@ func (p *CapturePipeline) Run(ctx context.Context, sendCh chan<- []byte) error {
 			if p.cfg.AEC != nil && p.cfg.AEC.IsEnabled() {
 				processed, aecErr := p.cfg.AEC.Process(ctx, samples)
 				if aecErr == nil {
+					samples = processed
+				}
+			}
+			// Apply AGC if enabled: normalize volume levels.
+			if p.cfg.AGC != nil {
+				processed, agcErr := p.cfg.AGC.Process(ctx, samples)
+				if agcErr == nil {
 					samples = processed
 				}
 			}

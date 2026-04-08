@@ -188,7 +188,7 @@ func (m SetupModel) BuildConfig() config.Config {
 				role = config.RoleCapture
 			}
 			entry := config.DeviceEntry{
-				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: 1.0,
+				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: dev.Volume, AGC: dev.AGC,
 			}
 			// Attach mix input for virtual output devices.
 			if !dev.IsInput && dev.IsVirtual {

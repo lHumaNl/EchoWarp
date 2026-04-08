@@ -416,3 +416,20 @@ func handleControlMsg(logger *slog.Logger, payload json.RawMessage, logFields ..
 	}
 	return ctrl.Action == "stop"
 }
+
+// buildAGCProcessors creates AGC processors for devices that have AGC enabled.
+// Returns nil if no devices have AGC enabled.
+func buildAGCProcessors(devices []config.DeviceEntry, sampleRate uint32) map[uint32]*audio.AGCProcessor {
+	var result map[uint32]*audio.AGCProcessor
+	for _, dev := range devices {
+		if dev.AGC {
+			if result == nil {
+				result = make(map[uint32]*audio.AGCProcessor)
+			}
+			agcCfg := audio.DefaultAGCConfig()
+			agcCfg.SampleRate = sampleRate
+			result[dev.ID] = audio.NewAGCProcessor(agcCfg)
+		}
+	}
+	return result
+}

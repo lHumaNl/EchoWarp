@@ -18,6 +18,8 @@ type DeviceOverlayItem struct {
 	SampleRate uint32
 	BitDepth   uint32
 	Muted      bool
+	Volume     float64
+	AGC        bool
 }
 
 // DeviceOverlayParams contains the state needed to render the device overlay.
@@ -81,7 +83,7 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 		}
 	}
 
-	help := styles.Help.Render("Tab: section   ↑↓: select   Enter: mute/unmute   Esc: close")
+	help := styles.Help.Render("↑↓: select  +/-: volume  space: AGC  enter: mute  Tab: section  Esc: close")
 
 	content := title + "\n\n" + strings.Join(sections, "\n") + "\n\n" + help
 
@@ -124,34 +126,27 @@ func renderDeviceOverlayRow(d DeviceOverlayItem, selected bool) string {
 		icon = "🔇"
 	}
 
-	info := formatDeviceOverlayInfo(d)
-
 	prefix := "  "
 	if selected {
 		prefix = styles.SelectedItem.Render(styles.CursorGlyph + " ")
 	}
 
-	maxNameW := 56 - 24 // boxWidth minus prefix, icon, info, padding
-	if maxNameW < 12 {
-		maxNameW = 12
-	}
+	maxNameW := 20
 	name := TruncateToWidth(d.Name, maxNameW)
 
-	return prefix + icon + " " + name + "  " + styles.Help.Render(info)
-}
+	// Volume bar + percentage
+	volBar := renderVolumeBar(d.Volume)
+	volPct := fmt.Sprintf("%3d%%", int(d.Volume*100))
+	if d.Muted {
+		volBar = styles.Help.Render("░░░░░░░░░░")
+		volPct = styles.Help.Render("MUTE")
+	}
 
-func formatDeviceOverlayInfo(d DeviceOverlayItem) string {
-	ch := ""
-	if d.Channels > 0 {
-		ch = FormatChannels(d.Channels)
+	// AGC indicator
+	agcIndicator := "◇AGC"
+	if d.AGC {
+		agcIndicator = "◆AGC"
 	}
-	bd := ""
-	if d.BitDepth > 0 {
-		bd = formatBitDepth(d.BitDepth)
-	}
-	sr := ""
-	if d.SampleRate > 0 {
-		sr = formatSampleRate(d.SampleRate)
-	}
-	return fmt.Sprintf("%s %s %s", ch, bd, sr)
+
+	return prefix + icon + " " + name + "  " + volBar + " " + volPct + "  " + styles.Help.Render(agcIndicator)
 }

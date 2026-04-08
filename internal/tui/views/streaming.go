@@ -26,8 +26,9 @@ type DeviceDisplayState struct {
 	ID           uint32
 	Name         string
 	Role         string  // "capture" or "playback"
-	Volume       float64 // 0.0–2.0
+	Volume       float64 // 0.0–1.5
 	Muted        bool
+	AGC          bool
 	Selected     bool
 	Disconnected bool
 }
@@ -526,9 +527,24 @@ func renderDevicePanel(devices []DeviceDisplayState, globalMuted bool) string {
 	return strings.Join(lines, "\n")
 }
 
+// renderCompactVolumeBar renders a short volume bar (6 chars) + percentage for inline use.
+func renderCompactVolumeBar(volume float64) string {
+	const barLen = 6
+	filled := int(volume / 1.5 * float64(barLen))
+	if filled > barLen {
+		filled = barLen
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
+	pct := fmt.Sprintf("%3d%%", int(volume*100))
+	if volume > 1.0 {
+		return styles.StatValueWarn.Render(bar) + " " + pct
+	}
+	return styles.StatValueGood.Render(bar) + " " + pct
+}
+
 func renderVolumeBar(volume float64) string {
 	const barLen = 10
-	filled := int(volume / 2.0 * float64(barLen))
+	filled := int(volume / 1.5 * float64(barLen))
 	if filled > barLen {
 		filled = barLen
 	}

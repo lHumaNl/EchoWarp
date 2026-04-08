@@ -444,6 +444,11 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 
 	case tea.KeyLeft:
+		// In Devices column with AGC focus: go back to device select column
+		if m.activeColumn == ColumnDevices && m.unifiedDuplex && m.deviceColumn == 1 {
+			m.deviceColumn = 0
+			return m, nil
+		}
 		// In Settings column: switch to Devices column
 		if m.activeColumn == ColumnSettings {
 			// For client mode: block if no server ready
@@ -465,7 +470,32 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 
 	case tea.KeyRight:
-		// In Devices column: switch to Settings column
+		// In Devices column (unified): switch to AGC column if device is selected
+		if m.activeColumn == ColumnDevices && m.unifiedDuplex && m.deviceColumn == 0 {
+			dev := m.currentCursorDevice()
+			if dev != nil {
+				if _, ok := m.multiSelect[dev.selectKey()]; ok {
+					m.deviceColumn = 1
+					return m, nil
+				}
+			}
+			// Not selected — go to settings
+			m.activeColumn = ColumnSettings
+			if m.cfg.Mode == config.ModeClient && m.serverList.HasEntries() {
+				m.serverListFocused = true
+			}
+			return m, nil
+		}
+		// In Devices column AGC: switch to Settings column
+		if m.activeColumn == ColumnDevices && m.unifiedDuplex && m.deviceColumn == 1 {
+			m.deviceColumn = 0
+			m.activeColumn = ColumnSettings
+			if m.cfg.Mode == config.ModeClient && m.serverList.HasEntries() {
+				m.serverListFocused = true
+			}
+			return m, nil
+		}
+		// In Devices column (non-unified): switch to Settings column
 		if m.activeColumn == ColumnDevices {
 			m.activeColumn = ColumnSettings
 			if m.cfg.Mode == config.ModeClient && m.serverList.HasEntries() {
@@ -477,8 +507,21 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	case tea.KeySpace, tea.KeyRunes:
 		// On Windows, Space arrives as KeyRunes with rune ' ' instead of KeySpace.
 		isSpace := msg.Type == tea.KeySpace || (msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == ' ')
+
+		// +/- volume adjustment in unified device column
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && m.activeColumn == ColumnDevices && m.unifiedDuplex {
+			r := msg.Runes[0]
+			if r == '+' || r == '=' || r == '-' {
+				return m.handleVolumeAdjust(r == '-')
+			}
+		}
+
 		if isSpace {
 			if m.activeColumn == ColumnDevices && m.unifiedDuplex {
+				// AGC column: toggle AGC
+				if m.deviceColumn == 1 {
+					return m.handleAGCToggle()
+				}
 				return m.handleMultiSelectToggle()
 			}
 			if m.activeColumn == ColumnSettings {
