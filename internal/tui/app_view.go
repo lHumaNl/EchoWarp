@@ -531,7 +531,11 @@ func (m Model) viewStreaming() string {
 			multiParams.PlaybackSpectrumBands = m.spectrumBands
 			multiParams.PlaybackVULevels = m.vuLevels
 		}
-		return views.MultiClientView(multiParams)
+		body := views.MultiClientView(multiParams)
+		if m.recordingOverlay.Visible {
+			body = m.recordingOverlay.Render(m.width)
+		}
+		return body
 	}
 	var devDisplay []views.DeviceDisplayState
 	for i, ds := range m.deviceStates {
@@ -586,7 +590,11 @@ func (m Model) viewStreaming() string {
 		params.PlaybackVULevels = m.vuLevels
 	}
 
-	return views.StreamingView(params)
+	body := views.StreamingView(params)
+	if m.recordingOverlay.Visible {
+		body = m.recordingOverlay.Render(m.width)
+	}
+	return body
 }
 
 // isCaptureOnlyMode returns true when the local side only captures audio (no playback).
@@ -730,10 +738,14 @@ func (m Model) helpKeys() string {
 			return "enter: send  esc: back  ↑↓: scroll  ^Q: quit"
 		}
 
-		if m.conference {
-			if m.recordingOverlay.Visible {
-				return "tab: section  space: toggle  ^A: all  ^N: none  enter: start  esc: cancel"
+		if m.recordingOverlay.Visible {
+			if m.recordingOverlay.IsStatusState() {
+				return "enter: stop recording  esc: close"
 			}
+			return "↑↓: move  space: toggle  ^A: all  ^N: none  enter: start  esc: cancel"
+		}
+
+		if m.conference {
 			if m.participantOverlay.Visible {
 				return "↑↓: select  enter: confirm  esc: cancel"
 			}
@@ -764,6 +776,11 @@ func (m Model) helpKeys() string {
 				}
 			}
 			parts = append(parts, "^U: unban list")
+			if m.isRecording {
+				parts = append(parts, "^R: stop rec")
+			} else {
+				parts = append(parts, "^R: rec")
+			}
 			if m.chatPanel.IsVisible() {
 				parts = append(parts, "^T: hide chat")
 			} else {
@@ -827,6 +844,11 @@ func (m Model) helpKeys() string {
 			} else {
 				parts = append(parts, "^P: pause")
 			}
+		}
+		if m.isRecording {
+			parts = append(parts, "^R: stop rec")
+		} else {
+			parts = append(parts, "^R: rec")
 		}
 		parts = append(parts, "^Q: quit")
 		return strings.Join(parts, "  ")

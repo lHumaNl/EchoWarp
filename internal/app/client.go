@@ -256,8 +256,8 @@ func (c *ClientApp) StartRecording(mode audio.RecordingMode) error {
 	c.recorderMu.Lock()
 	defer c.recorderMu.Unlock()
 	c.recorder = audio.NewConferenceRecorder(mode, c.cfg.SampleRate, 1)
-	configDir, _ := os.UserConfigDir() //nolint:errcheck
-	baseDir := filepath.Join(configDir, "echowarp", "recordings")
+	homeDir, _ := os.UserHomeDir() //nolint:errcheck
+	baseDir := filepath.Join(homeDir, "Documents", "EchoWarp_records")
 	return c.recorder.Start(baseDir)
 }
 

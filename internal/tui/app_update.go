@@ -486,6 +486,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.chatPanel.AddMessage(msg.Message)
 		return m, waitForChat(m.chatMsgCh)
 
+	case RecordingStatusUpdate:
+		m.recordingDir = msg.Dir
+		m.recordingFile = msg.FileName
+		m.recordingSize = msg.Size
+		// Update status overlay if it's visible.
+		if m.recordingOverlay.Visible && m.recordingOverlay.IsStatusState() {
+			m.recordingOverlay.UpdateStatus(msg.Size)
+		}
+		return m, nil
+
 	case views.ChatSendMsg:
 		if m.chatSendFn != nil && msg.Text != "" {
 			m.chatSendFn(msg.Text, msg.To)

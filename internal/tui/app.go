@@ -219,6 +219,9 @@ type Model struct {
 	recordingMode  views.RecordingMode
 	recordingStart time.Time
 	recordingCmdCh chan<- RecordingCommand // sends start/stop commands to app layer
+	recordingDir   string                  // recording output directory
+	recordingFile  string                  // primary recording file name
+	recordingSize  uint64                  // total recording size in bytes
 
 	// Graceful shutdown: closed when user presses Ctrl+Q.
 	stopCh   chan struct{}

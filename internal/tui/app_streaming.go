@@ -62,46 +62,19 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 				return m, nil
 			}
 		case tea.KeyCtrlR:
-			if m.conference {
-				if m.isRecording {
-					// Smart toggle: stop recording immediately
-					m.isRecording = false
-					m.recordingStart = time.Time{}
-					if m.recordingCmdCh != nil {
-						m.recordingCmdCh <- RecordingCommand{Start: false}
-					}
-				} else {
-					// Show overlay with current sources
-					var localDevices []views.RecordingSource
-					for _, ds := range m.deviceStates {
-						localDevices = append(localDevices, views.RecordingSource{
-							ID:   fmt.Sprintf("%d", ds.ID),
-							Name: ds.Name,
-						})
-					}
-					var remoteSources []views.RecordingSource
-					isServer := m.config.Mode == config.ModeServer
-					if isServer {
-						for _, ps := range m.conferenceStates {
-							if ps.ID == "server" {
-								continue // server is local
-							}
-							remoteSources = append(remoteSources, views.RecordingSource{
-								ID:   ps.ID,
-								Name: ps.ID,
-							})
-						}
-					} else {
-						remoteSources = append(remoteSources, views.RecordingSource{
-							ID:   "incoming",
-							Name: "Incoming stream",
-						})
-					}
-					m.recordingOverlay.Show(isServer, localDevices, remoteSources)
-				}
+			if m.isRecording {
+				// Show status overlay (press Enter there to stop).
+				m.recordingOverlay.ShowStatus(
+					m.recordingDir,
+					m.recordingFile,
+					m.recordingSize,
+					m.recordingStart,
+				)
 				return m, nil
 			}
-			// Ctrl+R outside conference — no action (reconnect not available in this mode)
+			// Build source lists based on mode.
+			captureDevices, playbackDevices, clients := m.buildRecordingSources()
+			m.recordingOverlay.ShowStart(captureDevices, playbackDevices, clients)
 			return m, nil
 		}
 
@@ -282,37 +255,131 @@ func (m Model) handleRecordingOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEsc:
 		m.recordingOverlay.Hide()
 	case tea.KeyEnter:
-		m.isRecording = true
-		m.recordingMode = m.recordingOverlay.SelectedMode()
-		m.recordingStart = time.Now()
-		if m.recordingCmdCh != nil {
-			m.recordingCmdCh <- RecordingCommand{
-				Start:          true,
-				Mode:           m.recordingMode,
-				LocalDeviceIDs: m.recordingOverlay.SelectedLocalDevices(),
-				RemoteIDs:      m.recordingOverlay.SelectedRemoteSources(),
+		if m.recordingOverlay.IsStatusState() {
+			// Stop recording.
+			m.isRecording = false
+			m.recordingStart = time.Time{}
+			m.recordingFile = ""
+			m.recordingDir = ""
+			m.recordingSize = 0
+			if m.recordingCmdCh != nil {
+				m.recordingCmdCh <- RecordingCommand{Start: false}
 			}
+			m.recordingOverlay.Hide()
+		} else {
+			// Start recording.
+			m.isRecording = true
+			m.recordingMode = m.recordingOverlay.SelectedMode()
+			m.recordingStart = time.Now()
+			if m.recordingCmdCh != nil {
+				m.recordingCmdCh <- RecordingCommand{
+					Start:          true,
+					Mode:           m.recordingOverlay.SelectedMode(),
+					LocalDeviceIDs: m.recordingOverlay.SelectedLocalDevices(),
+					PlaybackIDs:    m.recordingOverlay.SelectedPlaybackDevices(),
+					RemoteIDs:      m.recordingOverlay.SelectedRemoteSources(),
+				}
+			}
+			m.recordingOverlay.Hide()
 		}
-		m.recordingOverlay.Hide()
-	case tea.KeyTab:
-		m.recordingOverlay.NextSection()
-	case tea.KeyShiftTab:
-		m.recordingOverlay.PrevSection()
 	case tea.KeyUp:
-		m.recordingOverlay.Up()
+		if m.recordingOverlay.IsStartState() {
+			m.recordingOverlay.Up()
+		}
 	case tea.KeyDown:
-		m.recordingOverlay.Down()
+		if m.recordingOverlay.IsStartState() {
+			m.recordingOverlay.Down()
+		}
 	case tea.KeySpace:
-		m.recordingOverlay.Toggle()
+		if m.recordingOverlay.IsStartState() {
+			m.recordingOverlay.Toggle()
+		}
 	case tea.KeyCtrlA:
-		m.recordingOverlay.SelectAll()
+		if m.recordingOverlay.IsStartState() {
+			m.recordingOverlay.SelectAll()
+		}
 	case tea.KeyCtrlN:
-		m.recordingOverlay.SelectNone()
+		if m.recordingOverlay.IsStartState() {
+			m.recordingOverlay.SelectNone()
+		}
 	case tea.KeyCtrlR:
 		// Toggle overlay off
 		m.recordingOverlay.Hide()
 	}
 	return m, nil
+}
+
+// buildRecordingSources determines which sources to show in the recording popup
+// based on the current streaming mode.
+func (m Model) buildRecordingSources() (capture, playback, clients []views.RecordingSource) {
+	isServer := m.config.Mode == config.ModeServer
+
+	// Build capture device list from device states.
+	for _, ds := range m.deviceStates {
+		if ds.Role == "capture" {
+			capture = append(capture, views.RecordingSource{
+				ID:        fmt.Sprintf("%d", ds.ID),
+				Name:      ds.Name,
+				IsCapture: true,
+			})
+		}
+	}
+
+	// Build playback device list from device states.
+	for _, ds := range m.deviceStates {
+		if ds.Role == "playback" {
+			playback = append(playback, views.RecordingSource{
+				ID:   fmt.Sprintf("%d", ds.ID),
+				Name: ds.Name,
+			})
+		}
+	}
+
+	// Build client list.
+	if m.conference {
+		if isServer {
+			for _, ps := range m.conferenceStates {
+				if ps.ID == "server" {
+					continue
+				}
+				clients = append(clients, views.RecordingSource{
+					ID:   ps.ID,
+					Name: ps.ID,
+				})
+			}
+		} else {
+			clients = append(clients, views.RecordingSource{
+				ID:   "incoming",
+				Name: "Incoming stream",
+			})
+		}
+	} else if m.multiClient {
+		for _, c := range m.multiStats.Clients {
+			name := c.ClientID
+			if c.Nickname != "" {
+				name = c.Nickname
+			}
+			clients = append(clients, views.RecordingSource{
+				ID:   c.ClientID,
+				Name: name,
+			})
+		}
+	} else {
+		// Single-client mode: the remote peer is one source.
+		if isServer {
+			clients = append(clients, views.RecordingSource{
+				ID:   "client",
+				Name: "Client stream",
+			})
+		} else {
+			clients = append(clients, views.RecordingSource{
+				ID:   "incoming",
+				Name: "Server stream",
+			})
+		}
+	}
+
+	return capture, playback, clients
 }
 
 // openBanOverlay builds the reason list and opens the ban overlay for the given client.

@@ -112,8 +112,16 @@ const (
 type RecordingCommand struct {
 	Start          bool // true=start, false=stop
 	Mode           views.RecordingMode
-	LocalDeviceIDs []string // selected local device IDs
+	LocalDeviceIDs []string // selected capture device IDs
+	PlaybackIDs    []string // selected playback device IDs
 	RemoteIDs      []string // selected remote source IDs
+}
+
+// RecordingStatusUpdate is sent from the app layer to TUI to update recording status.
+type RecordingStatusUpdate struct {
+	Dir      string // recording output directory
+	FileName string // primary file name
+	Size     uint64 // total size in bytes
 }
 
 // DeviceState holds the current display state of a capture/playback device.

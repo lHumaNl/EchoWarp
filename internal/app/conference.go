@@ -115,8 +115,8 @@ func (ch *ConferenceHandler) StartRecording(mode audio.RecordingMode, sampleRate
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 	ch.recorder = audio.NewConferenceRecorder(mode, sampleRate, 1) // mono
-	configDir, _ := os.UserConfigDir()                             //nolint:errcheck
-	baseDir := filepath.Join(configDir, "echowarp", "recordings")
+	homeDir, _ := os.UserHomeDir()                                 //nolint:errcheck
+	baseDir := filepath.Join(homeDir, "Documents", "EchoWarp_records")
 	return ch.recorder.Start(baseDir)
 }
 
