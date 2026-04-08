@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/version"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 )
@@ -24,6 +25,7 @@ import (
 // The root command handles global flags and delegates to subcommands.
 // When run without arguments it launches an interactive quick-start menu.
 func NewRootCmd() *cobra.Command {
+	i18n.SetLanguage(i18n.LoadLanguage())
 	auth.Version = version.Version
 
 	rootCmd := &cobra.Command{
@@ -122,6 +124,13 @@ func (i quickStartItem) Title() string       { return i.title }
 func (i quickStartItem) Description() string { return i.desc }
 func (i quickStartItem) FilterValue() string { return i.title }
 
+type qsColumn int
+
+const (
+	qsColumnMenu qsColumn = iota
+	qsColumnLang
+)
+
 type quickStartModel struct {
 	screen      quickStartScreen
 	list        list.Model
@@ -134,6 +143,8 @@ type quickStartModel struct {
 	resultTitle string
 	width       int
 	height      int
+	column      qsColumn // active column: menu or language
+	langCursor  int      // cursor in the language list
 }
 
 var (
@@ -156,16 +167,16 @@ func newQuickStartModel(hasConfig bool, cfgPath string) quickStartModel {
 	var items []list.Item
 
 	items = []list.Item{
-		quickStartItem{choiceStartServer, "🎙  Server", "Create audio server (clients connect to stream)"},
-		quickStartItem{choiceStartClient, "🎧  Client", "Connect to a running server"},
+		quickStartItem{choiceStartServer, i18n.T("qs_server_title"), i18n.T("qs_server_desc")},
+		quickStartItem{choiceStartClient, i18n.T("qs_client_title"), i18n.T("qs_client_desc")},
 	}
 	if hasConfig {
-		items = append(items, quickStartItem{choiceConfigShow, "📋  Config", "Show current configuration"})
+		items = append(items, quickStartItem{choiceConfigShow, i18n.T("qs_config_title"), i18n.T("qs_config_desc")})
 	}
 	items = append(items,
-		quickStartItem{choiceDoctor, "🩺  Diagnostics", "Check audio & network health"},
-		quickStartItem{choiceDevices, "🔊  Devices", "List audio input/output devices"},
-		quickStartItem{choiceHelp, "❓  Help", "Commands, flags & examples"},
+		quickStartItem{choiceDoctor, i18n.T("qs_doctor_title"), i18n.T("qs_doctor_desc")},
+		quickStartItem{choiceDevices, i18n.T("qs_devices_title"), i18n.T("qs_devices_desc")},
+		quickStartItem{choiceHelp, i18n.T("qs_help_title"), i18n.T("qs_help_desc")},
 	)
 
 	delegate := list.NewDefaultDelegate()
@@ -191,15 +202,26 @@ func newQuickStartModel(hasConfig bool, cfgPath string) quickStartModel {
 	vp := viewport.New(80, 20)
 	vp.Style = lipgloss.NewStyle().PaddingLeft(1)
 
+	// Pre-select current language in side panel
+	langIdx := 0
+	cur := i18n.CurrentLanguage()
+	for idx, lang := range i18n.AvailableLanguages() {
+		if lang == cur {
+			langIdx = idx
+			break
+		}
+	}
+
 	return quickStartModel{
-		screen:    qsScreenMenu,
-		list:      l,
-		viewport:  vp,
-		spinner:   sp,
-		hasConfig: hasConfig,
-		cfgPath:   cfgPath,
-		width:     80,
-		height:    24,
+		screen:     qsScreenMenu,
+		list:       l,
+		viewport:   vp,
+		spinner:    sp,
+		hasConfig:  hasConfig,
+		cfgPath:    cfgPath,
+		width:      80,
+		height:     24,
+		langCursor: langIdx,
 	}
 }
 
@@ -262,12 +284,36 @@ func (m quickStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// knownLangNames maps language codes to native display names.
+var knownLangNames = map[i18n.Language]string{
+	i18n.English: "English",
+	i18n.Russian: "Русский",
+}
+
 func (m quickStartModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+q", "ctrl+c":
 		m.quitting = true
 		return m, tea.Quit
-	case "enter":
+	case "tab", "right":
+		if m.column == qsColumnMenu {
+			m.column = qsColumnLang
+		} else {
+			m.column = qsColumnMenu
+		}
+		return m, nil
+	case "left":
+		if m.column == qsColumnLang {
+			m.column = qsColumnMenu
+		}
+		return m, nil
+	}
+
+	if m.column == qsColumnLang {
+		return m.updateLangPanel(msg)
+	}
+
+	if msg.String() == "enter" {
 		if item, ok := m.list.SelectedItem().(quickStartItem); ok {
 			return m.handleChoice(item.choice)
 		}
@@ -275,6 +321,26 @@ func (m quickStartModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
+}
+
+func (m quickStartModel) updateLangPanel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	langs := i18n.AvailableLanguages()
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.langCursor > 0 {
+			m.langCursor--
+		}
+	case tea.KeyDown:
+		if m.langCursor < len(langs)-1 {
+			m.langCursor++
+		}
+	case tea.KeyEnter:
+		lang := langs[m.langCursor]
+		i18n.SetLanguage(lang)
+		_ = i18n.SaveLanguage(lang)
+		m = m.rebuildMenuItems()
+	}
+	return m, nil
 }
 
 func (m quickStartModel) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -339,6 +405,79 @@ func (m quickStartModel) handleChoice(choice quickStartChoice) (tea.Model, tea.C
 	return m, nil
 }
 
+var (
+	langPanelTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).MarginBottom(1)
+	langSelected   = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+	langDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+)
+
+func (m quickStartModel) viewMenu() string {
+	// Left column: menu list
+	menuWidth := m.width*2/3 - 2
+	if menuWidth < 40 {
+		menuWidth = 40
+	}
+	m.list.SetSize(menuWidth, m.height-2)
+	leftCol := m.list.View()
+
+	// Right column: language panel
+	langs := i18n.AvailableLanguages()
+	curLang := i18n.CurrentLanguage()
+
+	langLines := make([]string, 0, 2+len(langs))
+	langLines = append(langLines, langPanelTitle.Render(i18n.T("lang_overlay_title")), "")
+	for idx, lang := range langs {
+		name, ok := knownLangNames[lang]
+		if !ok {
+			name = string(lang)
+		}
+		bullet := "○ "
+		if lang == curLang {
+			bullet = "● "
+		}
+		line := bullet + name
+		if m.column == qsColumnLang && idx == m.langCursor {
+			line = langSelected.Render("▸ " + name)
+			if lang == curLang {
+				line = langSelected.Render("● " + name)
+			}
+		} else if lang != curLang {
+			line = langDim.Render(line)
+		}
+		langLines = append(langLines, "  "+line)
+	}
+
+	rightCol := strings.Join(langLines, "\n")
+
+	// Join columns side by side
+	joined := lipgloss.JoinHorizontal(lipgloss.Top,
+		lipgloss.NewStyle().Width(menuWidth).Render(leftCol),
+		lipgloss.NewStyle().PaddingLeft(2).Render(rightCol),
+	)
+
+	footer := resultFooterStyle.Render(i18n.T("qs_footer"))
+	return joined + "\n" + footer
+}
+
+// rebuildMenuItems recreates list items with current language strings.
+func (m quickStartModel) rebuildMenuItems() quickStartModel {
+	var items []list.Item
+	items = []list.Item{
+		quickStartItem{choiceStartServer, i18n.T("qs_server_title"), i18n.T("qs_server_desc")},
+		quickStartItem{choiceStartClient, i18n.T("qs_client_title"), i18n.T("qs_client_desc")},
+	}
+	if m.hasConfig {
+		items = append(items, quickStartItem{choiceConfigShow, i18n.T("qs_config_title"), i18n.T("qs_config_desc")})
+	}
+	items = append(items,
+		quickStartItem{choiceDoctor, i18n.T("qs_doctor_title"), i18n.T("qs_doctor_desc")},
+		quickStartItem{choiceDevices, i18n.T("qs_devices_title"), i18n.T("qs_devices_desc")},
+		quickStartItem{choiceHelp, i18n.T("qs_help_title"), i18n.T("qs_help_desc")},
+	)
+	m.list.SetItems(items)
+	return m
+}
+
 func (m quickStartModel) viewportHeight() int {
 	// header (3) + footer (2) = 5 lines reserved
 	h := m.height - 5
@@ -355,8 +494,7 @@ func (m quickStartModel) View() string {
 
 	switch m.screen {
 	case qsScreenMenu:
-		menuHelp := resultFooterStyle.Render("↑↓: navigate  enter: select  ^Q: quit")
-		return m.list.View() + "\n" + menuHelp
+		return m.viewMenu()
 
 	case qsScreenLoading:
 		return lipgloss.JoinVertical(lipgloss.Left,

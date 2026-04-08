@@ -48,7 +48,7 @@ func RemovePulseAudioSink(moduleID string) error {
 // updateVirtualMicField updates the Virtual mic field label and hint.
 func (m *SetupModel) updateVirtualMicField(created bool) {
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Virtual mic" {
+		if m.Fields[i].Key == "virtual_mic" {
 			if created {
 				m.Fields[i].ActionLabel = "EchoWarp ✓"
 				m.Fields[i].Hint = ""

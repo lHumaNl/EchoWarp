@@ -2,7 +2,6 @@
 package views
 
 import (
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -45,6 +45,7 @@ type ValidationResult struct {
 
 // SetupField represents a single configurable parameter in the setup screen.
 type SetupField struct {
+	Key      string // stable, language-independent identifier (e.g. "port", "tls")
 	Label    string
 	Type     FieldType
 	Source   FieldSource
@@ -80,11 +81,12 @@ type SetupField struct {
 }
 
 // NewTextField creates a free-form text input field.
-func NewTextField(label, value string, required bool) SetupField {
+func NewTextField(key, label, value string, required bool) SetupField {
 	ti := textinput.New()
 	ti.Prompt = ""
 	ti.CharLimit = 256
 	f := SetupField{
+		Key:       key,
 		Label:     label,
 		Type:      FieldText,
 		Source:    SourceDefault,
@@ -97,18 +99,19 @@ func NewTextField(label, value string, required bool) SetupField {
 }
 
 // NewPasswordField creates a masked text input field.
-func NewPasswordField(label, value string) SetupField {
-	f := NewTextField(label, value, false)
+func NewPasswordField(key, label, value string) SetupField {
+	f := NewTextField(key, label, value, false)
 	f.masked = true
 	return f
 }
 
 // NewNumberField creates a numeric input field with min/max validation.
-func NewNumberField(label string, value, minVal, maxVal int) SetupField {
+func NewNumberField(key, label string, value, minVal, maxVal int) SetupField {
 	ti := textinput.New()
 	ti.Prompt = ""
 	ti.CharLimit = 10
 	f := SetupField{
+		Key:        key,
 		Label:      label,
 		Type:       FieldNumber,
 		Source:     SourceDefault,
@@ -120,14 +123,14 @@ func NewNumberField(label string, value, minVal, maxVal int) SetupField {
 	}
 	f.validator = func(s string) ValidationResult {
 		if s == "" {
-			return ValidationResult{Valid: false, Message: "required"}
+			return ValidationResult{Valid: false, Message: i18n.T("validation_required")}
 		}
 		n, err := strconv.Atoi(s)
 		if err != nil {
-			return ValidationResult{Valid: false, Message: "must be a number"}
+			return ValidationResult{Valid: false, Message: i18n.T("validation_must_be_number")}
 		}
 		if n < f.MinVal || n > f.MaxVal {
-			return ValidationResult{Valid: false, Message: fmt.Sprintf("range: %d–%d", f.MinVal, f.MaxVal)}
+			return ValidationResult{Valid: false, Message: i18n.Tf("validation_range", f.MinVal, f.MaxVal)}
 		}
 		return ValidationResult{Valid: true}
 	}
@@ -135,11 +138,12 @@ func NewNumberField(label string, value, minVal, maxVal int) SetupField {
 }
 
 // NewToggleField creates a field that cycles through options on Enter/Space.
-func NewToggleField(label string, options []string, initial int) SetupField {
+func NewToggleField(key, label string, options []string, initial int) SetupField {
 	if initial >= len(options) {
 		initial = 0
 	}
 	return SetupField{
+		Key:        key,
 		Label:      label,
 		Type:       FieldToggle,
 		Source:     SourceDefault,
@@ -151,11 +155,12 @@ func NewToggleField(label string, options []string, initial int) SetupField {
 }
 
 // NewSelectField creates a field that opens a mini-overlay to choose a value.
-func NewSelectField(label string, options []string, initial int) SetupField {
+func NewSelectField(key, label string, options []string, initial int) SetupField {
 	if initial >= len(options) {
 		initial = 0
 	}
 	return SetupField{
+		Key:        key,
 		Label:      label,
 		Type:       FieldSelect,
 		Source:     SourceDefault,
@@ -167,8 +172,9 @@ func NewSelectField(label string, options []string, initial int) SetupField {
 }
 
 // NewActionField creates a clickable action item (e.g. [Advanced ▸]).
-func NewActionField(label, actionLabel string) SetupField {
+func NewActionField(key, label, actionLabel string) SetupField {
 	return SetupField{
+		Key:         key,
 		Label:       label,
 		Type:        FieldAction,
 		ActionLabel: actionLabel,
@@ -269,15 +275,18 @@ func (f *SetupField) Update(msg tea.Msg) tea.Cmd {
 }
 
 // Render draws the field as a single line.
-// focused: this field has cursor; width: available width.
-func (f *SetupField) Render(focused bool, _ int) string {
+// focused: this field has cursor; labelWidth: label column width (0 = auto).
+func (f *SetupField) Render(focused bool, labelWidth int) string {
 	if f.Type == FieldAction {
 		return f.renderAction(focused)
 	}
 
-	labelWidth := 18
-	if len(f.Label) >= labelWidth {
-		labelWidth = len(f.Label) + 1
+	if labelWidth <= 0 {
+		labelWidth = 18
+	}
+	lw := lipgloss.Width(f.Label)
+	if lw >= labelWidth {
+		labelWidth = lw + 1
 	}
 	label := styles.ConnParamLabel.Width(labelWidth).Render(f.Label)
 
@@ -326,7 +335,7 @@ func (f *SetupField) renderValue() string {
 		return styles.SetupRequired.Render("___")
 	}
 	if val == "" {
-		return styles.SetupDimValue.Render("(none)")
+		return styles.SetupDimValue.Render(i18n.T("value_none"))
 	}
 	return style.Render(val)
 }
@@ -399,7 +408,7 @@ func (f *SetupField) validate() {
 		return
 	}
 	if f.Required && f.Value == "" {
-		f.lastResult = ValidationResult{Valid: false, Message: "required"}
+		f.lastResult = ValidationResult{Valid: false, Message: i18n.T("validation_required")}
 		return
 	}
 	f.lastResult = ValidationResult{Valid: true}
@@ -419,7 +428,7 @@ func (f *SetupField) OptionIndex() int {
 // ValidateAddress checks if a string is a valid IPv4, IPv6, or hostname.
 func ValidateAddress(s string) ValidationResult {
 	if s == "" {
-		return ValidationResult{Valid: false, Message: "required"}
+		return ValidationResult{Valid: false, Message: i18n.T("validation_required")}
 	}
 	// Try IP parse
 	if ip := net.ParseIP(s); ip != nil {
@@ -427,11 +436,11 @@ func ValidateAddress(s string) ValidationResult {
 	}
 	// Check hostname format (simplified)
 	if len(s) > 253 {
-		return ValidationResult{Valid: false, Message: "too long"}
+		return ValidationResult{Valid: false, Message: i18n.T("validation_too_long")}
 	}
 	for _, r := range s {
 		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' && r != '.' {
-			return ValidationResult{Valid: false, Message: "invalid character"}
+			return ValidationResult{Valid: false, Message: i18n.T("validation_invalid_char")}
 		}
 	}
 	return ValidationResult{Valid: true}

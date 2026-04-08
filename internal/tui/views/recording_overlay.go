@@ -543,7 +543,7 @@ func (o *RecordingOverlay) wrapBox(content, title string, width int) string {
 		dashesAfter = 1
 	}
 	topLine := lipgloss.NewStyle().Foreground(borderColor).Render(
-		border.TopLeft+border.Top+title+strings.Repeat(border.Top, dashesAfter)+border.TopRight)
+		border.TopLeft + border.Top + title + strings.Repeat(border.Top, dashesAfter) + border.TopRight)
 
 	// Render content with side borders and padding.
 	padded := lipgloss.NewStyle().Padding(1, 2).Width(innerW).Render(content)
@@ -562,7 +562,7 @@ func (o *RecordingOverlay) wrapBox(content, title string, width int) string {
 		boxLines = append(boxLines, left+line+strings.Repeat(" ", rightPad)+right)
 	}
 	bottomLine := lipgloss.NewStyle().Foreground(borderColor).Render(
-		border.BottomLeft+strings.Repeat(border.Bottom, innerW)+border.BottomRight)
+		border.BottomLeft + strings.Repeat(border.Bottom, innerW) + border.BottomRight)
 	boxLines = append(boxLines, bottomLine)
 
 	box := strings.Join(boxLines, "\n")

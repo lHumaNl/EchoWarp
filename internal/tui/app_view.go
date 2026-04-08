@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/internal/tui/views"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
@@ -717,6 +718,8 @@ func (m Model) helpKeys() string {
 		if m.config.Mode == config.ModeServer && m.banListFn != nil {
 			help += "  ^U: ban list"
 		}
+		langCode := strings.ToUpper(string(i18n.CurrentLanguage()))
+		help += "  [" + langCode + "]"
 		return help
 	case ScreenConnection:
 		if m.config.Mode == config.ModeServer && m.banListFn != nil {

@@ -15,10 +15,10 @@ import (
 func (m *SetupModel) startProbeIfReady() tea.Cmd {
 	var addr, port string
 	for _, f := range m.Fields {
-		if f.Label == "Server address" {
+		if f.Key == "server_address" {
 			addr = f.Value
 		}
-		if f.Label == "Port" {
+		if f.Key == "port" {
 			port = f.Value
 		}
 	}
@@ -29,7 +29,7 @@ func (m *SetupModel) startProbeIfReady() tea.Cmd {
 	m.probeStatus = "probing"
 	m.probeError = ""
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Server address" {
+		if m.Fields[i].Key == "server_address" {
 			m.Fields[i].Hint = "⠋ probing server..."
 		}
 	}
@@ -76,7 +76,7 @@ func (m *SetupModel) tryShowServerRestoreOverlay() tea.Cmd {
 	// Determine current mode from field value
 	mode := ""
 	for _, f := range m.Fields {
-		if f.Label == "Mode" {
+		if f.Key == "mode" {
 			mode = strings.SplitN(f.Value, " ", 2)[0]
 			break
 		}
@@ -289,12 +289,12 @@ func (m *SetupModel) applyRestore(preset recent.DevicePreset, skipVirtual bool) 
 // restoreServerSettings applies saved server settings to the TUI fields.
 // Fields that have a zero/empty value in the settings are skipped (backward compat).
 func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
-	setIfNonEmpty := func(fields []SetupField, label, value string) {
+	setIfNonEmpty := func(fields []SetupField, key, value string) {
 		if value == "" {
 			return
 		}
 		for i := range fields {
-			if fields[i].Label == label {
+			if fields[i].Key == key {
 				fields[i].SetValue(value, SourceConfig)
 				return
 			}
@@ -304,7 +304,7 @@ func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
 	if s.LastMode != "" {
 		// Mode field stores values like "normal (server → client)" — match by prefix.
 		for i := range m.Fields {
-			if m.Fields[i].Label != "Mode" {
+			if m.Fields[i].Key != "mode" {
 				continue
 			}
 			for _, opt := range m.Fields[i].Options {
@@ -318,11 +318,11 @@ func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
 	}
 
 	if s.Port != 0 {
-		setIfNonEmpty(m.Fields, "Port", fmt.Sprintf("%d", s.Port))
+		setIfNonEmpty(m.Fields, "port", fmt.Sprintf("%d", s.Port))
 	}
-	setIfNonEmpty(m.Fields, "Password", s.Password)
+	setIfNonEmpty(m.Fields, "password", s.Password)
 	if s.MaxClients != 0 {
-		setIfNonEmpty(m.Fields, "Max clients", fmt.Sprintf("%d", s.MaxClients))
+		setIfNonEmpty(m.Fields, "max_clients", fmt.Sprintf("%d", s.MaxClients))
 	}
 
 	tlsVal := "off"
@@ -330,10 +330,10 @@ func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
 		tlsVal = "on"
 	}
 	if s.TLS {
-		setIfNonEmpty(m.AdvancedFields, "TLS", tlsVal)
+		setIfNonEmpty(m.AdvancedFields, "tls", tlsVal)
 	}
-	setIfNonEmpty(m.AdvancedFields, "TLS Cert", s.TLSCert)
-	setIfNonEmpty(m.AdvancedFields, "TLS Key", s.TLSKey)
+	setIfNonEmpty(m.AdvancedFields, "tls_cert", s.TLSCert)
+	setIfNonEmpty(m.AdvancedFields, "tls_key", s.TLSKey)
 
 	m.applyFieldDependencies()
 }

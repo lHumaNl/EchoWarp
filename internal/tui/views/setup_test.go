@@ -46,21 +46,21 @@ func TestNewSetupModelServer(t *testing.T) {
 	// Server should have: Port, Password, Max clients, Max auth fail, Echo cancellation, Advanced
 	require.GreaterOrEqual(t, len(m.Fields), 6)
 
-	labels := make([]string, len(m.Fields))
+	keys := make([]string, len(m.Fields))
 	for i, f := range m.Fields {
-		labels[i] = f.Label
+		keys[i] = f.Key
 	}
-	assert.Contains(t, labels, "Port")
-	assert.Contains(t, labels, "Password")
-	assert.Contains(t, labels, "Max clients")
-	assert.Contains(t, labels, "Max auth fail")
-	assert.Contains(t, labels, "Echo cancellation")
+	assert.Contains(t, keys, "port")
+	assert.Contains(t, keys, "password")
+	assert.Contains(t, keys, "max_clients")
+	assert.Contains(t, keys, "max_auth_fail")
+	assert.Contains(t, keys, "echo_cancellation")
 
-	assert.Contains(t, labels, "Mode")
+	assert.Contains(t, keys, "mode")
 	// Server-specific: no Max reconnect in main (it's in advanced), no Server address
-	assert.NotContains(t, labels, "Max reconnect")
-	assert.NotContains(t, labels, "TLS")
-	assert.NotContains(t, labels, "Server address")
+	assert.NotContains(t, keys, "max_reconnect")
+	assert.NotContains(t, keys, "tls")
+	assert.NotContains(t, keys, "server_address")
 }
 
 func TestNewSetupModelClient(t *testing.T) {
@@ -68,20 +68,20 @@ func TestNewSetupModelClient(t *testing.T) {
 
 	assert.False(t, m.IsInput) // client normal mode = output device
 
-	labels := make([]string, len(m.Fields))
+	keys := make([]string, len(m.Fields))
 	for i, f := range m.Fields {
-		labels[i] = f.Label
+		keys[i] = f.Key
 	}
-	assert.Contains(t, labels, "Server address")
-	assert.Contains(t, labels, "Port")
-	assert.Contains(t, labels, "Password")
-	assert.Contains(t, labels, "Max reconnect")
+	assert.Contains(t, keys, "server_address")
+	assert.Contains(t, keys, "port")
+	assert.Contains(t, keys, "password")
+	assert.Contains(t, keys, "max_reconnect")
 
-	assert.NotContains(t, labels, "Mode") // Mode removed from client settings (shown via probe)
+	assert.NotContains(t, keys, "mode") // Mode removed from client settings (shown via probe)
 	// Client-specific: no Max auth fail in main (it's in advanced), no Max clients
-	assert.NotContains(t, labels, "Max auth fail")
-	assert.NotContains(t, labels, "TLS")
-	assert.NotContains(t, labels, "Max clients")
+	assert.NotContains(t, keys, "max_auth_fail")
+	assert.NotContains(t, keys, "tls")
+	assert.NotContains(t, keys, "max_clients")
 }
 
 func TestSetupModelCLIPreFill(t *testing.T) {
@@ -94,11 +94,11 @@ func TestSetupModelCLIPreFill(t *testing.T) {
 
 	// Port should be CLI-sourced since it's non-default
 	for _, f := range m.Fields {
-		if f.Label == "Port" {
+		if f.Key == "port" {
 			assert.Equal(t, SourceCLI, f.Source)
 			assert.Equal(t, "8080", f.Value)
 		}
-		if f.Label == "Password" {
+		if f.Key == "password" {
 			assert.Equal(t, SourceCLI, f.Source)
 			assert.Equal(t, "secret", f.Value)
 		}
@@ -110,12 +110,12 @@ func TestSetupModelBuildConfig(t *testing.T) {
 
 	// Change port via field
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Port" {
+		if m.Fields[i].Key == "port" {
 			m.Fields[i].SetValue("9090", SourceUser)
 		}
 	}
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Mode" {
+		if m.Fields[i].Key == "mode" {
 			m.Fields[i].SetValue("reverse (client → server)", SourceUser)
 		}
 	}
@@ -130,17 +130,17 @@ func TestSetupModelAdvancedFields(t *testing.T) {
 
 	require.NotEmpty(t, m.AdvancedFields)
 
-	labels := make([]string, len(m.AdvancedFields))
+	keys := make([]string, len(m.AdvancedFields))
 	for i, f := range m.AdvancedFields {
-		labels[i] = f.Label
+		keys[i] = f.Key
 	}
-	assert.Contains(t, labels, "TLS")
-	assert.Contains(t, labels, "Sample rate")
-	assert.Contains(t, labels, "Channels")
-	assert.Contains(t, labels, "Opus bitrate")
-	assert.NotContains(t, labels, "Mode")          // Mode is in main fields
-	assert.NotContains(t, labels, "Max auth fail") // Max auth fail is in main fields
-	assert.NotContains(t, labels, "Max reconnect") // not relevant for server
+	assert.Contains(t, keys, "tls")
+	assert.Contains(t, keys, "sample_rate")
+	assert.Contains(t, keys, "channels")
+	assert.Contains(t, keys, "opus_bitrate")
+	assert.NotContains(t, keys, "mode")          // Mode is in main fields
+	assert.NotContains(t, keys, "max_auth_fail") // Max auth fail is in main fields
+	assert.NotContains(t, keys, "max_reconnect") // not relevant for server
 }
 
 func TestSetupModelView(t *testing.T) {
@@ -195,7 +195,7 @@ func TestSetupModelFieldDependencies(t *testing.T) {
 
 	// Initially TLS is off, so TLS Cert/Key should not be required
 	for _, f := range m.AdvancedFields {
-		if f.Label == "TLS Cert" || f.Label == "TLS Key" {
+		if f.Key == "tls_cert" || f.Key == "tls_key" {
 			assert.False(t, f.Required, "%s should not be required when TLS is off", f.Label)
 			assert.Empty(t, f.Hint)
 		}
@@ -203,7 +203,7 @@ func TestSetupModelFieldDependencies(t *testing.T) {
 
 	// Turn TLS on (TLS is in AdvancedFields)
 	for i := range m.AdvancedFields {
-		if m.AdvancedFields[i].Label == "TLS" {
+		if m.AdvancedFields[i].Key == "tls" {
 			m.AdvancedFields[i].SetValue("on", SourceUser)
 		}
 	}
@@ -211,7 +211,7 @@ func TestSetupModelFieldDependencies(t *testing.T) {
 
 	// Now TLS Cert/Key should be required
 	for _, f := range m.AdvancedFields {
-		if f.Label == "TLS Cert" || f.Label == "TLS Key" {
+		if f.Key == "tls_cert" || f.Key == "tls_key" {
 			assert.True(t, f.Required, "%s should be required when TLS is on", f.Label)
 			assert.Contains(t, f.Hint, "required")
 		}
@@ -224,12 +224,12 @@ func TestSetupModelFieldDependencies(t *testing.T) {
 func TestSetupModelAdvancedFieldsTLSCertKey(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 
-	labels := make([]string, len(m.AdvancedFields))
+	keys := make([]string, len(m.AdvancedFields))
 	for i, f := range m.AdvancedFields {
-		labels[i] = f.Label
+		keys[i] = f.Key
 	}
-	assert.Contains(t, labels, "TLS Cert")
-	assert.Contains(t, labels, "TLS Key")
+	assert.Contains(t, keys, "tls_cert")
+	assert.Contains(t, keys, "tls_key")
 }
 
 func TestSetupModelOverlayHelpKeys(t *testing.T) {
@@ -250,7 +250,7 @@ func TestSetupModelOverlayHelpKeys(t *testing.T) {
 // setModeField sets the "Mode" field by value string and calls applyFieldDependencies.
 func setModeField(m *SetupModel, value string) {
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Mode" {
+		if m.Fields[i].Key == "mode" {
 			m.Fields[i].SetValue(value, SourceUser)
 			break
 		}
@@ -258,18 +258,18 @@ func setModeField(m *SetupModel, value string) {
 	m.applyFieldDependencies()
 }
 
-func getFieldValue(fields []SetupField, label string) string {
+func getFieldValue(fields []SetupField, key string) string {
 	for _, f := range fields {
-		if f.Label == label {
+		if f.Key == key {
 			return f.Value
 		}
 	}
 	return ""
 }
 
-func getFieldHidden(fields []SetupField, label string) bool {
+func getFieldHidden(fields []SetupField, key string) bool {
 	for _, f := range fields {
-		if f.Label == label {
+		if f.Key == key {
 			return f.Hidden
 		}
 	}
@@ -280,18 +280,18 @@ func TestModeSwitchConferenceMaxClients(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 
 	// Default: normal mode, Max clients = 1
-	assert.Equal(t, "1", getFieldValue(m.Fields, "Max clients"))
+	assert.Equal(t, "1", getFieldValue(m.Fields, "max_clients"))
 
 	// Switch to conference → Max clients should auto-bump to 2
 	setModeField(&m, "conference (multi-user)")
 	assert.True(t, m.isConferenceMode)
-	val := getFieldValue(m.Fields, "Max clients")
+	val := getFieldValue(m.Fields, "max_clients")
 	assert.Equal(t, "2", val, "Conference should auto-bump Max clients to 2")
 
 	// Switch back to normal → Max clients should restore to 1
 	setModeField(&m, "normal (server → client)")
 	assert.False(t, m.isConferenceMode)
-	val = getFieldValue(m.Fields, "Max clients")
+	val = getFieldValue(m.Fields, "max_clients")
 	assert.Equal(t, "1", val, "Leaving conference should restore Max clients to previous value")
 }
 
@@ -300,7 +300,7 @@ func TestModeSwitchConferenceMaxClientsPreservesUserValue(t *testing.T) {
 
 	// User sets Max clients to 5
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Max clients" {
+		if m.Fields[i].Key == "max_clients" {
 			m.Fields[i].SetValue("5", SourceUser)
 			break
 		}
@@ -308,12 +308,12 @@ func TestModeSwitchConferenceMaxClientsPreservesUserValue(t *testing.T) {
 
 	// Switch to conference (5 >= 2, so no bump needed)
 	setModeField(&m, "conference (multi-user)")
-	val := getFieldValue(m.Fields, "Max clients")
+	val := getFieldValue(m.Fields, "max_clients")
 	assert.Equal(t, "5", val, "Conference should not change Max clients when already >= 2")
 
 	// Switch back to normal → should stay 5 (no restore needed since it wasn't bumped)
 	setModeField(&m, "normal (server → client)")
-	val = getFieldValue(m.Fields, "Max clients")
+	val = getFieldValue(m.Fields, "max_clients")
 	assert.Equal(t, "5", val, "Max clients should stay at user's value after leaving conference")
 }
 
@@ -321,24 +321,24 @@ func TestModeSwitchEchoCancellationVisibility(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 
 	// Normal mode: Echo cancellation should be hidden
-	assert.True(t, getFieldHidden(m.Fields, "Echo cancellation"),
+	assert.True(t, getFieldHidden(m.Fields, "echo_cancellation"),
 		"Echo cancellation should be hidden in normal mode")
 
 	// Switch to duplex → should be visible
 	setModeField(&m, "duplex (bidirectional)")
-	assert.False(t, getFieldHidden(m.Fields, "Echo cancellation"),
+	assert.False(t, getFieldHidden(m.Fields, "echo_cancellation"),
 		"Echo cancellation should be visible in duplex mode")
 
 	// Switch to conference → should still be visible
 	setModeField(&m, "conference (multi-user)")
-	assert.False(t, getFieldHidden(m.Fields, "Echo cancellation"),
+	assert.False(t, getFieldHidden(m.Fields, "echo_cancellation"),
 		"Echo cancellation should be visible in conference mode")
 
 	// Switch back to normal → should be hidden again and reset to off
 	setModeField(&m, "normal (server → client)")
-	assert.True(t, getFieldHidden(m.Fields, "Echo cancellation"),
+	assert.True(t, getFieldHidden(m.Fields, "echo_cancellation"),
 		"Echo cancellation should be hidden after switching back to normal")
-	assert.Equal(t, "off", getFieldValue(m.Fields, "Echo cancellation"),
+	assert.Equal(t, "off", getFieldValue(m.Fields, "echo_cancellation"),
 		"Echo cancellation should reset to off when hidden")
 }
 
@@ -363,7 +363,7 @@ func TestModeSwitchRoundTrip(t *testing.T) {
 		setModeField(&m, mode.value)
 		assert.Equal(t, mode.isDuplex, m.isDuplexMode, "isDuplexMode for %s", mode.value)
 		assert.Equal(t, mode.isConf, m.isConferenceMode, "isConferenceMode for %s", mode.value)
-		assert.Equal(t, mode.ecVisible, !getFieldHidden(m.Fields, "Echo cancellation"),
+		assert.Equal(t, mode.ecVisible, !getFieldHidden(m.Fields, "echo_cancellation"),
 			"Echo cancellation visibility for %s", mode.value)
 	}
 }
@@ -754,36 +754,36 @@ func TestApplyLoadedConfig_ServerFields(t *testing.T) {
 
 	// Check main fields
 	for _, f := range m.Fields {
-		switch f.Label {
-		case "Port":
+		switch f.Key {
+		case "port":
 			assert.Equal(t, "9999", f.Value)
 			assert.Equal(t, SourceConfig, f.Source)
-		case "Password":
+		case "password":
 			assert.Equal(t, "secret123", f.Value)
-		case "Max clients":
+		case "max_clients":
 			assert.Equal(t, "4", f.Value)
-		case "Mode":
+		case "mode":
 			assert.Contains(t, f.Value, "conference")
-		case "Echo cancellation":
+		case "echo_cancellation":
 			assert.Equal(t, "on", f.Value)
 		}
 	}
 
 	// Check advanced fields
 	for _, f := range m.AdvancedFields {
-		switch f.Label {
-		case "Log level":
+		switch f.Key {
+		case "log_level":
 			assert.Equal(t, "debug", f.Value)
 			assert.Equal(t, SourceConfig, f.Source)
-		case "Opus bitrate":
+		case "opus_bitrate":
 			assert.Equal(t, FormatBitrate(128000), f.Value)
-		case "Sample rate":
+		case "sample_rate":
 			assert.Equal(t, FormatSampleRate(44100), f.Value)
-		case "Channels":
+		case "channels":
 			assert.Equal(t, "stereo", f.Value)
-		case "Use SIMD":
+		case "use_simd":
 			assert.Equal(t, "on", f.Value) // default
-		case "HWID collection":
+		case "hwid_collection":
 			assert.Equal(t, "on", f.Value)
 		}
 	}
@@ -804,19 +804,19 @@ func TestApplyLoadedConfig_ClientFields(t *testing.T) {
 	m.applyLoadedConfig(loadedCfg)
 
 	for _, f := range m.Fields {
-		switch f.Label {
-		case "Server address":
+		switch f.Key {
+		case "server_address":
 			assert.Equal(t, "10.0.0.5", f.Value)
 			assert.Equal(t, SourceConfig, f.Source)
-		case "Port":
+		case "port":
 			assert.Equal(t, "5555", f.Value)
-		case "Password":
+		case "password":
 			assert.Equal(t, "pass", f.Value)
-		case "Nickname":
+		case "nickname":
 			assert.Equal(t, "mypc", f.Value)
-		case "Auto reconnect":
+		case "auto_reconnect":
 			assert.Equal(t, "on", f.Value)
-		case "Reconnect limit":
+		case "reconnect_limit":
 			assert.Equal(t, "3", f.Value)
 		}
 	}

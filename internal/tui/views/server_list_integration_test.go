@@ -47,9 +47,9 @@ func newClientSetupWithRecent(entries []ServerEntry) SetupModel {
 	return m
 }
 
-func fieldByLabel(fields []SetupField, label string) *SetupField {
+func fieldByLabel(fields []SetupField, key string) *SetupField {
 	for i := range fields {
-		if fields[i].Label == label {
+		if fields[i].Key == key {
 			return &fields[i]
 		}
 	}
@@ -113,11 +113,11 @@ func TestIntegration_FullFlow_DiscoveryProbeSelectFields(t *testing.T) {
 	m, _ = m.Update(ServerSelectedMsg{Entry: entries[homePCIdx]})
 
 	// Check Address/Port filled
-	addrField := fieldByLabel(m.Fields, "Server address")
+	addrField := fieldByLabel(m.Fields, "server_address")
 	require.NotNil(t, addrField)
 	assert.Equal(t, "192.168.1.50", addrField.Value)
 
-	portField := fieldByLabel(m.Fields, "Port")
+	portField := fieldByLabel(m.Fields, "port")
 	require.NotNil(t, portField)
 	assert.Equal(t, "4415", portField.Value)
 }
@@ -181,7 +181,7 @@ func TestIntegration_SelectThenManualEdit_ClearsSelection(t *testing.T) {
 
 	// Verify selected
 	assert.True(t, m.serverList.IsServerSelected())
-	addrField := fieldByLabel(m.Fields, "Server address")
+	addrField := fieldByLabel(m.Fields, "server_address")
 	require.NotNil(t, addrField)
 	assert.Equal(t, "192.168.1.10", addrField.Value)
 
@@ -222,7 +222,7 @@ func TestIntegration_PasswordVisibilityToggle(t *testing.T) {
 	// Now manually apply probe result for the selected server (simulating ProbeServerMsg after selection)
 	m = sendServerProbe(m, "1.1.1.1", 4415, makeProbeResult("normal", false), nil)
 
-	pwdField := fieldByLabel(m.Fields, "Password")
+	pwdField := fieldByLabel(m.Fields, "password")
 	require.NotNil(t, pwdField)
 	assert.True(t, pwdField.Hidden, "Password should be hidden when not required")
 
@@ -239,7 +239,7 @@ func TestIntegration_PasswordVisibilityToggle(t *testing.T) {
 	m, _ = m.Update(ServerSelectedMsg{Entry: sortedEntries[pwdIdx]})
 	m = sendServerProbe(m, "2.2.2.2", 4415, makeProbeResult("normal", true), nil)
 
-	pwdField = fieldByLabel(m.Fields, "Password")
+	pwdField = fieldByLabel(m.Fields, "password")
 	require.NotNil(t, pwdField)
 	assert.False(t, pwdField.Hidden, "Password should be visible when required")
 	assert.True(t, pwdField.Required)
@@ -249,7 +249,7 @@ func TestIntegration_PasswordVisibilityToggle(t *testing.T) {
 	m, _ = m.Update(ServerSelectedMsg{Entry: m.serverList.Entries()[noPwdIdx]})
 	m = sendServerProbe(m, "1.1.1.1", 4415, makeProbeResult("normal", false), nil)
 
-	pwdField = fieldByLabel(m.Fields, "Password")
+	pwdField = fieldByLabel(m.Fields, "password")
 	require.NotNil(t, pwdField)
 	assert.True(t, pwdField.Hidden, "Password should be hidden again")
 	assert.Empty(t, pwdField.Value, "Password value should be cleared")
@@ -347,7 +347,7 @@ func TestIntegration_ServerGoesOfflineAfterSelection(t *testing.T) {
 	m, _ = m.Update(ServerSelectedMsg{Entry: m.serverList.Entries()[0]})
 
 	// Verify fields filled
-	addrField := fieldByLabel(m.Fields, "Server address")
+	addrField := fieldByLabel(m.Fields, "server_address")
 	require.NotNil(t, addrField)
 	assert.Equal(t, "192.168.1.50", addrField.Value)
 
@@ -356,7 +356,7 @@ func TestIntegration_ServerGoesOfflineAfterSelection(t *testing.T) {
 	m = sendServerProbe(m, "192.168.1.50", 4415, nil, fmt.Errorf("connection refused"))
 
 	// Fields should NOT be cleared
-	addrField = fieldByLabel(m.Fields, "Server address")
+	addrField = fieldByLabel(m.Fields, "server_address")
 	require.NotNil(t, addrField)
 	assert.Equal(t, "192.168.1.50", addrField.Value, "address should not be cleared when server goes offline")
 	assert.Equal(t, "⚠ server went offline", addrField.Hint, "hint should warn about offline server")

@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/probe"
 )
 
@@ -62,8 +63,8 @@ func StartProbeCmd(addr, port string) tea.Cmd {
 func ApplyProbeResult(fields []SetupField, advFields []SetupField, result *ProbeServerResult) ([]SetupField, []SetupField, bool) {
 	isDuplex := result.Mode == "duplex" || result.Mode == "conference"
 	for i := range fields {
-		switch fields[i].Label {
-		case "Password":
+		switch fields[i].Key {
+		case "password":
 			if result.PasswordRequired {
 				fields[i].Hidden = false
 				fields[i].Hint = "⚠ required by server"
@@ -74,42 +75,42 @@ func ApplyProbeResult(fields []SetupField, advFields []SetupField, result *Probe
 				fields[i].Required = false
 				fields[i].Value = ""
 			}
-		case "Nickname":
+		case "nickname":
 			if result.HWIDRequired {
 				fields[i].Hint = "\u26a0 Server collects device ID (HWID) — may be used for banning"
 			}
-		case "Mode":
+		case "mode":
 			modeKey := result.Mode
-			if desc, ok := modeKeyToDescriptive[modeKey]; ok {
+			if desc, ok := modeKeyToDescriptiveMap()[modeKey]; ok {
 				fields[i].SetValue(desc, SourceAuto)
 			} else {
 				fields[i].SetValue(result.Mode, SourceAuto)
 			}
-			fields[i].Hint = "(server)"
+			fields[i].Hint = i18n.T("hint_server")
 			isDuplex = modeKey == "duplex" || modeKey == "conference"
 		}
 	}
 
 	for i := range advFields {
-		switch advFields[i].Label {
-		case "TLS":
+		switch advFields[i].Key {
+		case "tls":
 			if result.TLSRequired {
 				advFields[i].SetValue("on", SourceAuto)
 				if result.TLSSelfSigned {
-					advFields[i].Hint = "(server) ⚠ self-signed"
+					advFields[i].Hint = i18n.T("hint_server") + " " + i18n.T("hint_tls_self_signed")
 				} else {
-					advFields[i].Hint = "(server)"
+					advFields[i].Hint = i18n.T("hint_server")
 				}
 			} else {
 				advFields[i].SetValue("off", SourceAuto)
-				advFields[i].Hint = "(server)"
+				advFields[i].Hint = i18n.T("hint_server")
 			}
-		case "Sample rate":
+		case "sample_rate":
 			if result.SampleRate > 0 {
 				advFields[i].SetValue(FormatSampleRate(result.SampleRate), SourceAuto)
-				advFields[i].Hint = "(server)"
+				advFields[i].Hint = i18n.T("hint_server")
 			}
-		case "Channels":
+		case "channels":
 			switch result.Channels {
 			case 2:
 				advFields[i].SetValue("stereo", SourceAuto)
@@ -117,12 +118,12 @@ func ApplyProbeResult(fields []SetupField, advFields []SetupField, result *Probe
 				advFields[i].SetValue("mono", SourceAuto)
 			}
 			if result.Channels > 0 {
-				advFields[i].Hint = "(server)"
+				advFields[i].Hint = i18n.T("hint_server")
 			}
-		case "Opus bitrate":
+		case "opus_bitrate":
 			if result.OpusBitrate > 0 {
 				advFields[i].SetValue(FormatBitrate(result.OpusBitrate), SourceAuto)
-				advFields[i].Hint = "(server)"
+				advFields[i].Hint = i18n.T("hint_server")
 			}
 		}
 	}

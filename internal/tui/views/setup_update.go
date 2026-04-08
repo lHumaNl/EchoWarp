@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -103,10 +102,10 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 	case ServerSelectedMsg:
 		// Fill Address/Port from selected server (SourceDefault so no ✓ until probe succeeds)
 		for i := range m.Fields {
-			switch m.Fields[i].Label {
-			case "Server address":
+			switch m.Fields[i].Key {
+			case "server_address":
 				m.Fields[i].SetValue(msg.Entry.Address, SourceDefault)
-			case "Port":
+			case "port":
 				m.Fields[i].SetValue(fmt.Sprintf("%d", msg.Entry.Port), SourceDefault)
 			}
 		}
@@ -168,7 +167,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 				m.probeStatus = "error"
 				m.probeError = "⚠ server went offline"
 				for i := range m.Fields {
-					if m.Fields[i].Label == "Server address" {
+					if m.Fields[i].Key == "server_address" {
 						m.Fields[i].Hint = "⚠ server went offline"
 						break
 					}
@@ -210,7 +209,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			m.applyFieldDependencies()
 			// Update address hint
 			for i := range m.Fields {
-				if m.Fields[i].Label == "Server address" {
+				if m.Fields[i].Key == "server_address" {
 					hint := "✓ Server reachable"
 					if msg.Result.ServerName != "" {
 						hint += " (" + msg.Result.ServerName + ")"
@@ -224,10 +223,10 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			// Try to show restore overlay for manually entered server
 			var probeAddr, probePort string
 			for _, f := range m.Fields {
-				if f.Label == "Server address" {
+				if f.Key == "server_address" {
 					probeAddr = f.Value
 				}
-				if f.Label == "Port" {
+				if f.Key == "port" {
 					probePort = f.Value
 				}
 			}
@@ -241,7 +240,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			m.probeError = "⚠ Server unavailable"
 			m.probeResult = nil
 			for i := range m.Fields {
-				if m.Fields[i].Label == "Server address" {
+				if m.Fields[i].Key == "server_address" {
 					m.Fields[i].Hint = m.probeError
 				}
 			}
@@ -299,7 +298,7 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	}
 
 	// Priority 4: global shortcuts that should always work regardless of server list focus
-	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlL || msg.Type == tea.KeyCtrlH || msg.Type == tea.KeyCtrlY || msg.Type == tea.KeyCtrlE {
+	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlL || msg.Type == tea.KeyCtrlH || msg.Type == tea.KeyCtrlY || msg.Type == tea.KeyCtrlE || msg.Type == tea.KeyCtrlW {
 		// Fall through to Priority 5 where these are handled
 		return m.handleGlobalShortcut(msg)
 	}
@@ -508,6 +507,12 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	case tea.KeyCtrlE:
 		return m.openVirtualMicOverlay()
 
+	case tea.KeyCtrlW:
+		langOverlay := NewLanguageOverlay()
+		m.languageOverlay = langOverlay
+		m.overlay = SetupOverlayLanguage
+		return m, nil
+
 	case tea.KeyCtrlY:
 		clipCmd := BuildCLICommand(m.BuildConfig(), true)
 		copyToClipboard(clipCmd)
@@ -555,6 +560,11 @@ func (m SetupModel) handleGlobalShortcut(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		return m, flashCmd
 	case tea.KeyCtrlE:
 		return m.openVirtualMicOverlay()
+	case tea.KeyCtrlW:
+		langOverlay := NewLanguageOverlay()
+		m.languageOverlay = langOverlay
+		m.overlay = SetupOverlayLanguage
+		return m, nil
 	}
 	return m, nil
 }
@@ -728,6 +738,23 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			}
 		}
 
+	case SetupOverlayLanguage:
+		if m.languageOverlay != nil {
+			action := m.languageOverlay.Update(msg)
+			switch action {
+			case LanguageActionSelected:
+				m.overlay = SetupOverlayNone
+				m.languageOverlay = nil
+				// Fields use i18n.T() labels — rebuild to pick up new translations
+				m.Fields = buildMainFields(m.cfg)
+				m.AdvancedFields = buildAdvancedFields(m.cfg)
+				return m, nil
+			case LanguageActionCancel:
+				m.overlay = SetupOverlayNone
+				m.languageOverlay = nil
+			}
+		}
+
 	case SetupOverlayRestore:
 		if m.restoreOverlay != nil {
 			action := m.restoreOverlay.Update(msg)
@@ -776,7 +803,7 @@ func (m SetupModel) handleEditingKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 		m.writeBackFields(fields)
 		// Trigger server probe on address or port change (client mode)
-		if m.cfg.Mode == config.ModeClient && (f.Label == "Server address" || f.Label == "Port") {
+		if m.cfg.Mode == config.ModeClient && (f.Key == "server_address" || f.Key == "port") {
 			cmd := m.startProbeIfReady()
 			return m, cmd
 		}
@@ -812,12 +839,12 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 	// Client mode: server-driven fields are locked until probe succeeds
 	if m.cfg.Mode == config.ModeClient && m.probeResult == nil {
 		clientLocalFields := map[string]bool{
-			"Server address": true, "Port": true,
-			"Max reconnect": true,
-			"Log level":     true, "Echo cancellation": true,
-			"Use SIMD": true,
+			"server_address": true, "port": true,
+			"max_reconnect": true,
+			"log_level":     true, "echo_cancellation": true,
+			"use_simd": true,
 		}
-		if !clientLocalFields[f.Label] && f.Type != FieldAction {
+		if !clientLocalFields[f.Key] && f.Type != FieldAction {
 			return m, nil
 		}
 	}
@@ -825,11 +852,11 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 	switch f.Type {
 	case FieldText, FieldNumber:
 		// Block editing for fields locked by server probe
-		if f.Source == SourceAuto && f.Label != "Server address" {
+		if f.Source == SourceAuto && f.Key != "server_address" {
 			return m, nil
 		}
 		// Password not required by server — block editing
-		if f.Label == "Password" && f.Hint == "(not required)" {
+		if f.Key == "password" && f.Hint == "(not required)" {
 			return m, nil
 		}
 		f.StartEditing()
@@ -846,7 +873,7 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 		m.writeBackFields(fields)
 		m.applyFieldDependencies()
 		// Server mode: clear device selection and restore preset after mode change
-		if f.Label == "Mode" && m.cfg.Mode == config.ModeServer {
+		if f.Key == "mode" && m.cfg.Mode == config.ModeServer {
 			// Always clear device selections when switching modes —
 			// carrying over devices from another mode is incorrect.
 			m.multiSelect = make(map[string]DeviceRoleSet)
@@ -871,13 +898,13 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 		return m, nil
 
 	case FieldAction:
-		if strings.Contains(f.ActionLabel, "Advanced") {
+		if f.Key == "advanced" {
 			m.advancedOpen = !m.advancedOpen
 			f.ActionExpanded = m.advancedOpen
 			m.writeBackFields(fields)
 			return m, nil
 		}
-		if f.Label == "Virtual mic" {
+		if f.Key == "virtual_mic" {
 			m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicCreated, "EchoWarp")
 			m.overlay = SetupOverlayVirtualDevice
 			return m, nil

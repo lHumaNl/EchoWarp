@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 )
 
@@ -48,11 +49,11 @@ func ApplyDiscoveredServer(fields []SetupField, advFields []SetupField, server d
 
 	for i := range fields {
 		switch fields[i].Label {
-		case "Server address":
+		case i18n.T("field_server_address"):
 			fields[i].SetValue(ip, SourceAuto)
-		case "Port":
+		case i18n.T("field_port"):
 			fields[i].SetValue(fmt.Sprintf("%d", server.Port), SourceAuto)
-		case "Password":
+		case i18n.T("field_password"):
 			if server.AuthReq {
 				fields[i].Hint = "(required)"
 			}
@@ -61,17 +62,17 @@ func ApplyDiscoveredServer(fields []SetupField, advFields []SetupField, server d
 
 	for i := range advFields {
 		switch advFields[i].Label {
-		case "Mode":
+		case i18n.T("field_mode"):
 			mode := server.Mode
 			if mode == "" {
 				mode = "normal"
 			}
-			if desc, ok := modeKeyToDescriptive[mode]; ok {
+			if desc, ok := modeKeyToDescriptiveMap()[mode]; ok {
 				advFields[i].SetValue(desc, SourceAuto)
 			} else {
 				advFields[i].SetValue(mode, SourceAuto)
 			}
-		case "TLS":
+		case i18n.T("field_tls"):
 			if server.TLS {
 				advFields[i].SetValue("on", SourceAuto)
 			} else {

@@ -1,0 +1,137 @@
+app_name: "EchoWarp"
+mode_server: "Сервер"
+mode_client: "Клиент"
+mode_diagnostic: "Диагностика"
+btn_start: "Начать"
+btn_cancel: "Отмена"
+
+# Setup view — column headers
+setup_select_input_device: "Выберите устройство ввода"
+setup_select_output_device: "Выберите устройство вывода"
+setup_settings: "Настройки"
+setup_devices: "Устройства"
+setup_audio_devices: "Аудиоустройства"
+setup_input_device_mic: "Устройство ввода (микрофон)"
+setup_output_device_speaker: "Устройство вывода (динамик)"
+
+# Device section headers
+setup_section_input: "Ввод"
+setup_section_output: "Вывод"
+setup_col_select: "✓ Выбор"
+setup_no_devices: "(нет устройств)"
+setup_virtual_legend: "⟡ виртуальное"
+setup_loopback_legend: "🔄 петля"
+
+# Device status hints
+setup_capture_playback_count: "✓ %d захват, %d воспроизведение"
+setup_hub_mode_no_devices: "✓ Режим хаба — устройства не нужны"
+setup_conference_select_mic_speaker: "✗ Конференция — выберите микрофон и динамик"
+setup_select_capture_playback: "✗ Выберите минимум 1 захват и 1 воспроизведение"
+setup_n_selected: "✓ %d выбрано"
+setup_select_at_least_one: "✗ Выберите хотя бы одно устройство"
+
+# Client placeholder
+setup_select_server_to_configure: "Выберите сервер для настройки"
+setup_audio_devices_placeholder: "аудиоустройств"
+
+# Ready hints
+setup_probing_server: "⠋ Проверка сервера..."
+setup_select_server_to_start: "Выберите сервер для начала"
+setup_server_not_reachable: "✗ Сервер недоступен"
+setup_field_required: "✗ %s обязательно"
+setup_field_invalid: "✗ %s: %s"
+setup_settings_ok: "✓ Настройки ОК"
+
+# Discovery
+setup_discovering_servers: "Поиск серверов..."
+
+# Help keys — setup overlays
+help_summary_overlay: "enter: старт  esc: назад  ^Y: скопировать"
+help_virtual_device_overlay: "↑↓: навигация  enter: редактировать  space: переключить  esc: отмена"
+help_restore_overlay: "←→: выбрать  enter: подтвердить  esc: пропустить"
+help_config_save_overlay: "enter: сохранить  esc: отмена"
+help_config_load_overlay: "↑↓: обзор  enter: загрузить  ^D: удалить  esc: отмена"
+help_virtual_sink_lifecycle: "↑↓: навигация  ←→/space: переключить  enter: сохранить  esc: по умолчанию"
+help_editing: "enter: подтвердить  esc: отмена"
+help_devices_unified_duplex: "↑↓: устройство  tab: секция  space: переключить  ^E: виртуальное  ↵: старт  ^Q: выход"
+help_devices_duplex: "/: фильтр  ↑↓: устройство  ^↑^↓: секция  tab: настройки  ↵: старт  ^Q: выход"
+help_devices_normal: "/: фильтр  ↑↓: устройство  ^E: виртуальное  tab: настройки  ↵: старт  ^Q: выход"
+help_settings_column: "↑↓: навигация  enter/space: редактировать  tab: устройства  ^W: язык  ^S: сохранить  ^L: загрузить  ^H: обзор  ^Q: выход"
+help_language_overlay: "↑↓: выбрать  enter: подтвердить  esc: отмена"
+
+# Scroll indicator
+setup_scroll_indicator: "(%d–%d из %d)"
+
+# Field labels
+field_server_address: "Адрес сервера"
+field_port: "Порт"
+field_password: "Пароль"
+field_nickname: "Никнейм"
+field_max_clients: "Макс. клиентов"
+field_mode: "Режим"
+field_max_auth_fail: "Макс. ошибок авторизации"
+field_max_reconnect: "Макс. переподключений"
+field_auto_reconnect: "Автоподключение"
+field_reconnect_limit: "Лимит переподключений"
+field_echo_cancellation: "Эхоподавление"
+field_virtual_mic: "Виртуальный микрофон"
+field_log_level: "Уровень логирования"
+field_tls: "TLS"
+field_tls_cert: "TLS Сертификат"
+field_tls_key: "TLS Ключ"
+field_rate_limit: "Лимит запросов"
+field_sample_rate: "Частота дискретизации"
+field_channels: "Каналы"
+field_opus_bitrate: "Битрейт Opus"
+field_use_simd: "Использовать SIMD"
+field_hwid_collection: "Сбор HWID"
+
+# Field hints
+hint_server: "(сервер)"
+hint_nickname: "(необязательно, макс. 20 символов)"
+hint_pulse_audio: "(PulseAudio)"
+hint_rate_limit: "зап/с (0=выкл)"
+hint_simd: "(ускорение микширования для 2+ потоков)"
+hint_hwid: "(сбор ID устройства для банов)"
+hint_tls_self_signed: "⚠ самоподписанный"
+hint_reconnect_after: "(переподключение после остановки сервера)"
+hint_reconnect_unlimited: "(0 = без ограничений)"
+
+# Action labels
+action_advanced: "Дополнительно ▸"
+action_create_virtual: "Создать ▸"
+
+# Mode options
+mode_normal: "обычный (сервер → клиент)"
+mode_reverse: "обратный (клиент → сервер)"
+mode_duplex: "дуплекс (двунаправленный)"
+mode_conference: "конференция (многопользовательский)"
+
+# Field values
+value_none: "(нет)"
+
+# Validation
+# Language overlay
+lang_overlay_title: "Язык"
+lang_overlay_hint: "[Enter] Выбрать  [Esc] Отмена"
+
+# Quick-start menu
+qs_server_title: "🎙  Сервер"
+qs_server_desc: "Создать аудиосервер (клиенты подключаются к потоку)"
+qs_client_title: "🎧  Клиент"
+qs_client_desc: "Подключиться к серверу"
+qs_config_title: "📋  Конфигурация"
+qs_config_desc: "Показать текущую конфигурацию"
+qs_doctor_title: "🩺  Диагностика"
+qs_doctor_desc: "Проверить аудио и сеть"
+qs_devices_title: "🔊  Устройства"
+qs_devices_desc: "Список аудиоустройств ввода/вывода"
+qs_help_title: "❓  Справка"
+qs_help_desc: "Команды, флаги и примеры"
+qs_footer: "↑↓: навигация  enter: выбрать  tab/→: язык  ^Q: выход"
+
+validation_required: "обязательно"
+validation_must_be_number: "должно быть числом"
+validation_range: "диапазон: %d–%d"
+validation_too_long: "слишком длинное"
+validation_invalid_char: "недопустимый символ"

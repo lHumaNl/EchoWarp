@@ -73,24 +73,24 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 func (m *SetupModel) CollectServerSettings() preset.ServerSettings {
 	var s preset.ServerSettings
 	for _, f := range m.Fields {
-		switch f.Label {
-		case "Mode":
+		switch f.Key {
+		case "mode":
 			s.LastMode = strings.SplitN(f.Value, " ", 2)[0]
-		case "Port":
+		case "port":
 			s.Port = f.IntValue()
-		case "Password":
+		case "password":
 			s.Password = f.Value
-		case "Max clients":
+		case "max_clients":
 			s.MaxClients = f.IntValue()
 		}
 	}
 	for _, f := range m.AdvancedFields {
-		switch f.Label {
-		case "TLS":
+		switch f.Key {
+		case "tls":
 			s.TLS = f.Value == "on"
-		case "TLS Cert":
+		case "tls_cert":
 			s.TLSCert = f.Value
-		case "TLS Key":
+		case "tls_key":
 			s.TLSKey = f.Value
 		}
 	}

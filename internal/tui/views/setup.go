@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
@@ -35,6 +36,7 @@ const (
 	SetupOverlayConfigSave
 	SetupOverlayConfigLoad
 	SetupOverlayVirtualSinkLifecycle
+	SetupOverlayLanguage
 )
 
 // SetupDoneMsg is sent when the user confirms setup and is ready to start.
@@ -114,6 +116,7 @@ type SetupModel struct {
 	configSaveOverlay           *ConfigSaveOverlay
 	configLoadOverlay           *ConfigLoadOverlay
 	virtualSinkLifecycleOverlay *VirtualSinkLifecycleOverlay
+	languageOverlay             *LanguageOverlay
 
 	// Config save/load state
 	lastLoadedConfigName string
@@ -361,7 +364,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 	var fields []SetupField
 
 	if cfg.Mode == config.ModeClient {
-		addrField := NewTextField("Server address", cfg.Address, true)
+		addrField := NewTextField("server_address", i18n.T("field_server_address"), cfg.Address, true)
 		addrField.SetValidator(ValidateAddress)
 		if cfg.Address != "" {
 			addrField.Source = SourceCLI
@@ -369,7 +372,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 		fields = append(fields, addrField)
 	}
 
-	portField := NewNumberField("Port", cfg.Port, 1, 65535)
+	portField := NewNumberField("port", i18n.T("field_port"), cfg.Port, 1, 65535)
 	if cfg.Port != 4415 { // non-default
 		portField.Source = SourceCLI
 	}
@@ -379,19 +382,19 @@ func buildMainFields(cfg config.Config) []SetupField {
 	if cfg.Password != "" {
 		pw = cfg.Password
 	}
-	pwField := NewPasswordField("Password", pw)
+	pwField := NewPasswordField("password", i18n.T("field_password"), pw)
 	if cfg.Password != "" {
 		pwField.Source = SourceCLI
 	} else if cfg.Mode == config.ModeClient {
-		pwField.Hint = "(server)"
+		pwField.Hint = i18n.T("hint_server")
 		pwField.Hidden = true // hidden until probe says PasswordRequired
 	}
 	fields = append(fields, pwField)
 
 	// Nickname (client only)
 	if cfg.Mode == config.ModeClient {
-		nickField := NewTextField("Nickname", cfg.Nickname, false)
-		nickField.Hint = "(optional, max 20 chars)"
+		nickField := NewTextField("nickname", i18n.T("field_nickname"), cfg.Nickname, false)
+		nickField.Hint = i18n.T("hint_nickname")
 		if cfg.Nickname != "" {
 			nickField.Source = SourceCLI
 		}
@@ -399,7 +402,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 	}
 
 	if cfg.Mode == config.ModeServer {
-		mcField := NewNumberField("Max clients", cfg.MaxClients, 1, 100)
+		mcField := NewNumberField("max_clients", i18n.T("field_max_clients"), cfg.MaxClients, 1, 100)
 		if cfg.MaxClients != 1 {
 			mcField.Source = SourceCLI
 		}
@@ -409,10 +412,10 @@ func buildMainFields(cfg config.Config) []SetupField {
 	// Mode (server only — client gets mode from probe result)
 	if cfg.Mode == config.ModeServer {
 		modeOpts := []string{
-			"normal (server → client)",
-			"reverse (client → server)",
-			"duplex (bidirectional)",
-			"conference (multi-user)",
+			i18n.T("mode_normal"),
+			i18n.T("mode_reverse"),
+			i18n.T("mode_duplex"),
+			i18n.T("mode_conference"),
 		}
 		modeIdx := 0
 		if cfg.Conference {
@@ -422,7 +425,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 		} else if cfg.Reverse {
 			modeIdx = 1
 		}
-		modeField := NewToggleField("Mode", modeOpts, modeIdx)
+		modeField := NewToggleField("mode", i18n.T("field_mode"), modeOpts, modeIdx)
 		if cfg.Reverse || cfg.Duplex || cfg.Conference {
 			modeField.Source = SourceCLI
 		}
@@ -431,14 +434,14 @@ func buildMainFields(cfg config.Config) []SetupField {
 
 	if cfg.Mode == config.ModeServer {
 		// Server: show "Max auth fail" (ban threshold) in main fields
-		mafField := NewNumberField("Max auth fail", cfg.MaxFailedAttempts, 0, 100)
+		mafField := NewNumberField("max_auth_fail", i18n.T("field_max_auth_fail"), cfg.MaxFailedAttempts, 0, 100)
 		if cfg.MaxFailedAttempts != 5 {
 			mafField.Source = SourceCLI
 		}
 		fields = append(fields, mafField)
 	} else {
 		// Client: show "Max reconnect" in main fields
-		mrField := NewNumberField("Max reconnect", cfg.MaxReconnectAttempts, 0, 100)
+		mrField := NewNumberField("max_reconnect", i18n.T("field_max_reconnect"), cfg.MaxReconnectAttempts, 0, 100)
 		if cfg.MaxReconnectAttempts != 5 {
 			mrField.Source = SourceCLI
 		}
@@ -450,16 +453,16 @@ func buildMainFields(cfg config.Config) []SetupField {
 		if cfg.AutoReconnect {
 			arIdx = 1
 		}
-		arField := NewToggleField("Auto reconnect", arOpts, arIdx)
-		arField.Hint = "(reconnect after server shutdown)"
+		arField := NewToggleField("auto_reconnect", i18n.T("field_auto_reconnect"), arOpts, arIdx)
+		arField.Hint = i18n.T("hint_reconnect_after")
 		if cfg.AutoReconnect {
 			arField.Source = SourceCLI
 		}
 		fields = append(fields, arField)
 
 		// Reconnect limit (client only)
-		attField := NewNumberField("Reconnect limit", cfg.AutoReconnectAttempts, 0, 999)
-		attField.Hint = "(0 = unlimited)"
+		attField := NewNumberField("reconnect_limit", i18n.T("field_reconnect_limit"), cfg.AutoReconnectAttempts, 0, 999)
+		attField.Hint = i18n.T("hint_reconnect_unlimited")
 		if cfg.AutoReconnectAttempts != 0 {
 			attField.Source = SourceCLI
 		}
@@ -473,7 +476,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 	if cfg.AEC {
 		aecIdx = 1
 	}
-	aecField := NewToggleField("Echo cancellation", aecOpts, aecIdx)
+	aecField := NewToggleField("echo_cancellation", i18n.T("field_echo_cancellation"), aecOpts, aecIdx)
 	if cfg.AEC {
 		aecField.Source = SourceCLI
 	}
@@ -481,13 +484,13 @@ func buildMainFields(cfg config.Config) []SetupField {
 
 	// Virtual mic (Linux only) — creates PulseAudio null-sink
 	if runtime.GOOS == "linux" {
-		vmField := NewActionField("Virtual mic", "Create ▸")
-		vmField.Hint = "(PulseAudio)"
+		vmField := NewActionField("virtual_mic", i18n.T("field_virtual_mic"), i18n.T("action_create_virtual"))
+		vmField.Hint = i18n.T("hint_pulse_audio")
 		fields = append(fields, vmField)
 	}
 
 	// Action: Advanced
-	fields = append(fields, NewActionField("", "Advanced ▸"))
+	fields = append(fields, NewActionField("advanced", "", i18n.T("action_advanced")))
 
 	return fields
 }
@@ -504,7 +507,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 			break
 		}
 	}
-	logField := NewSelectField("Log level", logOpts, logIdx)
+	logField := NewSelectField("log_level", i18n.T("field_log_level"), logOpts, logIdx)
 	if cfg.LogLevel != "" && cfg.LogLevel != "info" {
 		logField.Source = SourceCLI
 	}
@@ -517,12 +520,12 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.IsTLSEnabled() {
 			tlsIdx = 1
 		}
-		tlsField := NewToggleField("TLS", tlsOpts, tlsIdx)
+		tlsField := NewToggleField("tls", i18n.T("field_tls"), tlsOpts, tlsIdx)
 		if cfg.IsTLSEnabled() {
 			tlsField.Source = SourceCLI
 		}
 		if cfg.TLSSelfSigned {
-			tlsField.Hint = "⚠ self-signed"
+			tlsField.Hint = i18n.T("hint_tls_self_signed")
 		}
 		fields = append(fields, tlsField)
 	} else {
@@ -531,11 +534,11 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.TLS {
 			tlsIdx = 1
 		}
-		tlsField := NewToggleField("TLS", tlsOpts, tlsIdx)
+		tlsField := NewToggleField("tls", i18n.T("field_tls"), tlsOpts, tlsIdx)
 		if cfg.TLS {
 			tlsField.Source = SourceCLI
 		} else {
-			tlsField.Hint = "(server)"
+			tlsField.Hint = i18n.T("hint_server")
 		}
 		fields = append(fields, tlsField)
 	}
@@ -544,14 +547,14 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 	if cfg.Mode == config.ModeServer {
 		tlsOn := cfg.IsTLSEnabled()
 
-		certField := NewTextField("TLS Cert", cfg.TLSCert, false)
+		certField := NewTextField("tls_cert", i18n.T("field_tls_cert"), cfg.TLSCert, false)
 		if cfg.TLSCert != "" {
 			certField.Source = SourceCLI
 		}
 		certField.Hidden = !tlsOn
 		fields = append(fields, certField)
 
-		keyField := NewTextField("TLS Key", cfg.TLSKey, false)
+		keyField := NewTextField("tls_key", i18n.T("field_tls_key"), cfg.TLSKey, false)
 		if cfg.TLSKey != "" {
 			keyField.Source = SourceCLI
 		}
@@ -565,8 +568,8 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if rlVal == 0 {
 			rlVal = 5 // CLI default
 		}
-		rlField := NewNumberField("Rate limit", rlVal, 0, 1000)
-		rlField.Hint = "req/s (0=off)"
+		rlField := NewNumberField("rate_limit", i18n.T("field_rate_limit"), rlVal, 0, 1000)
+		rlField.Hint = i18n.T("hint_rate_limit")
 		if cfg.RateLimit != 0 && cfg.RateLimit != 5 {
 			rlField.Source = SourceCLI
 		}
@@ -582,7 +585,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 			break
 		}
 	}
-	srField := NewSelectField("Sample rate", srOpts, srIdx)
+	srField := NewSelectField("sample_rate", i18n.T("field_sample_rate"), srOpts, srIdx)
 	if cfg.SampleRate != 48000 {
 		srField.Source = SourceCLI
 	}
@@ -593,7 +596,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 	if cfg.Channels == 1 {
 		chIdx = 1
 	}
-	chField := NewToggleField("Channels", chOpts, chIdx)
+	chField := NewToggleField("channels", i18n.T("field_channels"), chOpts, chIdx)
 	if cfg.Channels != 2 {
 		chField.Source = SourceCLI
 	}
@@ -608,7 +611,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 			break
 		}
 	}
-	brField := NewSelectField("Opus bitrate", brOpts, brIdx)
+	brField := NewSelectField("opus_bitrate", i18n.T("field_opus_bitrate"), brOpts, brIdx)
 	if cfg.OpusBitrate != 64000 {
 		brField.Source = SourceCLI
 	}
@@ -621,8 +624,8 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.NoSIMDOptimization {
 			hwIdx = 1
 		}
-		hwField := NewToggleField("Use SIMD", hwOpts, hwIdx)
-		hwField.Hint = "(accelerate audio mixing for 2+ streams)"
+		hwField := NewToggleField("use_simd", i18n.T("field_use_simd"), hwOpts, hwIdx)
+		hwField.Hint = i18n.T("hint_simd")
 		if cfg.NoSIMDOptimization {
 			hwField.Source = SourceCLI
 		}
@@ -636,8 +639,8 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.HWIDRequired {
 			hwidIdx = 1
 		}
-		hwidField := NewToggleField("HWID collection", hwidOpts, hwidIdx)
-		hwidField.Hint = "(collect device ID for bans)"
+		hwidField := NewToggleField("hwid_collection", i18n.T("field_hwid_collection"), hwidOpts, hwidIdx)
+		hwidField.Hint = i18n.T("hint_hwid")
 		if cfg.HWIDRequired {
 			hwidField.Source = SourceCLI
 		}
@@ -649,11 +652,14 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 
 // modeKeyToDescriptive maps a bare mode key ("normal", "reverse", etc.) to its
 // descriptive option string used in the Mode toggle field.
-var modeKeyToDescriptive = map[string]string{
-	"normal":     "normal (server → client)",
-	"reverse":    "reverse (client → server)",
-	"duplex":     "duplex (bidirectional)",
-	"conference": "conference (multi-user)",
+// Computed at call time so that i18n translations are resolved dynamically.
+func modeKeyToDescriptiveMap() map[string]string {
+	return map[string]string{
+		"normal":     i18n.T("mode_normal"),
+		"reverse":    i18n.T("mode_reverse"),
+		"duplex":     i18n.T("mode_duplex"),
+		"conference": i18n.T("mode_conference"),
+	}
 }
 
 // applyFieldDependencies updates field requirements based on current values.
@@ -661,7 +667,7 @@ func (m *SetupModel) applyFieldDependencies() {
 	// Find TLS field value (now in AdvancedFields)
 	tlsValue := "off"
 	for _, f := range m.AdvancedFields {
-		if f.Label == "TLS" {
+		if f.Key == "tls" {
 			tlsValue = f.Value
 			break
 		}
@@ -669,7 +675,7 @@ func (m *SetupModel) applyFieldDependencies() {
 
 	// Update TLS Cert/Key visibility and requirements in advanced fields
 	for i := range m.AdvancedFields {
-		if m.AdvancedFields[i].Label == "TLS Cert" || m.AdvancedFields[i].Label == "TLS Key" {
+		if m.AdvancedFields[i].Key == "tls_cert" || m.AdvancedFields[i].Key == "tls_key" {
 			if tlsValue == "on" {
 				m.AdvancedFields[i].Hidden = false
 				m.AdvancedFields[i].Required = true
@@ -704,7 +710,7 @@ func (m *SetupModel) applyFieldDependencies() {
 	// or from probe result (client).
 	var modeKey string
 	for _, f := range m.Fields {
-		if f.Label == "Mode" {
+		if f.Key == "mode" {
 			modeKey = strings.SplitN(f.Value, " ", 2)[0]
 			break
 		}
@@ -732,7 +738,7 @@ func (m *SetupModel) applyFieldDependencies() {
 
 	// Conference requires at least 2 clients; restore default when leaving conference.
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Max clients" {
+		if m.Fields[i].Key == "max_clients" {
 			if m.isConferenceMode && m.Fields[i].IntValue() < 2 {
 				m.preConferenceMaxClients = m.Fields[i].IntValue()
 				m.Fields[i].SetValue("2", SourceDefault)
@@ -746,7 +752,7 @@ func (m *SetupModel) applyFieldDependencies() {
 
 	// Echo cancellation is only useful in duplex/conference modes
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Echo cancellation" {
+		if m.Fields[i].Key == "echo_cancellation" {
 			m.Fields[i].Hidden = !m.isDuplexMode
 			if m.Fields[i].Hidden {
 				m.Fields[i].Value = "off"
@@ -759,13 +765,13 @@ func (m *SetupModel) applyFieldDependencies() {
 	// Auto reconnect: show/hide Reconnect limit field
 	autoReconnectOn := false
 	for _, f := range m.Fields {
-		if f.Label == "Auto reconnect" {
+		if f.Key == "auto_reconnect" {
 			autoReconnectOn = f.Value == "on"
 			break
 		}
 	}
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Reconnect limit" {
+		if m.Fields[i].Key == "reconnect_limit" {
 			m.Fields[i].Hidden = !autoReconnectOn
 			break
 		}
@@ -776,10 +782,10 @@ func (m *SetupModel) applyFieldDependencies() {
 		certEmpty := true
 		keyEmpty := true
 		for _, f := range m.AdvancedFields {
-			if f.Label == "TLS Cert" && f.Value != "" {
+			if f.Key == "tls_cert" && f.Value != "" {
 				certEmpty = false
 			}
-			if f.Label == "TLS Key" && f.Value != "" {
+			if f.Key == "tls_key" && f.Value != "" {
 				keyEmpty = false
 			}
 		}
@@ -820,10 +826,10 @@ func (m SetupModel) InitCmd() tea.Cmd {
 	if m.cfg.Address != "" {
 		var addr, port string
 		for _, f := range m.Fields {
-			if f.Label == "Server address" {
+			if f.Key == "server_address" {
 				addr = f.Value
 			}
-			if f.Label == "Port" {
+			if f.Key == "port" {
 				port = f.Value
 			}
 		}
@@ -846,7 +852,7 @@ func (m *SetupModel) activeFields() []SetupField {
 		combined := make([]SetupField, 0, len(m.Fields)+len(m.AdvancedFields))
 		for _, f := range m.Fields {
 			combined = append(combined, f)
-			if f.Type == FieldAction && strings.Contains(f.ActionLabel, "Advanced") {
+			if f.Key == "advanced" {
 				combined = append(combined, m.AdvancedFields...)
 			}
 		}
@@ -881,7 +887,7 @@ func (m *SetupModel) writeBackFields(fields []SetupField) {
 		advIdx := 0
 		inAdvanced := false
 		for _, f := range fields {
-			if f.Type == FieldAction && strings.Contains(f.ActionLabel, "Advanced") {
+			if f.Key == "advanced" {
 				m.Fields[mainIdx] = f
 				mainIdx++
 				inAdvanced = true
