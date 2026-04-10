@@ -52,6 +52,9 @@ type ServerOption func(*APIServer)
 //	GET    /api/v1/bans        - List active bans (IP/HWID/nickname)
 //	POST   /api/v1/bans        - Add a ban (body: {ip|hwid|nickname, reason?})
 //	DELETE /api/v1/bans/{id}   - Remove a ban by id ("<kind>:<subject>")
+//	POST /api/v1/recording/start  - Start recording (body: {"mode":"mix|tracks|both"})
+//	POST /api/v1/recording/stop   - Stop recording (returns {duration, size, files})
+//	GET  /api/v1/recording/status - Current recording status (idempotent)
 //	GET  /ws/v1/events         - WebSocket event stream
 //	GET  /metrics              - Prometheus metrics
 //
@@ -242,6 +245,9 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/bans", s.handleBanList)
 	mux.HandleFunc("POST /api/v1/bans", s.handleBanAdd)
 	mux.HandleFunc("DELETE /api/v1/bans/{id}", s.handleBanRemove)
+	mux.HandleFunc("POST /api/v1/recording/start", s.handleRecordingStart)
+	mux.HandleFunc("POST /api/v1/recording/stop", s.handleRecordingStop)
+	mux.HandleFunc("GET /api/v1/recording/status", s.handleRecordingStatus)
 	mux.HandleFunc("GET /ws/v1/events", s.handleWebSocket)
 	mux.Handle("GET /metrics", promhttp.Handler())
 

@@ -70,6 +70,11 @@ type ClientApp struct {
 	recorderMu     sync.Mutex
 	recordingCmdCh <-chan RecordingCommand
 
+	// recState tracks recording metadata for the daemon-API
+	// RecordingController adapter. See internal/app/recording_adapter.go
+	// for the rationale (same pattern as ServerApp.recState).
+	recState recordingAdapterState
+
 	// Chat client for text messaging.
 	chatClient *ChatClient
 
@@ -322,8 +327,13 @@ func (c *ClientApp) GetChatClient() *ChatClient {
 	return c.chatClient
 }
 
-// StartRecording starts client-side recording.
-func (c *ClientApp) StartRecording(mode audio.RecordingMode) error {
+// startRecordingInternal starts client-side recording. Public entry
+// points: the TUI bridge (processRecordingCommands) and the daemon API
+// adapter (recording_adapter.go) both call this helper. Renamed from
+// the former exported StartRecording in phase 5c so the ClientApp type
+// can satisfy echowarp.RecordingController with the public-typed
+// signature without a name clash.
+func (c *ClientApp) startRecordingInternal(mode audio.RecordingMode) error {
 	c.recorderMu.Lock()
 	defer c.recorderMu.Unlock()
 	c.recorder = audio.NewConferenceRecorder(mode, c.cfg.SampleRate, 1)
@@ -332,8 +342,9 @@ func (c *ClientApp) StartRecording(mode audio.RecordingMode) error {
 	return c.recorder.Start(baseDir)
 }
 
-// StopRecording stops client-side recording.
-func (c *ClientApp) StopRecording() (time.Duration, uint64, int, error) {
+// stopRecordingInternal stops client-side recording. See
+// startRecordingInternal for why this is unexported.
+func (c *ClientApp) stopRecordingInternal() (time.Duration, uint64, int, error) {
 	c.recorderMu.Lock()
 	defer c.recorderMu.Unlock()
 	if c.recorder == nil {
@@ -365,13 +376,13 @@ func (c *ClientApp) processRecordingCommands(ctx context.Context) {
 				return
 			}
 			if cmd.Start {
-				if err := c.StartRecording(cmd.Mode); err != nil {
+				if err := c.startRecordingInternal(cmd.Mode); err != nil {
 					c.logger.Error("Failed to start recording", "error", err)
 				} else {
 					c.logger.Info("Recording started", "mode", cmd.Mode)
 				}
 			} else {
-				dur, size, files, err := c.StopRecording()
+				dur, size, files, err := c.stopRecordingInternal()
 				if err != nil {
 					c.logger.Error("Failed to stop recording", "error", err)
 				} else {
@@ -553,7 +564,7 @@ func (c *ClientApp) Run(ctx context.Context) error {
 	go c.processRecordingCommands(sessCtx)
 	go c.flushRecordingHeaders(sessCtx)
 	// Stop any active recording when session ends (e.g. disconnect/reconnect).
-	defer func() { _, _, _, _ = c.StopRecording() }() //nolint:errcheck
+	defer func() { _, _, _, _ = c.stopRecordingInternal() }() //nolint:errcheck
 
 	c.setupPeerCallbacks(peer, sessCancel)
 

@@ -132,6 +132,18 @@ func (ch *ConferenceHandler) StopRecording() (duration time.Duration, totalSize 
 	return dur, size, files, err
 }
 
+// RecordingDir returns the output directory of the active recording,
+// or empty string when nothing is being recorded. Used by the daemon
+// API adapter to enumerate the produced files after Stop.
+func (ch *ConferenceHandler) RecordingDir() string {
+	ch.mu.RLock()
+	defer ch.mu.RUnlock()
+	if ch.recorder == nil {
+		return ""
+	}
+	return ch.recorder.Dir()
+}
+
 // IsRecording returns whether recording is active.
 func (ch *ConferenceHandler) IsRecording() bool {
 	ch.mu.RLock()

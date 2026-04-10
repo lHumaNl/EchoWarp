@@ -112,6 +112,42 @@ type BanManager interface {
 	RemoveBan(id string) error
 }
 
+// RecordingController is an optional interface that Runner implementations
+// may satisfy to expose on-demand start/stop control of the audio recorder
+// via the public Node API (Node.StartRecording, Node.StopRecording,
+// Node.RecordingStatus). Runners that do not implement this interface
+// cause the Start/Stop node methods to return an ErrInternalState-class
+// error and Node.RecordingStatus to return a zero-value (Active=false)
+// status so GET /api/v1/recording/status remains idempotent even on
+// recording-incapable runners.
+//
+// Implementations must be safe to call concurrently with Run(ctx). The
+// adapter is expected to delegate to the same ConferenceRecorder (or
+// equivalent) instance that the CLI --record flag drives, so starting
+// a recording via the API during an already-active CLI recording is
+// reported as an error rather than silently spawning a parallel writer.
+type RecordingController interface {
+	// StartRecording begins a recording session in the given mode.
+	// Must return a non-nil error if a recording is already active on
+	// the underlying recorder so the caller learns about the conflict
+	// instead of silently overwriting the existing session.
+	StartRecording(mode RecordingMode) error
+
+	// StopRecording stops the active recording and returns a summary
+	// of the session. When no recording was active, implementations
+	// should return a zero-value RecordingResult and nil error so the
+	// API call is idempotent — the Node wrapper distinguishes "never
+	// running" (ErrNotRunning) from "running but nothing to stop"
+	// (nil error, empty result) itself.
+	StopRecording() (RecordingResult, error)
+
+	// RecordingStatus returns the current state of the recorder. Must
+	// return a zero-value (Active=false) status when no recording is
+	// in progress — see the Node wrapper comment for why this is
+	// required to keep GET /api/v1/recording/status idempotent.
+	RecordingStatus() RecordingStatus
+}
+
 // RunnerFactory creates a Runner instance based on configuration.
 // This function bridges the pkg/echowarp package with internal/app implementations,
 // avoiding direct imports that would break the package boundary.

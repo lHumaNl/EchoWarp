@@ -82,6 +82,14 @@ type ServerApp struct {
 	// Recording command channel for receiving start/stop commands from TUI.
 	recordingCmdCh <-chan RecordingCommand
 
+	// recState tracks recording metadata (mode, start time, output
+	// directory) that the underlying audio.ConferenceRecorder does not
+	// expose directly. Populated by the daemon-API RecordingController
+	// adapter in recording_adapter.go and consumed by RecordingStatus
+	// / StopRecording. The struct carries its own mutex so callers
+	// that hold s.mu do not need to coordinate here.
+	recState recordingAdapterState
+
 	// Callback invoked when client count changes (for probe/session info).
 	onClientCount func(int)
 

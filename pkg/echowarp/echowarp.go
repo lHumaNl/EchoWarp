@@ -1020,6 +1020,98 @@ func (n *Node) banManagerRunner() (BanManager, error) {
 	return mgr, nil
 }
 
+// StartRecording begins an audio recording session in the given mode on
+// the running runner. mode must be one of "mix", "tracks", or "both"
+// (the three RecordingMode constants exported from this package) —
+// anything else is rejected as ErrConfigValidation without touching the
+// runner. The node must be running (ErrNotRunning otherwise) and the
+// runner must implement RecordingController (ErrInternalState
+// otherwise). Any error returned by the controller itself — notably
+// "recording already active" — is propagated unchanged so API callers
+// can distinguish a conflict from a wiring problem.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's
+// StartRecording which is expected to return quickly (file creation
+// only — no audio is buffered here).
+func (n *Node) StartRecording(mode string) error {
+	if !IsValidRecordingMode(mode) {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid recording mode").
+			WithContext("mode", mode).
+			WithSuggestion("Use one of: mix, tracks, both")
+	}
+	ctrl, err := n.recordingController()
+	if err != nil {
+		return err
+	}
+	return ctrl.StartRecording(RecordingMode(mode))
+}
+
+// StopRecording stops the currently active recording session and
+// returns a summary of the produced files. If no recording was active
+// but the runner is otherwise healthy, a zero-value RecordingResult and
+// nil error are returned — the API layer maps that to a 200 response
+// with an empty body, matching the idempotent convention used by other
+// "stop" endpoints (Disconnect, Stop). Returns ErrNotRunning when the
+// node is not running and ErrInternalState when the runner does not
+// implement RecordingController.
+//
+// Safe for concurrent use.
+func (n *Node) StopRecording() (RecordingResult, error) {
+	ctrl, err := n.recordingController()
+	if err != nil {
+		return RecordingResult{}, err
+	}
+	return ctrl.StopRecording()
+}
+
+// RecordingStatus returns a snapshot of the recorder state. This
+// method is deliberately idempotent and never returns an error: when
+// the node is not running, the runner is absent, or the runner does
+// not implement RecordingController, the method returns a zero-value
+// RecordingStatus (Active=false). API callers can therefore poll GET
+// /api/v1/recording/status safely regardless of node state — matching
+// the BanList / Participants convention introduced in phase 4b/5b.
+//
+// Safe for concurrent use.
+func (n *Node) RecordingStatus() RecordingStatus {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return RecordingStatus{}
+	}
+	ctrl, ok := runner.(RecordingController)
+	if !ok {
+		return RecordingStatus{}
+	}
+	return ctrl.RecordingStatus()
+}
+
+// recordingController returns the current runner as a
+// RecordingController or a structured error explaining why it cannot
+// serve a recording command. Mirrors banManagerRunner /
+// participantCommandReceiver so all optional-interface endpoints share
+// the same error taxonomy (ErrNotRunning vs ErrInternalState).
+func (n *Node) recordingController() (RecordingController, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before managing recordings")
+	}
+	ctrl, ok := runner.(RecordingController)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support recording control").
+			WithSuggestion("Use a runner implementation that implements RecordingController (e.g. ServerApp)")
+	}
+	return ctrl, nil
+}
+
 // Devices returns a list of all available audio input and output devices on the system.
 // This is a package-level convenience function equivalent to Node.Devices().
 func Devices() ([]AudioDevice, error) {
