@@ -121,7 +121,27 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	rateLimiter := createDaemonRateLimiter(flags.rateLimit)
 	setupDaemonDiscovery(flags.noDiscovery, flags.serverName, logger)
 
-	node, err := createNode(cfg, logger, rateLimiter)
+	// Wire the ban manager into the Node (server mode only — client-mode
+	// daemons do not own a ban list). The same manager instance is also
+	// passed to the runner factory via Node.banMgr → ServerApp, which
+	// means bans installed through POST /api/v1/bans take effect
+	// immediately on incoming signaling connections (ServerApp calls
+	// banMgr.IsBanned on every connect — see internal/app/server_single.go).
+	// Without this wiring, the daemon's ban manager would be nil and the
+	// API endpoints would persist nothing (Phase 5b gap identified in
+	// implementer notes).
+	var banMgr ban.BanManager
+	if cfg.Mode == config.ModeServer {
+		bm, bmErr := setupBanManager(&cfg, logger)
+		if bmErr != nil {
+			logger.Warn("ban manager setup failed — ban endpoints will be no-op", "error", bmErr)
+		} else if bm != nil {
+			banMgr = bm
+			defer func() { _ = bm.Close() }()
+		}
+	}
+
+	node, err := createNode(cfg, logger, rateLimiter, banMgr)
 	if err != nil {
 		return err
 	}
@@ -286,18 +306,26 @@ func setupDaemonDiscovery(noDiscovery bool, serverName string, logger *slog.Logg
 	}
 }
 
-func createNode(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter) (*echowarp.Node, error) {
+func createNode(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter, banMgr ban.BanManager) (*echowarp.Node, error) {
 	nodeCfg := convertToNodeConfig(cfg)
 	// nodeRef is a forward-capture holder for the *Node: the runner factory
 	// needs access to the node's EventBus to wire the chat-event hook, but
 	// the factory is instantiated before NewNode returns. Populating the
 	// holder immediately after NewNode closes the circular dependency.
 	var nodeRef *echowarp.Node
-	node, err := echowarp.NewNode(nodeCfg,
+	opts := []echowarp.Option{
 		echowarp.WithLogger(logger),
 		echowarp.WithEventHandler(echowarp.NewEventHandler()),
 		echowarp.WithRunnerFactory(createRunnerFactory(cfg, logger, rateLimiter, &nodeRef)),
-	)
+	}
+	// Only inject the ban manager when one is actually available. Client-
+	// mode daemons pass nil so the Node's optional BanManager runner
+	// interface assertion falls through to ErrInternalState on mutation
+	// and to an empty slice on list — matching the documented contract.
+	if banMgr != nil {
+		opts = append(opts, echowarp.WithBanManager(banMgr))
+	}
+	node, err := echowarp.NewNode(nodeCfg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
 	}

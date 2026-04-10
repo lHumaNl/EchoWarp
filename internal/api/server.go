@@ -49,6 +49,9 @@ type ServerOption func(*APIServer)
 //	POST /api/v1/conference/participants/{id}/kick   - Kick participant (stub — 501)
 //	POST /api/v1/conference/participants/{id}/volume - Set participant volume (stub — 501)
 //	POST /api/v1/chat/send     - Send a chat message (broadcast or DM)
+//	GET    /api/v1/bans        - List active bans (IP/HWID/nickname)
+//	POST   /api/v1/bans        - Add a ban (body: {ip|hwid|nickname, reason?})
+//	DELETE /api/v1/bans/{id}   - Remove a ban by id ("<kind>:<subject>")
 //	GET  /ws/v1/events         - WebSocket event stream
 //	GET  /metrics              - Prometheus metrics
 //
@@ -236,6 +239,9 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/conference/participants/{id}/kick", s.handleConferenceParticipantKick)
 	mux.HandleFunc("POST /api/v1/conference/participants/{id}/volume", s.handleConferenceParticipantVolume)
 	mux.HandleFunc("POST /api/v1/chat/send", s.handleChatSend)
+	mux.HandleFunc("GET /api/v1/bans", s.handleBanList)
+	mux.HandleFunc("POST /api/v1/bans", s.handleBanAdd)
+	mux.HandleFunc("DELETE /api/v1/bans/{id}", s.handleBanRemove)
 	mux.HandleFunc("GET /ws/v1/events", s.handleWebSocket)
 	mux.Handle("GET /metrics", promhttp.Handler())
 

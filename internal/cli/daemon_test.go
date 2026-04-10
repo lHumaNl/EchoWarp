@@ -660,7 +660,7 @@ func TestCreateNode(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	rateLimiter := auth.NewIPRateLimiter(5)
 
-	node, err := createNode(cfg, logger, rateLimiter)
+	node, err := createNode(cfg, logger, rateLimiter, nil)
 	if err != nil {
 		t.Errorf("createNode failed: %v", err)
 	}
@@ -1040,7 +1040,7 @@ func TestCreateNode_InvalidDevice(t *testing.T) {
 
 	// createNode should succeed even with invalid device ID
 	// (device validation happens at runtime)
-	node, err := createNode(cfg, logger, nil)
+	node, err := createNode(cfg, logger, nil, nil)
 	if err != nil {
 		t.Logf("createNode returned error (expected on some systems): %v", err)
 	}

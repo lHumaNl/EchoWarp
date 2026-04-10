@@ -898,6 +898,128 @@ func (n *Node) SendChat(text, to string) error {
 	return sender.SendChat(text, to)
 }
 
+// BanList returns a snapshot of all currently active bans across IP,
+// HWID, and Nickname kinds. The method is deliberately idempotent and
+// non-erroring: if the node is not running, has no runner, or the
+// runner does not implement the BanManager optional interface, it
+// returns a non-nil empty slice. API callers can therefore poll GET
+// /api/v1/bans safely regardless of node state.
+//
+// The returned slice is freshly allocated — the caller is free to
+// mutate or sort it without affecting the runner's internal state.
+//
+// Safe for concurrent use.
+func (n *Node) BanList() []BanEntry {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return []BanEntry{}
+	}
+	mgr, ok := runner.(BanManager)
+	if !ok {
+		return []BanEntry{}
+	}
+	list := mgr.BanList()
+	if list == nil {
+		return []BanEntry{}
+	}
+	return list
+}
+
+// AddBan installs a new ban on the running runner. Exactly one of
+// entry.IP, entry.HWID, or entry.Nickname must be non-empty — providing
+// none or more than one returns ErrConfigValidation. The node must be
+// running, otherwise ErrNotRunning is returned. If the runner does not
+// implement the BanManager optional interface (e.g. a client-mode
+// runner that does not own a ban list), ErrInternalState is returned.
+//
+// Bans installed through this method take effect immediately: the
+// underlying ban manager is the same instance consulted on incoming
+// signaling connections, so a subsequent connect attempt from the
+// banned subject is rejected without requiring a reload.
+//
+// Safe for concurrent use.
+func (n *Node) AddBan(entry BanEntry) error {
+	if err := validateBanEntry(entry); err != nil {
+		return err
+	}
+	mgr, err := n.banManagerRunner()
+	if err != nil {
+		return err
+	}
+	return mgr.AddBan(entry)
+}
+
+// RemoveBan removes a previously installed ban identified by its stable
+// ID ("<kind>:<subject>"). The id must be non-empty
+// (ErrConfigValidation otherwise) and the node must be running
+// (ErrNotRunning otherwise). If the runner does not implement the
+// BanManager optional interface, ErrInternalState is returned. Unknown
+// IDs are reported as an error propagated from the runner.
+//
+// Safe for concurrent use.
+func (n *Node) RemoveBan(id string) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid ban id").
+			WithSuggestion("Ban id must be non-empty (format: <kind>:<subject>)")
+	}
+	mgr, err := n.banManagerRunner()
+	if err != nil {
+		return err
+	}
+	return mgr.RemoveBan(id)
+}
+
+// validateBanEntry enforces the "exactly one of IP/HWID/Nickname must
+// be set" invariant. Kept as a free function so handler-level and
+// node-level call sites share the same check and error message.
+func validateBanEntry(entry BanEntry) error {
+	count := 0
+	if entry.IP != "" {
+		count++
+	}
+	if entry.HWID != "" {
+		count++
+	}
+	if entry.Nickname != "" {
+		count++
+	}
+	if count == 0 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Ban entry requires a subject").
+			WithSuggestion("Set exactly one of ip, hwid, or nickname on the ban entry")
+	}
+	if count > 1 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Ban entry has multiple subjects").
+			WithSuggestion("Set exactly one of ip, hwid, or nickname — not more than one at a time")
+	}
+	return nil
+}
+
+// banManagerRunner returns the current runner as a BanManager or a
+// structured error describing why it cannot serve a ban command. Split
+// out from AddBan/RemoveBan so both mutation paths map to the same
+// error taxonomy (ErrNotRunning vs ErrInternalState).
+func (n *Node) banManagerRunner() (BanManager, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before managing bans")
+	}
+	mgr, ok := runner.(BanManager)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support ban management").
+			WithSuggestion("Use a runner implementation that implements BanManager (e.g. ServerApp)")
+	}
+	return mgr, nil
+}
+
 // Devices returns a list of all available audio input and output devices on the system.
 // This is a package-level convenience function equivalent to Node.Devices().
 func Devices() ([]AudioDevice, error) {
