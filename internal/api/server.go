@@ -36,6 +36,8 @@ type ServerOption func(*APIServer)
 //	POST /api/v1/config        - Update configuration
 //	POST /api/v1/start         - Start streaming
 //	POST /api/v1/stop          - Stop streaming
+//	POST /api/v1/connect       - Connect to a server in client mode (alias + client config)
+//	POST /api/v1/disconnect    - Disconnect (semantic alias for /stop)
 //	POST /api/v1/pause         - Pause streaming
 //	POST /api/v1/resume        - Resume streaming
 //	POST /api/v1/shutdown      - Graceful shutdown
@@ -220,6 +222,8 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/config", s.handleConfig)
 	mux.HandleFunc("POST /api/v1/start", s.handleStart)
 	mux.HandleFunc("POST /api/v1/stop", s.handleStop)
+	mux.HandleFunc("POST /api/v1/connect", s.handleConnect)
+	mux.HandleFunc("POST /api/v1/disconnect", s.handleDisconnect)
 	mux.HandleFunc("POST /api/v1/pause", s.handlePause)
 	mux.HandleFunc("POST /api/v1/resume", s.handleResume)
 	mux.HandleFunc("POST /api/v1/shutdown", s.handleShutdown)

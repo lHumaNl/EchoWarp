@@ -55,6 +55,8 @@ func setupTestHandlersServer(t *testing.T) (*APIServer, *httptest.Server) {
 	mux.HandleFunc("PUT /api/v1/config", apiServer.handleConfig)
 	mux.HandleFunc("POST /api/v1/start", apiServer.handleStart)
 	mux.HandleFunc("POST /api/v1/stop", apiServer.handleStop)
+	mux.HandleFunc("POST /api/v1/connect", apiServer.handleConnect)
+	mux.HandleFunc("POST /api/v1/disconnect", apiServer.handleDisconnect)
 	mux.HandleFunc("POST /api/v1/pause", apiServer.handlePause)
 	mux.HandleFunc("POST /api/v1/resume", apiServer.handleResume)
 	mux.HandleFunc("POST /api/v1/shutdown", apiServer.handleShutdown)
@@ -1137,4 +1139,161 @@ func TestHandleReadyz_NodeNil(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Equal(t, "not ready", result["status"])
+}
+
+// TestHandleConnect asserts that POST /api/v1/connect configures the node in
+// client mode and transitions it through a Start cycle. The default test
+// setup uses a noopTestRunner so Start returns quickly — the node should end
+// up back in stopped state, but the handler must return 200 (fast success)
+// and must have applied the client config during Reconfigure.
+func TestHandleConnect(t *testing.T) {
+	apiServer, ts := setupTestHandlersServer(t)
+
+	body := `{"address":"127.0.0.1","port":4415,"password":"test","nickname":"bob"}`
+	resp, err := http.Post(ts.URL+"/api/v1/connect", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "fast connect should return 200")
+
+	var result map[string]string
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "connected", result["status"])
+
+	// The node config must reflect the new client-mode values.
+	cfg := apiServer.node.Config()
+	assert.Equal(t, echowarp.ModeClient, cfg.Mode, "node must be reconfigured to client mode")
+	assert.Equal(t, "127.0.0.1", cfg.Address)
+	assert.Equal(t, 4415, cfg.Port)
+	assert.Equal(t, "bob", cfg.Nickname)
+
+	// Noop runner returns immediately, so the node settles back in stopped state.
+	assert.Eventually(t, func() bool {
+		return apiServer.node.Status() == echowarp.StatusStopped
+	}, 500*time.Millisecond, 10*time.Millisecond)
+}
+
+// TestHandleConnectMissingAddress asserts that POST /api/v1/connect returns
+// 400 when neither address nor discover is set — the caller has no target.
+func TestHandleConnectMissingAddress(t *testing.T) {
+	_, ts := setupTestHandlersServer(t)
+
+	resp, err := http.Post(ts.URL+"/api/v1/connect", "application/json", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Contains(t, result.Error, "address")
+}
+
+// TestHandleConnectWhenRunning asserts that POST /api/v1/connect returns 409
+// when the node is already in a non-idle state — connect must not hijack a
+// running session.
+func TestHandleConnectWhenRunning(t *testing.T) {
+	cfg := echowarp.NodeConfig{
+		Mode:       echowarp.ModeServer,
+		Port:       0,
+		SampleRate: 48000,
+		Channels:   1,
+	}
+
+	blockingRunner := &blockingTestRunner{started: make(chan struct{})}
+	factory := func(_ echowarp.NodeConfig, _ *slog.Logger, _ ban.BanManager, _ *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		return blockingRunner, nil
+	}
+
+	node, err := echowarp.NewNode(cfg, echowarp.WithRunnerFactory(factory))
+	require.NoError(t, err)
+
+	go func() {
+		_ = node.Start(context.Background())
+	}()
+	<-blockingRunner.started
+	defer func() { _ = node.Stop() }()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	apiServer := NewAPIServer(node, "127.0.0.1:0", "", logger, nil, nil, false)
+	apiServer.initMiddleware()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/connect", apiServer.handleConnect)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	body := `{"address":"127.0.0.1"}`
+	resp, err := http.Post(ts.URL+"/api/v1/connect", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Contains(t, result.Error, "already running")
+}
+
+// TestHandleDisconnect asserts that POST /api/v1/disconnect is routed through
+// the same stop path as POST /api/v1/stop. With an idle node it must return
+// 409 (node not running) — the error body is identical to /stop.
+func TestHandleDisconnect(t *testing.T) {
+	_, ts := setupTestHandlersServer(t)
+
+	resp, err := http.Post(ts.URL+"/api/v1/disconnect", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Contains(t, result.Error, "not running")
+}
+
+// TestHandleDisconnectStopsRunningNode asserts that POST /api/v1/disconnect
+// successfully stops a running node — exercising the happy path of the
+// client-side semantic alias.
+func TestHandleDisconnectStopsRunningNode(t *testing.T) {
+	cfg := echowarp.NodeConfig{
+		Mode:       echowarp.ModeClient,
+		Port:       0,
+		SampleRate: 48000,
+		Channels:   1,
+	}
+
+	blockingRunner := &blockingTestRunner{started: make(chan struct{})}
+	factory := func(_ echowarp.NodeConfig, _ *slog.Logger, _ ban.BanManager, _ *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		return blockingRunner, nil
+	}
+	node, err := echowarp.NewNode(cfg, echowarp.WithRunnerFactory(factory))
+	require.NoError(t, err)
+
+	go func() { _ = node.Start(context.Background()) }()
+	<-blockingRunner.started
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	apiServer := NewAPIServer(node, "127.0.0.1:0", "", logger, nil, nil, false)
+	apiServer.initMiddleware()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/disconnect", apiServer.handleDisconnect)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/disconnect", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]string
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "stopped", result["status"])
 }

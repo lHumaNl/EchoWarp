@@ -230,6 +230,98 @@ func (s *APIServer) handleStart(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// connectRequest is the body for POST /api/v1/connect.
+// It configures the node in client mode and starts it. Either Address or
+// Discover must be set. Discover triggers mDNS auto-discovery (single server).
+type connectRequest struct {
+	Address  string  `json:"address,omitempty"`   // Target server address.
+	Port     int     `json:"port,omitempty"`      // Target TCP port (default 4415 from current cfg).
+	Password string  `json:"password,omitempty"`  // Authentication password.
+	DeviceID *uint32 `json:"device_id,omitempty"` // Audio device ID.
+	Nickname string  `json:"nickname,omitempty"`  // Chat display name.
+	Discover bool    `json:"discover,omitempty"`  // Auto-discover server via mDNS.
+}
+
+// handleConnect configures the node in client mode and starts it. This is the
+// client-side counterpart of handleStart: useful when the daemon was started
+// idle (no explicit mode) and the caller wants to switch to client mode on
+// demand — e.g., the Decky plugin connecting to a LAN server.
+//
+// Returns:
+//   - 400 if neither address nor discover is set.
+//   - 409 if the node is already running.
+//   - 500 if Node.Start() fails synchronously within 2s.
+//   - 202 if the node is still starting after 2s (ongoing in background).
+//   - 200 on fast successful start.
+func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
+	var req connectRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+	}
+
+	if req.Address == "" && !req.Discover {
+		writeError(w, http.StatusBadRequest, "address or discover must be set")
+		return
+	}
+
+	if s.node.Status() != echowarp.StatusIdle && s.node.Status() != echowarp.StatusStopped {
+		writeError(w, http.StatusConflict, "already running")
+		return
+	}
+
+	cfg := s.node.Config()
+	cfg.Mode = echowarp.ModeClient
+	if req.Address != "" {
+		cfg.Address = req.Address
+	}
+	if req.Port != 0 {
+		cfg.Port = req.Port
+	}
+	if req.Password != "" {
+		cfg.Password = req.Password
+	}
+	if req.DeviceID != nil {
+		cfg.DeviceID = req.DeviceID
+	}
+	if req.Nickname != "" {
+		cfg.Nickname = req.Nickname
+	}
+
+	if err := s.node.Reconfigure(cfg); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.node.Start(context.Background())
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "connected"})
+	case <-time.After(2 * time.Second):
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+	case <-r.Context().Done():
+		writeError(w, http.StatusRequestTimeout, "request canceled")
+	}
+}
+
+// handleDisconnect is a semantic alias for handleStop used by client-side
+// callers. It delegates to the same stop logic — the distinction is purely
+// for API clarity (Decky plugin disconnects from a server vs. stopping a
+// running server).
+func (s *APIServer) handleDisconnect(w http.ResponseWriter, r *http.Request) {
+	s.handleStop(w, r)
+}
+
 func (s *APIServer) handleStop(w http.ResponseWriter, r *http.Request) {
 	if s.node.Status() == echowarp.StatusStopped || s.node.Status() == echowarp.StatusIdle {
 		writeError(w, http.StatusConflict, "node not running")

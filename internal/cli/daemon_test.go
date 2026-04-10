@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/lHumaNl/echowarp/internal/app"
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/daemon"
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
@@ -1284,5 +1285,150 @@ log_level: warn
 	// Log level: config file (warn) should be used (no env var or CLI override)
 	if cfg.LogLevel != "warn" {
 		t.Errorf("expected log level 'warn' from config file, got %s", cfg.LogLevel)
+	}
+}
+
+// TestDaemonStartCommand_ClientModeFlags asserts that phase-2 client-mode
+// flags are registered on `daemon start` and carry the spec defaults.
+func TestDaemonStartCommand_ClientModeFlags(t *testing.T) {
+	cmd := newDaemonStartCmd()
+	flags := cmd.Flags()
+
+	for _, name := range []string{"mode", "address", "discover", "nickname",
+		"auto-reconnect", "auto-reconnect-attempts", "tls-insecure"} {
+		if flags.Lookup(name) == nil {
+			t.Errorf("daemon start command should have --%s flag", name)
+		}
+	}
+
+	mode, _ := flags.GetString("mode")
+	if mode != "server" {
+		t.Errorf("expected default mode 'server', got %q", mode)
+	}
+
+	autoReconnect, _ := flags.GetBool("auto-reconnect")
+	if !autoReconnect {
+		t.Error("expected default auto-reconnect=true")
+	}
+
+	attempts, _ := flags.GetInt("auto-reconnect-attempts")
+	if attempts != 5 {
+		t.Errorf("expected default auto-reconnect-attempts=5, got %d", attempts)
+	}
+}
+
+// TestCreateRunnerFactory_ClientMode asserts that createRunnerFactory routes
+// client-mode configs to NewClientApp rather than NewServerApp. The returned
+// runner's concrete type is the witness for the branch being taken — ensures
+// phase 2's ClientApp wiring is live and not shadowed by the server branch.
+func TestCreateRunnerFactory_ClientMode(t *testing.T) {
+	cfg := config.Config{
+		Mode:       config.ModeClient,
+		Port:       4415,
+		Address:    "127.0.0.1",
+		Password:   "test",
+		SampleRate: 48000,
+		Channels:   1,
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+
+	factory := createRunnerFactory(cfg, logger, nil)
+	if factory == nil {
+		t.Fatal("createRunnerFactory should return non-nil factory")
+	}
+
+	runner, err := factory(echowarp.NodeConfig{}, logger, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("factory should not error: %v", err)
+	}
+	if _, ok := runner.(*app.ClientApp); !ok {
+		t.Errorf("expected *app.ClientApp for client mode, got %T", runner)
+	}
+}
+
+// TestCreateRunnerFactory_ServerModeRoute asserts the default branch still
+// produces a ServerApp — regression guard so that the new switch doesn't
+// silently break the existing server path.
+func TestCreateRunnerFactory_ServerModeRoute(t *testing.T) {
+	cfg := config.Config{
+		Mode:       config.ModeServer,
+		Port:       4415,
+		Password:   "test",
+		SampleRate: 48000,
+		Channels:   1,
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	rateLimiter := auth.NewIPRateLimiter(5)
+
+	factory := createRunnerFactory(cfg, logger, rateLimiter)
+	runner, err := factory(echowarp.NodeConfig{}, logger, nil, nil, rateLimiter)
+	if err != nil {
+		t.Fatalf("factory should not error: %v", err)
+	}
+	if _, ok := runner.(*app.ServerApp); !ok {
+		t.Errorf("expected *app.ServerApp for server mode, got %T", runner)
+	}
+}
+
+// TestApplyDaemonClientOverrides asserts that applyDaemonClientOverrides
+// correctly copies client-mode CLI flags into the config and applies the
+// documented defaults when flags are unset.
+func TestApplyDaemonClientOverrides(t *testing.T) {
+	cmd := newDaemonStartCmd()
+	_ = cmd.Flags().Set("address", "10.0.0.5")
+	_ = cmd.Flags().Set("nickname", "alice")
+	_ = cmd.Flags().Set("tls-insecure", "true")
+
+	cfg := config.Config{Mode: config.ModeServer}
+	applyDaemonClientOverrides(cmd, &cfg)
+
+	if cfg.Mode != config.ModeClient {
+		t.Errorf("expected mode=client, got %q", cfg.Mode)
+	}
+	if cfg.Address != "10.0.0.5" {
+		t.Errorf("expected address=10.0.0.5, got %q", cfg.Address)
+	}
+	if cfg.Nickname != "alice" {
+		t.Errorf("expected nickname=alice, got %q", cfg.Nickname)
+	}
+	if !cfg.TLSInsecure {
+		t.Error("expected tls-insecure=true")
+	}
+	// auto-reconnect default should kick in (flag not Changed).
+	if !cfg.AutoReconnect {
+		t.Error("expected auto-reconnect default=true")
+	}
+	if cfg.AutoReconnectAttempts != 5 {
+		t.Errorf("expected auto-reconnect-attempts default=5, got %d", cfg.AutoReconnectAttempts)
+	}
+}
+
+// TestRunDaemonStart_ClientModeMissingAddress asserts that `daemon start
+// --mode client` without --address or --discover fails validation up-front
+// instead of booting a half-configured client.
+func TestRunDaemonStart_ClientModeMissingAddress(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "daemon.pid")
+	logFile := filepath.Join(tmpDir, "daemon.log")
+
+	cmd := newDaemonStartCmd()
+	_ = cmd.Flags().Set("mode", "client")
+	_ = cmd.Flags().Set("password", "test")
+	_ = cmd.Flags().Set("pid-file", pidFile)
+	_ = cmd.Flags().Set("log-file", logFile)
+
+	err := runDaemonStart(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for client mode without --address/--discover")
+	}
+	// The specific error phrase must mention --address/--discover so CLI users
+	// can self-serve without reading the source.
+	if !bytes.Contains([]byte(err.Error()), []byte("address")) &&
+		!bytes.Contains([]byte(err.Error()), []byte("discover")) {
+		t.Errorf("error should mention --address or --discover: %v", err)
 	}
 }

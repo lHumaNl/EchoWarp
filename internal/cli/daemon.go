@@ -54,6 +54,13 @@ func newDaemonStartCmd() *cobra.Command {
 		RunE:  runDaemonStart,
 	}
 
+	cmd.Flags().String("mode", "server", "Daemon mode: server or client")
+	cmd.Flags().StringP("address", "a", "", "Server address to connect to (client mode)")
+	cmd.Flags().Bool("discover", false, "Auto-discover server via mDNS (client mode)")
+	cmd.Flags().StringP("nickname", "n", "", "Chat display name (client mode)")
+	cmd.Flags().Bool("auto-reconnect", true, "Auto-reconnect after server disconnect (client mode)")
+	cmd.Flags().Int("auto-reconnect-attempts", 5, "Max auto-reconnect attempts (client mode, 0=infinite)")
+	cmd.Flags().Bool("tls-insecure", false, "Accept self-signed TLS certificates (client mode)")
 	cmd.Flags().IntP("port", "p", 4415, "TCP port for signaling")
 	cmd.Flags().UintP("device", "d", 0, "Audio device ID")
 	cmd.Flags().StringP("password", "P", "", "Password for authentication")
@@ -140,9 +147,28 @@ func setupDaemon(cmd *cobra.Command) (*daemon.Daemon, config.Config, *slog.Logge
 		return nil, config.Config{}, nil, err
 	}
 
-	cfg, err := loadConfig(cmd, config.ModeServer)
+	// Determine daemon mode: --mode flag chooses between server and client loading.
+	modeStr, _ := cmd.Flags().GetString("mode")
+	loadMode := config.ModeServer
+	if modeStr == string(config.ModeClient) {
+		loadMode = config.ModeClient
+	}
+
+	cfg, err := loadConfig(cmd, loadMode)
 	if err != nil {
 		return nil, config.Config{}, nil, err
+	}
+
+	// Apply client-specific overrides when running in client mode. In server
+	// mode these flags are silently ignored (not fail) per phase 2 spec.
+	if loadMode == config.ModeClient {
+		applyDaemonClientOverrides(cmd, &cfg)
+		if cfg.Address == "" {
+			discover, _ := cmd.Flags().GetBool("discover")
+			if !discover {
+				return nil, config.Config{}, nil, fmt.Errorf("client mode requires --address or --discover")
+			}
+		}
 	}
 
 	if errs := cfg.Validate(); len(errs) > 0 {
@@ -379,6 +405,38 @@ func convertToNodeConfig(cfg config.Config) echowarp.NodeConfig {
 
 func createRunnerFactory(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter) echowarp.RunnerFactory {
 	return func(_ echowarp.NodeConfig, _ *slog.Logger, banMgr ban.BanManager, tlsConf *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
-		return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter), nil
+		switch cfg.Mode {
+		case config.ModeClient:
+			return app.NewClientApp(cfg, logger, tlsConf), nil
+		default:
+			return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter), nil
+		}
+	}
+}
+
+// applyDaemonClientOverrides applies client-specific CLI flags to the config when
+// the daemon is running in client mode. Called only from setupDaemon; server mode
+// silently skips these overrides so the same binary/flags work for both modes.
+func applyDaemonClientOverrides(cmd *cobra.Command, cfg *config.Config) {
+	cfg.Mode = config.ModeClient
+	if cmd.Flags().Changed("address") {
+		cfg.Address, _ = cmd.Flags().GetString("address")
+	}
+	if cmd.Flags().Changed("nickname") {
+		cfg.Nickname, _ = cmd.Flags().GetString("nickname")
+	}
+	if cmd.Flags().Changed("auto-reconnect") {
+		cfg.AutoReconnect, _ = cmd.Flags().GetBool("auto-reconnect")
+	} else {
+		// Default for client mode: enable auto-reconnect (spec default=true).
+		cfg.AutoReconnect = true
+	}
+	if cmd.Flags().Changed("auto-reconnect-attempts") {
+		cfg.AutoReconnectAttempts, _ = cmd.Flags().GetInt("auto-reconnect-attempts")
+	} else if cfg.AutoReconnectAttempts == 0 {
+		cfg.AutoReconnectAttempts = 5
+	}
+	if cmd.Flags().Changed("tls-insecure") {
+		cfg.TLSInsecure, _ = cmd.Flags().GetBool("tls-insecure")
 	}
 }
