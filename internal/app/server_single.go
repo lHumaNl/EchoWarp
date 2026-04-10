@@ -544,8 +544,10 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 	needsIntercept := s.aec != nil || (s.conference != nil && clientID != "") || muteIncomingFlag != nil
 
 	if !needsIntercept {
-		// Simple path: decoder → JitterBuffer → player.
-		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone)
+		// Simple path: decoder → JitterBuffer → player. Server-mode
+		// has no single "incoming stream" to mute via MuteController,
+		// so pass nil.
+		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone, nil)
 		return
 	}
 
@@ -613,7 +615,7 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 		}
 	}()
 
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil)
 	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone)
 
 	s.logger.Info("Jitter buffer enabled (intercept path)",

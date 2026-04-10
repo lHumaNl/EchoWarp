@@ -248,6 +248,8 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/recording/start", s.handleRecordingStart)
 	mux.HandleFunc("POST /api/v1/recording/stop", s.handleRecordingStop)
 	mux.HandleFunc("GET /api/v1/recording/status", s.handleRecordingStatus)
+	mux.HandleFunc("POST /api/v1/mute", s.handleMuteToggle)
+	mux.HandleFunc("POST /api/v1/discovery/publish", s.handleDiscoveryPublish)
 	mux.HandleFunc("GET /ws/v1/events", s.handleWebSocket)
 	mux.Handle("GET /metrics", promhttp.Handler())
 

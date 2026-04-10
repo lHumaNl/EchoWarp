@@ -110,6 +110,15 @@ type ClientApp struct {
 	// The capture pipeline checks this and drops encoded frames when true.
 	serverMutedIncoming atomic.Bool
 
+	// incomingMuted is toggled via MuteController.SetMuted (daemon API
+	// POST /api/v1/mute). When set, the jitter playback pump zeros
+	// decoded frames before writing them to the playback device — the
+	// pipeline keeps running so timing stays stable and unmute is
+	// instantaneous. Distinct from serverMutedIncoming which is the
+	// server-initiated capture-side mute exposed by the peer_mute
+	// control message.
+	incomingMuted atomic.Bool
+
 	// pauseCh receives pause toggle requests from TUI.
 	// true=pause, false=resume. The client sends pause/resume control messages to the server.
 	pauseCh <-chan bool
@@ -827,8 +836,11 @@ func (c *ClientApp) newServerMuteIncomingFilterCh(ctx context.Context, dst chan<
 
 // setupReceiveAudioPipeline creates audio playback pipeline for normal mode (client receives).
 // Uses JitterBuffer for adaptive buffering based on network conditions.
+// The client's incoming-mute flag (toggled via SetMuted / Node.SetMuted from
+// the daemon API) is passed to the pump so mute takes effect without
+// tearing down the playback device.
 func (c *ClientApp) setupReceiveAudioPipeline(ctx context.Context, peer transport.PeerManager, audioDone chan error) error {
-	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone)
+	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted)
 	return nil
 }
 

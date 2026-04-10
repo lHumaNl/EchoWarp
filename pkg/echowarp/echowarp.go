@@ -1112,6 +1112,89 @@ func (n *Node) recordingController() (RecordingController, error) {
 	return ctrl, nil
 }
 
+// SetMuted toggles local mute of the incoming audio stream on the running
+// runner. Intended for client-mode runners — when muted is true, decoded
+// audio frames are dropped before reaching the playback device; when
+// false, playback resumes. Returns ErrNotRunning when the node is not
+// running and ErrInternalState when the runner does not implement
+// MuteController (i.e. server-mode runners). The operation is idempotent.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's
+// SetMuted which is expected to perform a single atomic store.
+func (n *Node) SetMuted(muted bool) error {
+	ctrl, err := n.muteController()
+	if err != nil {
+		return err
+	}
+	return ctrl.SetMuted(muted)
+}
+
+// SetDiscoveryPublish toggles runtime mDNS service publishing on the
+// running runner. Intended for server-mode runners — a client has nothing
+// to advertise. When enabled is true the runner starts a zeroconf
+// publisher goroutine; when false it cancels the publisher's context and
+// waits for it to exit. Returns ErrNotRunning when the node is not
+// running and ErrInternalState when the runner does not implement
+// DiscoveryPublisher (i.e. client-mode runners). The operation is
+// idempotent — enabling an already-published service or disabling an
+// already-stopped one is a no-op that returns nil.
+//
+// Safe for concurrent use.
+func (n *Node) SetDiscoveryPublish(enabled bool) error {
+	pub, err := n.discoveryPublisher()
+	if err != nil {
+		return err
+	}
+	return pub.SetDiscoveryPublish(enabled)
+}
+
+// muteController returns the current runner as a MuteController or a
+// structured error explaining why it cannot serve a mute command.
+// Mirrors recordingController / banManagerRunner / participantCommandReceiver
+// so all optional-interface endpoints share the same error taxonomy
+// (ErrNotRunning vs ErrInternalState).
+func (n *Node) muteController() (MuteController, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before toggling mute")
+	}
+	ctrl, ok := runner.(MuteController)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support mute control").
+			WithSuggestion("Use a runner implementation that implements MuteController (e.g. ClientApp)")
+	}
+	return ctrl, nil
+}
+
+// discoveryPublisher returns the current runner as a DiscoveryPublisher
+// or a structured error explaining why it cannot serve a discovery
+// toggle command. Mirrors muteController / recordingController so the
+// error taxonomy stays uniform across all optional-interface endpoints.
+func (n *Node) discoveryPublisher() (DiscoveryPublisher, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before toggling discovery publishing")
+	}
+	pub, ok := runner.(DiscoveryPublisher)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support discovery publishing").
+			WithSuggestion("Use a runner implementation that implements DiscoveryPublisher (e.g. ServerApp)")
+	}
+	return pub, nil
+}
+
 // Devices returns a list of all available audio input and output devices on the system.
 // This is a package-level convenience function equivalent to Node.Devices().
 func Devices() ([]AudioDevice, error) {

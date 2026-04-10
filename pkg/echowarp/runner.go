@@ -148,6 +148,51 @@ type RecordingController interface {
 	RecordingStatus() RecordingStatus
 }
 
+// MuteController is an optional interface that Runner implementations may
+// satisfy to expose a simple on/off toggle for the incoming audio stream
+// via the public Node API (Node.SetMuted). The interface is intended for
+// client-mode runners — "mute" in this context means "drop every decoded
+// audio frame that would otherwise be handed to the playback device", not
+// "tell the peer to stop sending" (that is a separate control message
+// handled via the per-peer mute path). Server-mode runners typically do
+// not implement this interface because a server has no single "incoming"
+// stream to mute.
+//
+// Runners that do not implement this interface cause Node.SetMuted to
+// return an ErrInternalState-class error. Implementations must be safe
+// to call concurrently with Run(ctx) and must return quickly — the
+// intended implementation is a single atomic store.
+type MuteController interface {
+	// SetMuted toggles local mute of the incoming audio stream. When
+	// muted is true, decoded frames are dropped before reaching the
+	// playback device; when false, audio resumes immediately. The
+	// operation must be idempotent: SetMuted(true) twice is equivalent
+	// to SetMuted(true) once.
+	SetMuted(muted bool) error
+}
+
+// DiscoveryPublisher is an optional interface that Runner implementations
+// may satisfy to expose a runtime on/off toggle for mDNS service
+// publishing via the public Node API (Node.SetDiscoveryPublish). The
+// interface is intended for server-mode runners — a client has nothing
+// to advertise.
+//
+// Runners that do not implement this interface cause
+// Node.SetDiscoveryPublish to return an ErrInternalState-class error.
+// Implementations must be safe to call concurrently with Run(ctx); the
+// canonical implementation spawns/tears down a background zeroconf
+// publisher goroutine under its own mutex and never blocks the caller
+// on network I/O.
+type DiscoveryPublisher interface {
+	// SetDiscoveryPublish starts or stops mDNS publishing. When enabled
+	// is true and publishing is not currently active, the runner starts
+	// a new publisher; when enabled is false and publishing is active,
+	// the runner cancels the publisher's context and waits for it to
+	// exit. Both directions are idempotent: calling SetDiscoveryPublish
+	// with the current state is a no-op and returns nil.
+	SetDiscoveryPublish(enabled bool) error
+}
+
 // RunnerFactory creates a Runner instance based on configuration.
 // This function bridges the pkg/echowarp package with internal/app implementations,
 // avoiding direct imports that would break the package boundary.

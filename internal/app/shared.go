@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -107,7 +108,12 @@ func decodeAudioStreamToJitter(logger *slog.Logger, inCh <-chan []byte, dec *aud
 // to synchronize playback phase with incoming packet timing.
 // Periodically calls AdaptiveAdjust based on the observed underrun rate, with
 // aggressive adaptation during the initial warmup period.
-func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}) {
+// jitterPlaybackPump drains decoded frames from the jitter buffer on a 20ms
+// tick and forwards them to playbackCh. When muteFlag is non-nil and set,
+// the pump substitutes a silence frame of identical length so the downstream
+// player keeps its timing (bypassing it entirely would cause underruns and
+// audible pops on unmute).
+func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool) {
 	defer close(playbackCh)
 
 	// Create a dedicated PLC decoder to generate concealment frames on underrun.
@@ -130,6 +136,11 @@ func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh 
 		default:
 			firstFrame = jb.Read()
 			if firstFrame != nil {
+				if muteFlag != nil && muteFlag.Load() {
+					for i := range firstFrame {
+						firstFrame[i] = 0
+					}
+				}
 				select {
 				case playbackCh <- firstFrame:
 				case <-ctx.Done():
@@ -159,6 +170,11 @@ pumpLoop:
 				frame := jb.Read()
 				if frame == nil {
 					return
+				}
+				if muteFlag != nil && muteFlag.Load() {
+					for i := range frame {
+						frame[i] = 0
+					}
 				}
 				select {
 				case playbackCh <- frame:
@@ -195,6 +211,17 @@ pumpLoop:
 					// Re-encode is expensive; instead we just accept that PLC state
 					// won't be perfect. The PLC decoder generates smooth fade-out
 					// which is still much better than hard silence cuts.
+				}
+				// Local mute: zero the frame samples in place so the
+				// player keeps its timing but nothing audible reaches
+				// the speaker. Done here rather than via a separate
+				// filter stage because the decoded frame is already a
+				// freshly-allocated slice owned by this goroutine, so
+				// in-place mutation is safe.
+				if muteFlag != nil && muteFlag.Load() {
+					for i := range frame {
+						frame[i] = 0
+					}
 				}
 				select {
 				case playbackCh <- frame:
@@ -356,8 +383,12 @@ func mixLocalInput(ctx context.Context, logger *slog.Logger, sampleRate, channel
 }
 
 // startJitteredPlayback creates a JitterBuffer, wires decoder→JB→player pipeline.
-// maxFrames is the upper limit for adaptive buffer growth.
-func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error) {
+// maxFrames is the upper limit for adaptive buffer growth. When muteFlag is
+// non-nil, the pump substitutes silence for decoded frames whenever the flag
+// is set — this is how Node.SetMuted (MuteController) drops incoming audio
+// without tearing down the playback device. Pass nil for server-mode callers
+// where there is no single "incoming stream" to mute.
+func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool) {
 	targetFrames := cfg.EffectiveAudioBufferFrames()
 	maxFrames := targetFrames * 3
 	if maxFrames < 10 {
@@ -375,7 +406,7 @@ func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.
 	doneCh := make(chan struct{})
 
 	setupAudioDecoderWithJitter(logger, peer, cfg.SampleRate, cfg.Channels, jb, spectrum, level, doneCh)
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag)
 	startAudioPlayer(ctx, logger, cfg, playbackCh, audioDone)
 
 	logger.Info("Jitter buffer enabled",

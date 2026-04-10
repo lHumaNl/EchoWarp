@@ -90,6 +90,13 @@ type ServerApp struct {
 	// that hold s.mu do not need to coordinate here.
 	recState recordingAdapterState
 
+	// discoveryState owns the on/off lifecycle of the mDNS publisher
+	// goroutine spawned by SetDiscoveryPublish (phase 5d). The state
+	// lives next to recState for symmetry and to keep toggle adapters
+	// grouped — see toggles_adapter.go for the SetDiscoveryPublish
+	// implementation.
+	discoveryState discoveryAdapterState
+
 	// Callback invoked when client count changes (for probe/session info).
 	onClientCount func(int)
 
@@ -366,6 +373,12 @@ func (s *ServerApp) GetChatHub() *ChatHub {
 // In single-client mode (MaxClients <= 1), handles one client at a time sequentially.
 // In multi-client mode (MaxClients > 1), accepts concurrent connections up to MaxClients.
 func (s *ServerApp) Run(ctx context.Context) error {
+	// Ensure any mDNS publisher started via the daemon API
+	// (SetDiscoveryPublish) is torn down when Run exits, so a Node.Stop
+	// followed by a fresh Node.Start does not leak the zeroconf
+	// goroutine.
+	defer func() { _ = s.SetDiscoveryPublish(false) }() //nolint:errcheck // adapter never errors on disable
+
 	// Initialize AEC processor for duplex mode.
 	if s.cfg.AEC && (s.cfg.Duplex || s.cfg.Conference) {
 		s.aec = audio.NewAECProcessor(audio.DefaultAECConfig())
