@@ -20,6 +20,7 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
 // newDaemonCmd creates the "daemon" command group for daemon lifecycle management.
@@ -468,11 +469,41 @@ func createRunnerFactory(cfg config.Config, logger *slog.Logger, rateLimiter *au
 			}
 			handler.Bus().EmitChatMessage(msg.From, msg.To, msg.Text, msg.TS)
 		}
+		// statsHook forwards every stats tick from the runner into
+		// Node.UpdateStats so GET /api/v1/stats returns non-zero bytes
+		// during streaming. Resolved lazily through nodeRef because the
+		// runner factory is constructed before NewNode returns.
+		statsHook := func(stats transport.ConnectionStats) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			(*nodeRef).UpdateStats(stats)
+		}
+		// clientJoinHook / clientLeaveHook mirror the runner's register /
+		// unregister events into Node.AddClient / Node.RemoveClient so
+		// GET /api/v1/clients returns the real live roster.
+		clientJoinHook := func(clientID, remoteAddr string) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			(*nodeRef).AddClient(echowarp.ClientInfo{ID: clientID, Address: remoteAddr})
+		}
+		clientLeaveHook := func(clientID string) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			(*nodeRef).RemoveClient(clientID)
+		}
 		switch cfg.Mode {
 		case config.ModeClient:
-			return app.NewClientApp(cfg, logger, tlsConf).WithChatEventHook(chatHook), nil
+			return app.NewClientApp(cfg, logger, tlsConf).
+				WithChatEventHook(chatHook).
+				WithStatsHook(statsHook), nil
 		default:
-			return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter).WithChatEventHook(chatHook), nil
+			return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter).
+				WithChatEventHook(chatHook).
+				WithStatsHook(statsHook).
+				WithClientTrackingHooks(clientJoinHook, clientLeaveHook), nil
 		}
 	}
 }

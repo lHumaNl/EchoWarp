@@ -143,6 +143,21 @@ type ServerApp struct {
 	// Protected by mu (same mutex as clients).
 	sessions map[string]*sessionEntry
 
+	// statsHook is an optional callback invoked on every stats tick with the
+	// same ConnectionStats value that would be sent to statsCh. The daemon
+	// wires it to Node.UpdateStats so GET /api/v1/stats returns live numbers
+	// without requiring a TUI statsCh. Safe to leave nil; additive to the
+	// TUI path — both sinks receive the same values.
+	statsHook func(transport.ConnectionStats)
+
+	// onClientJoin / onClientLeave are optional callbacks invoked on every
+	// client register/unregister event in both single- and multi-client
+	// modes. The daemon wires them to Node.AddClient/Node.RemoveClient so
+	// GET /api/v1/clients returns the real live roster. Safe to leave nil;
+	// additive to the TUI path.
+	onClientJoin  func(clientID, remoteAddr string)
+	onClientLeave func(clientID string)
+
 	// deviceCmdCh is the internal channel into which device control commands
 	// (mute/volume) are pushed by HandleDeviceCommand. A consumer goroutine
 	// that actually applies the commands to the mixer is wired up by the CLI
@@ -229,6 +244,32 @@ func (s *ServerApp) DeviceCommandChannel() <-chan DeviceCommand {
 func (s *ServerApp) WithStatsChannels(statsCh chan<- transport.ConnectionStats, errCh chan<- error) *ServerApp {
 	s.statsCh = statsCh
 	s.errCh = errCh
+	return s
+}
+
+// WithStatsHook installs a callback invoked on every stats tick (and on the
+// final "disconnected" stat) with the same ConnectionStats value that would
+// be delivered to the TUI statsCh. Primarily used by the daemon to forward
+// live stats into Node.UpdateStats so GET /api/v1/stats reflects non-zero
+// bytes during streaming. Safe to pass nil (equivalent to unset); additive
+// to the TUI path — both sinks receive the same values.
+func (s *ServerApp) WithStatsHook(fn func(transport.ConnectionStats)) *ServerApp {
+	s.statsHook = fn
+	return s
+}
+
+// WithClientTrackingHooks installs callbacks invoked on every client
+// register / unregister event in both single- and multi-client modes. The
+// daemon wires these to Node.AddClient / Node.RemoveClient so
+// GET /api/v1/clients returns the real live roster. Safe to pass nil
+// (equivalent to unset); additive to the TUI path — the TUI observes the
+// same events via the onClientCount callback.
+func (s *ServerApp) WithClientTrackingHooks(
+	onJoin func(clientID, remoteAddr string),
+	onLeave func(clientID string),
+) *ServerApp {
+	s.onClientJoin = onJoin
+	s.onClientLeave = onLeave
 	return s
 }
 

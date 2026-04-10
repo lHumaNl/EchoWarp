@@ -48,6 +48,13 @@ type ClientApp struct {
 	statsCh chan<- transport.ConnectionStats
 	errCh   chan<- error
 
+	// statsHook is an optional callback invoked on every stats tick with
+	// the same ConnectionStats value that would be sent to statsCh. The
+	// daemon wires it to Node.UpdateStats so GET /api/v1/stats returns
+	// live bytes without requiring a TUI statsCh. Additive to the TUI
+	// path; both sinks receive the same values.
+	statsHook func(transport.ConnectionStats)
+
 	// Graceful stop: closed when TUI requests shutdown (before context cancellation).
 	stopCh <-chan struct{}
 
@@ -196,6 +203,17 @@ func (c *ClientApp) DeviceCommandChannel() <-chan DeviceCommand {
 func (c *ClientApp) WithStatsChannels(statsCh chan<- transport.ConnectionStats, errCh chan<- error) *ClientApp {
 	c.statsCh = statsCh
 	c.errCh = errCh
+	return c
+}
+
+// WithStatsHook installs a callback invoked on every stats tick (and on the
+// final "disconnected" stat) with the same ConnectionStats value that would
+// be delivered to the TUI statsCh. Primarily used by the daemon to forward
+// live stats into Node.UpdateStats so GET /api/v1/stats reflects non-zero
+// bytes during streaming. Safe to pass nil (equivalent to unset); additive
+// to the TUI path — both sinks receive the same values.
+func (c *ClientApp) WithStatsHook(fn func(transport.ConnectionStats)) *ClientApp {
+	c.statsHook = fn
 	return c
 }
 
@@ -424,18 +442,33 @@ func (c *ClientApp) flushRecordingHeaders(ctx context.Context) {
 	}
 }
 
-// reportStats periodically sends connection statistics to the TUI stats channel.
-// Started immediately when the message loop begins (before DC ready), so the TUI
-// transitions to the streaming screen as soon as PeerConnection reaches "connected".
+// publishStats forwards a ConnectionStats snapshot to both the TUI statsCh
+// (if configured) and the API statsHook (if configured). Non-blocking for
+// the channel sink — the fallback drops the value when the TUI is not
+// draining, matching the original reportStats behavior.
+func (c *ClientApp) publishStats(stats transport.ConnectionStats) {
+	if c.statsCh != nil {
+		select {
+		case c.statsCh <- stats:
+		default:
+		}
+	}
+	if c.statsHook != nil {
+		c.statsHook(stats)
+	}
+}
+
+// reportStats periodically sends connection statistics to all configured
+// sinks (TUI statsCh and/or API statsHook). Started immediately when the
+// message loop begins (before DC ready), so the TUI transitions to the
+// streaming screen as soon as PeerConnection reaches "connected" and the
+// daemon's Node.Stats() reflects live bytes.
 func (c *ClientApp) reportStats(ctx context.Context, peer transport.PeerManager) {
-	if c.statsCh == nil {
+	if c.statsCh == nil && c.statsHook == nil {
 		return
 	}
 	// Send initial stat immediately.
-	select {
-	case c.statsCh <- peer.GetStats():
-	default:
-	}
+	c.publishStats(peer.GetStats())
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -443,23 +476,17 @@ func (c *ClientApp) reportStats(ctx context.Context, peer transport.PeerManager)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			select {
-			case c.statsCh <- peer.GetStats():
-			default:
-			}
+			c.publishStats(peer.GetStats())
 		}
 	}
 }
 
-// sendDisconnected sends a final "disconnected" stats update to the TUI.
+// sendDisconnected sends a final "disconnected" stats update to all sinks.
 func (c *ClientApp) sendDisconnected() {
-	if c.statsCh == nil {
+	if c.statsCh == nil && c.statsHook == nil {
 		return
 	}
-	select {
-	case c.statsCh <- transport.ConnectionStats{State: "disconnected"}:
-	default:
-	}
+	c.publishStats(transport.ConnectionStats{State: "disconnected"})
 }
 
 // Run connects to the server and starts streaming. It blocks until the context
@@ -869,7 +896,8 @@ func (c *ClientApp) runMessageLoop(ctx context.Context, signaler transport.Signa
 
 	// Start stats reporting immediately so the TUI can transition to the streaming
 	// screen as soon as the PeerConnection reaches "connected" state.
-	if c.statsCh != nil {
+	// Also runs in daemon mode when only a statsHook is configured.
+	if c.statsCh != nil || c.statsHook != nil {
 		statsWg.Add(1)
 		go func() {
 			defer statsWg.Done()

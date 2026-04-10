@@ -193,6 +193,32 @@ type DiscoveryPublisher interface {
 	SetDiscoveryPublish(enabled bool) error
 }
 
+// PauseController is an optional interface that Runner implementations may
+// satisfy to propagate Node-level Pause/Resume calls into the runner's audio
+// send pipeline. "Pause" in this context means "stop advancing the outgoing
+// audio frame counter" — the underlying pipeline stays wired so Resume is
+// instantaneous and timing stays aligned. Runners that do not implement this
+// interface cause Node.Pause/Node.Resume to fall back to state-only
+// transitions (for backwards compatibility with runners predating phase 6);
+// see echowarp.go Pause/Resume for the exact semantics.
+//
+// Implementations must:
+//   - Be safe to call concurrently with Run(ctx). The canonical
+//     implementation is a single atomic.Bool store plus an optional
+//     best-effort notification to already-connected peers.
+//   - Be idempotent in both directions: SetPaused(true) twice is
+//     equivalent to SetPaused(true) once, and the same for false.
+//   - Return quickly — no blocking I/O. The Node wrapper holds no locks
+//     during the call, but the HTTP handler that triggered Pause/Resume
+//     is waiting for the result synchronously.
+type PauseController interface {
+	// SetPaused toggles the runner-level pause state. When paused is
+	// true the runner must stop advancing its outgoing audio frame
+	// counter (drop or skip encode at the earliest sensible point in
+	// the pipeline); when false it must resume immediately.
+	SetPaused(paused bool) error
+}
+
 // RunnerFactory creates a Runner instance based on configuration.
 // This function bridges the pkg/echowarp package with internal/app implementations,
 // avoiding direct imports that would break the package boundary.

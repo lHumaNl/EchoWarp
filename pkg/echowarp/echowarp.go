@@ -643,31 +643,85 @@ func (n *Node) setState(status NodeStatus) {
 
 // Pause temporarily suspends audio streaming. Only valid when status is Streaming.
 // Use Resume to continue streaming.
+//
+// When the current runner implements PauseController, Pause also forwards
+// the toggle into the runner so the outgoing audio frame counter actually
+// stops advancing. If the runner's SetPaused(true) returns an error the
+// state machine is rolled back to Streaming (and paused atomic cleared) so
+// the Node never lands in a half-paused state. Runners that do not
+// implement PauseController cause Pause to succeed with state-only
+// semantics — this preserves backwards compatibility with pre-phase-6
+// tests and the TUI path, where the runner observes the serverPauseCh/
+// pauseCh channel independently.
 func (n *Node) Pause() error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if !n.state.CanPause() {
-		return ewerrors.NewError(ewerrors.ErrInternalState, "Cannot pause: not streaming").
+		err := ewerrors.NewError(ewerrors.ErrInternalState, "Cannot pause: not streaming").
 			WithContext("status", string(n.status)).
 			WithSuggestion("Start streaming before pausing")
+		n.mu.Unlock()
+		return err
 	}
 	n.paused.Store(true)
 	n.setState(StatusPaused)
+	runner := n.runner
+	n.mu.Unlock()
+
+	if runner == nil {
+		return nil
+	}
+	ctrl, ok := runner.(PauseController)
+	if !ok {
+		return nil
+	}
+	if err := ctrl.SetPaused(true); err != nil {
+		// Roll back state so the node stays consistent.
+		n.mu.Lock()
+		n.paused.Store(false)
+		n.setState(StatusStreaming)
+		n.mu.Unlock()
+		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to pause runner")
+	}
 	return nil
 }
 
 // Resume continues audio streaming after being paused.
 // Only valid when status is Paused.
+//
+// Like Pause, Resume forwards the toggle into the runner when the current
+// runner implements PauseController, rolling the Node state back to
+// Paused if the runner's SetPaused(false) returns an error. Runners that
+// do not implement PauseController cause Resume to succeed with
+// state-only semantics.
 func (n *Node) Resume() error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if !n.state.CanResume() {
-		return ewerrors.NewError(ewerrors.ErrInternalState, "Cannot resume: not paused").
+		err := ewerrors.NewError(ewerrors.ErrInternalState, "Cannot resume: not paused").
 			WithContext("status", string(n.status)).
 			WithSuggestion("Pause the node before resuming")
+		n.mu.Unlock()
+		return err
 	}
 	n.paused.Store(false)
 	n.setState(StatusStreaming)
+	runner := n.runner
+	n.mu.Unlock()
+
+	if runner == nil {
+		return nil
+	}
+	ctrl, ok := runner.(PauseController)
+	if !ok {
+		return nil
+	}
+	if err := ctrl.SetPaused(false); err != nil {
+		// Roll back state so the node stays consistent.
+		n.mu.Lock()
+		n.paused.Store(true)
+		n.setState(StatusPaused)
+		n.mu.Unlock()
+		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to resume runner")
+	}
 	return nil
 }
 
