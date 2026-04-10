@@ -165,6 +165,13 @@ func NewAPIServerWithOptions(node *echowarp.Node, bindAddr string, token string,
 	return server
 }
 
+// WSHub returns the WebSocket hub used for broadcasting events to clients.
+// Exposed so external components (such as the EventBus → WS bridge) can push
+// events without going through an HTTP round trip.
+func (s *APIServer) WSHub() *WSHub {
+	return s.wsHub
+}
+
 // serverID returns the server UUID for the listening port, or "" if not yet generated.
 func (s *APIServer) serverID() string {
 	_, portStr, err := net.SplitHostPort(s.bindAddr)

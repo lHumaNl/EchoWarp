@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +29,13 @@ func setupTestHandlersServer(t *testing.T) (*APIServer, *httptest.Server) {
 		SampleRate: 48000,
 		Channels:   1,
 	}
-	node, err := echowarp.NewNode(cfg)
+	// Provide a no-op runner factory so node.Start() succeeds. Without it,
+	// Start returns a synchronous "no runner factory configured" error which
+	// handleStart now surfaces as HTTP 500 (see TestHandleStartErrorFeedback).
+	factory := func(_ echowarp.NodeConfig, _ *slog.Logger, _ ban.BanManager, _ *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		return &noopTestRunner{}, nil
+	}
+	node, err := echowarp.NewNode(cfg, echowarp.WithRunnerFactory(factory))
 	require.NoError(t, err)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -191,6 +198,53 @@ func (r *blockingTestRunner) Run(ctx context.Context) error {
 	close(r.started)
 	<-ctx.Done()
 	return nil
+}
+
+// noopTestRunner exits immediately without streaming. Used in the default
+// test server setup so node.Start() has something to launch.
+type noopTestRunner struct{}
+
+func (r *noopTestRunner) Run(_ context.Context) error { return nil }
+
+// TestHandleStartErrorFeedback asserts that POST /api/v1/start surfaces
+// synchronous Node.Start() errors as HTTP 500 with an error body. Prior to
+// the fix, handleStart used a fire-and-forget goroutine that discarded the
+// error and always returned 200, making start failures invisible to API
+// consumers such as the Decky plugin.
+func TestHandleStartErrorFeedback(t *testing.T) {
+	cfg := echowarp.NodeConfig{
+		Mode:       echowarp.ModeServer,
+		Port:       0,
+		SampleRate: 48000,
+		Channels:   1,
+	}
+	// Node with no runner factory — Node.Start() returns a synchronous error
+	// ("no runner factory configured") that the handler must propagate.
+	node, err := echowarp.NewNode(cfg)
+	require.NoError(t, err)
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	apiServer := NewAPIServer(node, "127.0.0.1:0", "", logger, nil, nil, false)
+	apiServer.initMiddleware()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/start", apiServer.handleStart)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/start", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode,
+		"start failure must be reported as 500, not 200")
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.Error, "error body must contain a message")
+	assert.Contains(t, strings.ToLower(result.Error), "runner",
+		"error should mention the missing runner factory")
 }
 
 func TestHandleStart_InvalidJSON(t *testing.T) {

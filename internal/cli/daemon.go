@@ -114,6 +114,12 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	apiServer := startAPIServer(ctx, node, flags, logger)
 	defer func() { _ = apiServer.Stop() }()
 
+	// Bridge EventBus lifecycle events to WebSocket clients so API consumers
+	// (Decky plugin, etc.) receive real-time status/connection/error updates.
+	if apiServer != nil && node.EventHandler() != nil {
+		go api.BridgeEventsToWS(ctx, node.EventHandler().Bus(), apiServer.WSHub(), logger)
+	}
+
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start node: %w", err)
 	}
@@ -246,6 +252,7 @@ func createNode(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRate
 	nodeCfg := convertToNodeConfig(cfg)
 	node, err := echowarp.NewNode(nodeCfg,
 		echowarp.WithLogger(logger),
+		echowarp.WithEventHandler(echowarp.NewEventHandler()),
 		echowarp.WithRunnerFactory(createRunnerFactory(cfg, logger, rateLimiter)),
 	)
 	if err != nil {

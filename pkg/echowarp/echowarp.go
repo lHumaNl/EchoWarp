@@ -374,6 +374,15 @@ type Node struct {
 	runnerDone chan struct{} // closed when runRunner goroutine exits
 }
 
+// EventHandler returns the EventHandler associated with the Node, or nil if no
+// handler was configured via WithEventHandler. The returned handler can be used
+// to subscribe to lifecycle events via its Bus().
+func (n *Node) EventHandler() *EventHandler {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.events
+}
+
 // NewNode creates a new Node with the given configuration and optional functional options.
 // The node starts in Idle status and requires Start() to begin streaming.
 func NewNode(cfg NodeConfig, opts ...Option) (*Node, error) {

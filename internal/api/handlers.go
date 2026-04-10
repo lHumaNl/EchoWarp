@@ -206,11 +206,28 @@ func (s *APIServer) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start the node in a goroutine and wait up to 2s for a synchronous error.
+	// If the node fails fast (e.g., missing runner factory, invalid config) the
+	// caller gets a 500 with the error. If the node is still starting after
+	// the grace period we return 202 Accepted and keep it running in the
+	// background — further status can be polled via GET /api/v1/status.
+	errCh := make(chan error, 1)
 	go func() {
-		_ = s.node.Start(context.Background()) //nolint:errcheck
+		errCh <- s.node.Start(context.Background())
 	}()
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+	select {
+	case err := <-errCh:
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+	case <-time.After(2 * time.Second):
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting"})
+	case <-r.Context().Done():
+		writeError(w, http.StatusRequestTimeout, "request canceled")
+	}
 }
 
 func (s *APIServer) handleStop(w http.ResponseWriter, r *http.Request) {

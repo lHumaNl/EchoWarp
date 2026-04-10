@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"nhooyr.io/websocket"        //nolint:staticcheck // migration to coder/websocket tracked separately
 	"nhooyr.io/websocket/wsjson" //nolint:staticcheck // migration to coder/websocket tracked separately
@@ -67,7 +68,7 @@ func (h *WSHub) Broadcast(event WSEvent) {
 	}
 
 	for conn := range h.clients {
-		ctx, cancel := context.WithTimeout(context.Background(), 5)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		err := conn.Write(ctx, websocket.MessageText, data) //nolint:staticcheck
 		cancel()
 		if err != nil {
