@@ -589,8 +589,19 @@ func parseDeviceID(r *http.Request, prefix string) (int, error) {
 	return id, nil
 }
 
-// handleDeviceMute toggles mute on a device.
-// TODO: implement when Node exposes per-device mute control.
+// handleDeviceMute sets the absolute mute state of a device.
+//
+// Response codes:
+//   - 200 on success (command successfully enqueued to the runner).
+//   - 400 on invalid device id or malformed JSON body.
+//   - 409 when the node is not running (no runner to receive the command).
+//   - 500 on any other error propagated from the runner (e.g. queue full).
+//
+// Note on task 013: the command is delivered to ServerApp/ClientApp's internal
+// device command channel. The consumer that actually applies it to the mixer
+// is wired up by task 013 — until that is complete, API calls reach the
+// channel but may be drained by a log-only consumer. The API itself returns
+// 200 only when the command is successfully queued.
 func (s *APIServer) handleDeviceMute(w http.ResponseWriter, r *http.Request) {
 	id, err := parseDeviceID(r, "/api/v1/devices")
 	if err != nil {
@@ -604,14 +615,23 @@ func (s *APIServer) handleDeviceMute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: call s.node.SetDeviceMute(id, req.Muted) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("device mute control not yet implemented (device_id=%d)", id),
+	if err := s.node.SetDeviceMute(id, req.Muted); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"device_id": id,
+		"muted":     req.Muted,
 	})
 }
 
-// handleDeviceVolume sets the volume for a device.
-// TODO: implement when Node exposes per-device volume control.
+// handleDeviceVolume sets the absolute volume multiplier of a device. Valid
+// range 0.0–1.5 (matching task 013 — the mixer caps volume at 1.5 to avoid
+// clipping).
+//
+// Response codes: see handleDeviceMute.
 func (s *APIServer) handleDeviceVolume(w http.ResponseWriter, r *http.Request) {
 	id, err := parseDeviceID(r, "/api/v1/devices")
 	if err != nil {
@@ -625,15 +645,32 @@ func (s *APIServer) handleDeviceVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Volume < 0.0 || req.Volume > 2.0 {
-		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 2.0")
+	if req.Volume < 0.0 || req.Volume > 1.5 {
+		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 1.5")
 		return
 	}
 
-	// TODO: call s.node.SetDeviceVolume(id, req.Volume) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("device volume control not yet implemented (device_id=%d)", id),
+	if err := s.node.SetDeviceVolume(id, req.Volume); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"device_id": id,
+		"volume":    req.Volume,
 	})
+}
+
+// deviceCommandStatus maps a Node.SetDevice* error into an HTTP status code.
+// Errors originating from an idle/stopped node map to 409 Conflict (the
+// caller must Start the node first); every other error maps to 500.
+func deviceCommandStatus(status echowarp.NodeStatus) int {
+	switch status {
+	case echowarp.StatusIdle, echowarp.StatusStopped:
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }
 
 // ── Conference ───────────────────────────────────────────────────────────────

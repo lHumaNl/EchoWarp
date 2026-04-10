@@ -948,22 +948,12 @@ func TestHandleDiscover_ZeroTimeout_UsesDefault(t *testing.T) {
 
 // ── Device Control tests ─────────────────────────────────────────────────────
 
-func TestHandleDeviceMute_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"muted": true}`)
-	resp, err := http.Post(ts.URL+"/api/v1/devices/1/mute", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
+// NOTE: TestHandleDeviceMute_Returns501 / TestHandleDeviceVolume_Returns501
+// removed in phase 4a — the 501 stub was replaced by a real implementation
+// that forwards the command to the runner's DeviceCommandReceiver. The new
+// coverage lives in device_control_test.go (TestHandleDeviceMuteImplemented
+// et al.), which asserts both the HTTP 200 response and that the command
+// reached the runner via channel inspection.
 
 func TestHandleDeviceMute_InvalidJSON(t *testing.T) {
 	_, ts := setupTestHandlersServer(t)
@@ -978,23 +968,6 @@ func TestHandleDeviceMute_InvalidJSON(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Contains(t, result.Error, "invalid JSON")
-}
-
-func TestHandleDeviceVolume_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"volume": 0.75}`)
-	resp, err := http.Post(ts.URL+"/api/v1/devices/2/volume", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
 }
 
 func TestHandleDeviceVolume_InvalidRange(t *testing.T) {

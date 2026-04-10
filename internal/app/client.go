@@ -123,6 +123,13 @@ type ClientApp struct {
 	// sessionID stores the server-assigned session UUID for reconnect support.
 	// Persists in memory across reconnect attempts within the same process.
 	sessionID string
+
+	// deviceCmdCh is the internal channel into which device control commands
+	// (mute/volume) are pushed by HandleDeviceCommand. Owned by the runner
+	// so the API layer has a non-blocking place to deliver commands. The
+	// consumer goroutine that actually applies the commands to the mixer
+	// is wired up by the CLI / task 013.
+	deviceCmdCh chan DeviceCommand
 }
 
 // NewClientApp creates a new client application with the given configuration.
@@ -136,7 +143,15 @@ func NewClientApp(cfg config.Config, logger *slog.Logger, tlsConfig *tls.Config)
 		tlsConfig:       tlsConfig,
 		signalerFactory: NewTCPSignalerFactory(),
 		peerFactory:     NewWebRTCPeerFactory(),
+		deviceCmdCh:     make(chan DeviceCommand, 16),
 	}
+}
+
+// DeviceCommandChannel returns the internal device command channel for
+// consumers (e.g. the CLI-level HandleDeviceCommands goroutine wired in task
+// 013). Returns nil only for zero-valued ClientApps built outside NewClientApp.
+func (c *ClientApp) DeviceCommandChannel() <-chan DeviceCommand {
+	return c.deviceCmdCh
 }
 
 // WithStatsChannels configures optional channels for reporting statistics to TUI.

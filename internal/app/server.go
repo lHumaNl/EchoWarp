@@ -119,6 +119,13 @@ type ServerApp struct {
 	// sessions stores session entries for reconnect support.
 	// Protected by mu (same mutex as clients).
 	sessions map[string]*sessionEntry
+
+	// deviceCmdCh is the internal channel into which device control commands
+	// (mute/volume) are pushed by HandleDeviceCommand. A consumer goroutine
+	// that actually applies the commands to the mixer is wired up by the CLI
+	// / task 013 — the app layer only owns the buffered channel so the API
+	// layer has a non-blocking place to deliver commands.
+	deviceCmdCh chan DeviceCommand
 }
 
 // sessionEntry stores data needed to restore a client's identity on reconnect.
@@ -159,7 +166,16 @@ func NewServerApp(cfg config.Config, logger *slog.Logger, banMgr ban.BanManager,
 		peerFactory:     NewWebRTCPeerFactory(),
 		clients:         make(map[string]*multiClient),
 		sessions:        make(map[string]*sessionEntry),
+		deviceCmdCh:     make(chan DeviceCommand, 16),
 	}
+}
+
+// DeviceCommandChannel returns the internal device command channel. Consumers
+// (e.g. the CLI-level HandleDeviceCommands goroutine wired in task 013) read
+// from this channel to apply commands to the mixer. Returns nil only for
+// zero-valued ServerApps produced in tests that skip NewServerApp.
+func (s *ServerApp) DeviceCommandChannel() <-chan DeviceCommand {
+	return s.deviceCmdCh
 }
 
 // WithStatsChannels configures optional channels for reporting statistics to TUI.

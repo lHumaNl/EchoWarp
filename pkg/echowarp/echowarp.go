@@ -680,6 +680,79 @@ func (n *Node) Devices() ([]AudioDevice, error) {
 	return listDevices()
 }
 
+// SetDeviceMute sets the mute state of the given audio device on the running
+// runner. Returns an error if the device id is negative, the node has no
+// runner (not started), or the runner does not implement DeviceCommandReceiver.
+//
+// Safe for concurrent use. This method is non-blocking: it delegates to the
+// runner's HandleDeviceCommand which is expected to enqueue the command with
+// a bounded timeout.
+func (n *Node) SetDeviceMute(id int, muted bool) error {
+	if id < 0 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid device id").
+			WithContext("device_id", id).
+			WithSuggestion("Device id must be non-negative")
+	}
+	receiver, err := n.deviceCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleDeviceCommand(DeviceCommand{
+		Action:   DeviceActionSetMute,
+		DeviceID: id,
+		Muted:    muted,
+	})
+}
+
+// SetDeviceVolume sets the volume multiplier (0.0–1.5) of the given audio
+// device on the running runner. Returns an error if the id is negative, the
+// volume is out of range, the node has no runner, or the runner does not
+// implement DeviceCommandReceiver.
+//
+// Safe for concurrent use.
+func (n *Node) SetDeviceVolume(id int, volume float64) error {
+	if id < 0 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid device id").
+			WithContext("device_id", id).
+			WithSuggestion("Device id must be non-negative")
+	}
+	if volume < 0.0 || volume > 1.5 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Volume out of range").
+			WithContext("volume", volume).
+			WithSuggestion("Volume must be in the range 0.0–1.5")
+	}
+	receiver, err := n.deviceCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleDeviceCommand(DeviceCommand{
+		Action:   DeviceActionSetVolume,
+		DeviceID: id,
+		Volume:   volume,
+	})
+}
+
+// deviceCommandReceiver returns the current runner as a DeviceCommandReceiver
+// or a structured error if the node is not running or the runner does not
+// support device commands.
+func (n *Node) deviceCommandReceiver() (DeviceCommandReceiver, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(n.Status())).
+			WithSuggestion("Start the node before issuing device commands")
+	}
+	receiver, ok := runner.(DeviceCommandReceiver)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support device commands").
+			WithSuggestion("Use a runner implementation that implements DeviceCommandReceiver")
+	}
+	return receiver, nil
+}
+
 // Devices returns a list of all available audio input and output devices on the system.
 // This is a package-level convenience function equivalent to Node.Devices().
 func Devices() ([]AudioDevice, error) {
