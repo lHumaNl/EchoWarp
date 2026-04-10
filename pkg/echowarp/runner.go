@@ -44,6 +44,24 @@ type ParticipantLister interface {
 	Participants() []ParticipantInfo
 }
 
+// ChatSender is an optional interface that Runner implementations may satisfy
+// to accept outgoing chat messages issued via the public Node API
+// (Node.SendChat).
+//
+// Runners that do not implement this interface cause Node.SendChat to return
+// an ErrInternalState-class error. This keeps the core Runner contract minimal
+// while still allowing typed chat send without the caller knowing the
+// concrete runner type.
+type ChatSender interface {
+	// SendChat enqueues a chat message for delivery. Empty to means
+	// broadcast to all participants; non-empty to is a direct-message to
+	// that participant (addressed by nickname or id, implementation-defined).
+	// Implementations should return quickly (non-blocking, or with a short
+	// timeout) and must be safe to call from any goroutine while the runner
+	// is executing Run(ctx).
+	SendChat(text, to string) error
+}
+
 // ParticipantCommandReceiver is an optional interface that Runner
 // implementations may satisfy to accept conference-participant-level control
 // commands (mute / kick / volume) issued via the public Node API

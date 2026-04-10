@@ -28,6 +28,7 @@ type wsBroadcaster interface {
 //	EventStatsUpdate   → "stats_updated"
 //	EventClientJoined  → "client_joined"
 //	EventClientLeft    → "client_left"
+//	EventChatMessage   → "chat_message"
 //
 // The "status_changed" event type listed in the spec maps to
 // EventConnected/EventDisconnected — there is no dedicated EventBus type for
@@ -62,6 +63,7 @@ func BridgeEventsToWS(ctx context.Context, bus *echowarp.EventBus, hub wsBroadca
 		bus.Subscribe(echowarp.EventStatsUpdate, handler("stats_updated")),
 		bus.Subscribe(echowarp.EventClientJoined, handler("client_joined")),
 		bus.Subscribe(echowarp.EventClientLeft, handler("client_left")),
+		bus.Subscribe(echowarp.EventChatMessage, handler("chat_message")),
 	}
 
 	logger.Debug("events → WS bridge started", "subscriptions", len(subs))

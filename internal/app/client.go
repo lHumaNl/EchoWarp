@@ -76,6 +76,12 @@ type ClientApp struct {
 	// Optional channel for forwarding chat messages to TUI.
 	chatMsgCh chan<- ChatMessage
 
+	// chatEventHook is an optional callback invoked on every chat message the
+	// ChatClient receives (broadcast, DM, system). The daemon/API layer uses
+	// it to re-emit chat traffic as EventChatMessage on the Node's EventBus
+	// so WebSocket subscribers receive chat in real time.
+	chatEventHook func(ChatMessage)
+
 	// Optional channel to notify TUI of server-assigned nickname.
 	chatNicknameCh chan<- string
 
@@ -221,6 +227,15 @@ func (c *ClientApp) WithChatChannel(ch chan<- ChatMessage) *ClientApp {
 	return c
 }
 
+// WithChatEventHook installs a callback invoked on every chat message the
+// ChatClient receives. The hook is primarily used by the daemon to re-emit
+// chat traffic as EventChatMessage on the Node's EventBus so WebSocket
+// clients receive chat in real time. Safe to pass nil (equivalent to unset).
+func (c *ClientApp) WithChatEventHook(fn func(ChatMessage)) *ClientApp {
+	c.chatEventHook = fn
+	return c
+}
+
 // WithChatNicknameChannel sets the channel to notify TUI of server-assigned nickname.
 func (c *ClientApp) WithChatNicknameChannel(ch chan<- string) *ClientApp {
 	c.chatNicknameCh = ch
@@ -277,6 +292,29 @@ func (c *ClientApp) SendChatMessage(text string, toNickname ...string) error {
 		return c.chatClient.Send(text, toNickname...)
 	}
 	return fmt.Errorf("chat client not initialized")
+}
+
+// SendChat implements echowarp.ChatSender. It sends a chat message to the
+// server via the ChatClient. Empty to broadcasts; non-empty to is delivered
+// as a DM to that nickname. Returns an ErrNotRunning error if the ChatClient
+// has not been initialized yet (e.g., ClientApp constructed but Run not
+// called, or Run has already exited), or any send error from the underlying
+// data channel (bubbled up via ErrInternalState).
+func (c *ClientApp) SendChat(text, to string) error {
+	if c.chatClient == nil {
+		return ewerrors.NewError(ewerrors.ErrNotRunning, "Client chat channel not initialized").
+			WithSuggestion("Start the client before sending chat messages")
+	}
+	var err error
+	if to == "" {
+		err = c.chatClient.Send(text)
+	} else {
+		err = c.chatClient.Send(text, to)
+	}
+	if err != nil {
+		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to send chat message")
+	}
+	return nil
 }
 
 // GetChatClient returns the chat client (nil if not yet initialized).
@@ -481,6 +519,9 @@ func (c *ClientApp) Run(ctx context.Context) error {
 			case c.chatMsgCh <- msg:
 			default:
 			}
+		}
+		if c.chatEventHook != nil {
+			c.chatEventHook(msg)
 		}
 	})
 

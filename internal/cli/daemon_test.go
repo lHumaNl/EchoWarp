@@ -639,7 +639,7 @@ func TestCreateRunnerFactory(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	rateLimiter := auth.NewIPRateLimiter(5)
 
-	factory := createRunnerFactory(cfg, logger, rateLimiter)
+	factory := createRunnerFactory(cfg, logger, rateLimiter, nil)
 	if factory == nil {
 		t.Error("createRunnerFactory should return non-nil factory")
 	}
@@ -887,7 +887,7 @@ func TestCreateRunnerFactory_InvokesFactory(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	rateLimiter := auth.NewIPRateLimiter(5)
 
-	factory := createRunnerFactory(cfg, logger, rateLimiter)
+	factory := createRunnerFactory(cfg, logger, rateLimiter, nil)
 	if factory == nil {
 		t.Fatal("createRunnerFactory should return non-nil factory")
 	}
@@ -1336,7 +1336,7 @@ func TestCreateRunnerFactory_ClientMode(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 
-	factory := createRunnerFactory(cfg, logger, nil)
+	factory := createRunnerFactory(cfg, logger, nil, nil)
 	if factory == nil {
 		t.Fatal("createRunnerFactory should return non-nil factory")
 	}
@@ -1366,7 +1366,7 @@ func TestCreateRunnerFactory_ServerModeRoute(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&buf, nil))
 	rateLimiter := auth.NewIPRateLimiter(5)
 
-	factory := createRunnerFactory(cfg, logger, rateLimiter)
+	factory := createRunnerFactory(cfg, logger, rateLimiter, nil)
 	runner, err := factory(echowarp.NodeConfig{}, logger, nil, nil, rateLimiter)
 	if err != nil {
 		t.Fatalf("factory should not error: %v", err)

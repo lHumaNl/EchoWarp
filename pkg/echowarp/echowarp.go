@@ -868,6 +868,36 @@ func (n *Node) participantCommandReceiver() (ParticipantCommandReceiver, error) 
 	return receiver, nil
 }
 
+// SendChat sends a chat message via the running runner. An empty to
+// broadcasts to all participants; a non-empty to is delivered as a direct
+// message to the identified participant (nickname/id, as the runner sees
+// fit). Returns an error if text is empty, the node is not running, or the
+// runner does not implement ChatSender.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's SendChat
+// which is expected to enqueue with a bounded timeout.
+func (n *Node) SendChat(text, to string) error {
+	if text == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Chat text must not be empty").
+			WithSuggestion("Provide a non-empty text field in the chat send request")
+	}
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(n.Status())).
+			WithSuggestion("Start the node before sending chat messages")
+	}
+	sender, ok := runner.(ChatSender)
+	if !ok {
+		return ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support chat send").
+			WithSuggestion("Use a runner implementation that implements ChatSender")
+	}
+	return sender.SendChat(text, to)
+}
+
 // Devices returns a list of all available audio input and output devices on the system.
 // This is a package-level convenience function equivalent to Node.Devices().
 func Devices() ([]AudioDevice, error) {

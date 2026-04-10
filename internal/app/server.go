@@ -13,6 +13,7 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
+	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
@@ -95,6 +96,13 @@ type ServerApp struct {
 
 	// Optional channel for forwarding chat messages to TUI.
 	chatMsgCh chan<- ChatMessage
+
+	// chatEventHook is an optional callback invoked on every ChatHub onMessage
+	// fan-out. It is intended for the daemon/API layer to re-emit chat traffic
+	// as an EventChatMessage on the Node's EventBus so WebSocket subscribers
+	// can receive chat in real time. nil when the server is driven by the TUI
+	// only.
+	chatEventHook func(ChatMessage)
 
 	// Auto-increment counter for assigning default nicknames ("Client-N").
 	nextNickname int
@@ -300,6 +308,15 @@ func (s *ServerApp) WithChatChannel(ch chan<- ChatMessage) *ServerApp {
 	return s
 }
 
+// WithChatEventHook installs a callback invoked on every chat message fan-out
+// from the ChatHub. The hook is primarily used by the daemon to re-emit chat
+// traffic as EventChatMessage on the Node's EventBus so WebSocket clients
+// receive chat in real time. Safe to pass nil (equivalent to unset).
+func (s *ServerApp) WithChatEventHook(fn func(ChatMessage)) *ServerApp {
+	s.chatEventHook = fn
+	return s
+}
+
 // WithServerPauseChannel sets the channel for receiving server participant pause toggles from TUI.
 func (s *ServerApp) WithServerPauseChannel(ch <-chan bool) *ServerApp {
 	s.serverPauseCh = ch
@@ -312,6 +329,24 @@ func (s *ServerApp) SendChatMessage(text string, toNickname ...string) {
 	if s.chatHub != nil {
 		s.chatHub.SendFromServer(text, toNickname...)
 	}
+}
+
+// SendChat implements echowarp.ChatSender. It sends a chat message from the
+// server via the ChatHub. Empty to broadcasts; non-empty to is delivered as a
+// DM to that nickname. Returns an ErrNotRunning error if the ChatHub has not
+// been initialized yet (e.g., ServerApp constructed but Run not called, or
+// Run has already exited).
+func (s *ServerApp) SendChat(text, to string) error {
+	if s.chatHub == nil {
+		return ewerrors.NewError(ewerrors.ErrNotRunning, "Server chat hub not initialized").
+			WithSuggestion("Start the server before sending chat messages")
+	}
+	if to == "" {
+		s.chatHub.SendFromServer(text)
+	} else {
+		s.chatHub.SendFromServer(text, to)
+	}
+	return nil
 }
 
 // GetChatHub returns the chat hub (nil if not yet initialized).
@@ -336,6 +371,9 @@ func (s *ServerApp) Run(ctx context.Context) error {
 			case s.chatMsgCh <- msg:
 			default:
 			}
+		}
+		if s.chatEventHook != nil {
+			s.chatEventHook(msg)
 		}
 	})
 

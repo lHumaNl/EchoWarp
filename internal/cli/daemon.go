@@ -288,14 +288,20 @@ func setupDaemonDiscovery(noDiscovery bool, serverName string, logger *slog.Logg
 
 func createNode(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter) (*echowarp.Node, error) {
 	nodeCfg := convertToNodeConfig(cfg)
+	// nodeRef is a forward-capture holder for the *Node: the runner factory
+	// needs access to the node's EventBus to wire the chat-event hook, but
+	// the factory is instantiated before NewNode returns. Populating the
+	// holder immediately after NewNode closes the circular dependency.
+	var nodeRef *echowarp.Node
 	node, err := echowarp.NewNode(nodeCfg,
 		echowarp.WithLogger(logger),
 		echowarp.WithEventHandler(echowarp.NewEventHandler()),
-		echowarp.WithRunnerFactory(createRunnerFactory(cfg, logger, rateLimiter)),
+		echowarp.WithRunnerFactory(createRunnerFactory(cfg, logger, rateLimiter, &nodeRef)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
 	}
+	nodeRef = node
 	return node, nil
 }
 
@@ -417,13 +423,28 @@ func convertToNodeConfig(cfg config.Config) echowarp.NodeConfig {
 	return nodeCfg
 }
 
-func createRunnerFactory(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter) echowarp.RunnerFactory {
+func createRunnerFactory(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter, nodeRef **echowarp.Node) echowarp.RunnerFactory {
 	return func(_ echowarp.NodeConfig, _ *slog.Logger, banMgr ban.BanManager, tlsConf *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		// chatHook forwards every ChatHub/ChatClient fan-out onto the Node's
+		// EventBus as an EventChatMessage. The daemon's EventBus→WS bridge
+		// then relays it to any connected WebSocket clients in real time.
+		// Resolved lazily through nodeRef because the runner factory is
+		// constructed before NewNode returns.
+		chatHook := func(msg app.ChatMessage) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			handler := (*nodeRef).EventHandler()
+			if handler == nil {
+				return
+			}
+			handler.Bus().EmitChatMessage(msg.From, msg.To, msg.Text, msg.TS)
+		}
 		switch cfg.Mode {
 		case config.ModeClient:
-			return app.NewClientApp(cfg, logger, tlsConf), nil
+			return app.NewClientApp(cfg, logger, tlsConf).WithChatEventHook(chatHook), nil
 		default:
-			return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter), nil
+			return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter).WithChatEventHook(chatHook), nil
 		}
 	}
 }

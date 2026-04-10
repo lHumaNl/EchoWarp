@@ -28,6 +28,12 @@ const (
 	EventClientJoined
 	// EventClientLeft is emitted when a client disconnects (server mode).
 	EventClientLeft
+	// EventChatMessage is emitted when a chat message is received (either
+	// from a remote peer in client mode, or from any participant in server
+	// mode). System, broadcast, and DM variants all map to this single event
+	// type — the Data payload (ChatMessageData) carries the distinguishing
+	// fields (From, To, Text).
+	EventChatMessage
 )
 
 // EventData is a marker interface for typed event payloads.
@@ -86,6 +92,27 @@ type ClientLeftData struct {
 }
 
 func (ClientLeftData) eventData() {}
+
+// ChatMessageData is emitted with EventChatMessage. It mirrors the minimal
+// set of fields a downstream consumer (WebSocket bridge, plugin, etc.) needs
+// to render a chat entry, without exposing internal ring-buffer state.
+type ChatMessageData struct {
+	// From is the sender's display name. Empty for system messages
+	// originating from the server itself (e.g. "Server").
+	From string `json:"from,omitempty"`
+	// To is the direct-message recipient display name. Empty for broadcast
+	// messages addressed to all participants.
+	To string `json:"to,omitempty"`
+	// Text is the plain-text content of the message. May be truncated by
+	// the sender if it exceeded the internal per-message length limit.
+	Text string `json:"text"`
+	// TS is the message timestamp in milliseconds since the Unix epoch, as
+	// assigned by the server (or by the local client for outgoing
+	// broadcasts).
+	TS int64 `json:"ts"`
+}
+
+func (ChatMessageData) eventData() {}
 
 // Event represents a notification emitted by the event bus.
 type Event struct {
@@ -313,6 +340,17 @@ func (b *EventBus) EmitClientJoined(clientID, addr string) {
 // EmitClientLeft emits a client leave event with the client ID.
 func (b *EventBus) EmitClientLeft(clientID string) {
 	b.Emit(Event{Type: EventClientLeft, Data: ClientLeftData{ClientID: clientID}})
+}
+
+// EmitChatMessage emits a chat message event. Used by Runner implementations
+// to surface incoming (remote) chat traffic to API/WS subscribers.
+func (b *EventBus) EmitChatMessage(from, to, text string, ts int64) {
+	b.Emit(Event{Type: EventChatMessage, Data: ChatMessageData{
+		From: from,
+		To:   to,
+		Text: text,
+		TS:   ts,
+	}})
 }
 
 // EventHandler provides convenience methods for subscribing to specific event types.

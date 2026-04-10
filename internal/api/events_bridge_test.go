@@ -75,16 +75,17 @@ func TestEventBusBridge(t *testing.T) {
 	bus.EmitStatsUpdate(echowarp.ConnectionStats{})
 	bus.EmitClientJoined("client-1", "10.0.0.2:5678")
 	bus.EmitClientLeft("client-1")
+	bus.EmitChatMessage("Alice", "Bob", "psst", 42)
 
-	events := hub.waitFor(t, 6, 2*time.Second)
-	require.Len(t, events, 6, "all six events should be forwarded to the hub")
+	events := hub.waitFor(t, 7, 2*time.Second)
+	require.Len(t, events, 7, "all seven events should be forwarded to the hub")
 
 	types := make([]string, len(events))
 	for i, e := range events {
 		types[i] = e.Type
 	}
 	assert.ElementsMatch(t,
-		[]string{"connected", "disconnected", "error", "stats_updated", "client_joined", "client_left"},
+		[]string{"connected", "disconnected", "error", "stats_updated", "client_joined", "client_left", "chat_message"},
 		types,
 	)
 
@@ -104,6 +105,13 @@ func TestEventBusBridge(t *testing.T) {
 			d, ok := e.Data.(map[string]string)
 			require.True(t, ok, "error event data must be map[string]string")
 			assert.Equal(t, "boom", d["error"])
+		case "chat_message":
+			d, ok := e.Data.(echowarp.ChatMessageData)
+			require.True(t, ok, "chat_message event data must be ChatMessageData")
+			assert.Equal(t, "Alice", d.From)
+			assert.Equal(t, "Bob", d.To)
+			assert.Equal(t, "psst", d.Text)
+			assert.Equal(t, int64(42), d.TS)
 		}
 	}
 
