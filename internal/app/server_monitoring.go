@@ -10,18 +10,33 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
-// reportStats periodically sends connection statistics to the TUI stats channel.
-// Started immediately when the signaling loop begins (before DC ready), so the TUI
-// transitions to the streaming screen as soon as PeerConnection reaches "connected".
+// publishStats forwards a ConnectionStats snapshot to both the TUI statsCh
+// (if configured) and the API statsHook (if configured). Non-blocking for
+// the channel sink — the fallback drops the value when the TUI is not
+// draining, matching the original reportStats behavior.
+func (s *ServerApp) publishStats(stats transport.ConnectionStats) {
+	if s.statsCh != nil {
+		select {
+		case s.statsCh <- stats:
+		default:
+		}
+	}
+	if s.statsHook != nil {
+		s.statsHook(stats)
+	}
+}
+
+// reportStats periodically sends connection statistics to the TUI stats channel
+// and/or the API stats hook (whichever sinks are configured). Started
+// immediately when the signaling loop begins (before DC ready), so the TUI
+// transitions to the streaming screen as soon as PeerConnection reaches
+// "connected" and the daemon's Node.Stats() reflects live bytes.
 func (s *ServerApp) reportStats(ctx context.Context, peer transport.PeerManager) {
-	if s.statsCh == nil {
+	if s.statsCh == nil && s.statsHook == nil {
 		return
 	}
 	// Send initial stat immediately.
-	select {
-	case s.statsCh <- peer.GetStats():
-	default:
-	}
+	s.publishStats(peer.GetStats())
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -29,28 +44,50 @@ func (s *ServerApp) reportStats(ctx context.Context, peer transport.PeerManager)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			select {
-			case s.statsCh <- peer.GetStats():
-			default:
-			}
+			s.publishStats(peer.GetStats())
 		}
 	}
 }
 
-// sendDisconnected sends a final "disconnected" stats update to the TUI.
+// sendDisconnected sends a final "disconnected" stats update to all sinks.
 func (s *ServerApp) sendDisconnected() {
-	if s.statsCh == nil {
+	if s.statsCh == nil && s.statsHook == nil {
 		return
 	}
-	select {
-	case s.statsCh <- transport.ConnectionStats{State: "disconnected"}:
-	default:
-	}
+	s.publishStats(transport.ConnectionStats{State: "disconnected"})
 }
 
-// reportMultiStats periodically sends multi-client stats to the TUI.
+// aggregateMultiStats folds per-client stats into a single ConnectionStats
+// suitable for the single-value statsHook sink. Sums BytesSent / BytesRecv /
+// PacketsLost across all connected clients and picks the max RTT/jitter to
+// give the API caller a conservative upper bound. The State field is set to
+// "connected" when at least one client is in a non-disconnected state.
+func (s *ServerApp) aggregateMultiStats(stats transport.MultiClientStats) transport.ConnectionStats {
+	agg := transport.ConnectionStats{}
+	for _, ci := range stats.Clients {
+		agg.BytesSent += ci.BytesSent
+		agg.BytesRecv += ci.BytesRecv
+		agg.PacketsLost += ci.PacketsLost
+		if ci.Jitter > agg.Jitter {
+			agg.Jitter = ci.Jitter
+		}
+		if ci.RoundTrip > agg.RoundTrip {
+			agg.RoundTrip = ci.RoundTrip
+		}
+		if ci.State != "" && ci.State != "disconnected" {
+			agg.State = "connected"
+		}
+	}
+	return agg
+}
+
+// reportMultiStats periodically sends multi-client stats to the TUI and/or
+// the API stats hook. In API-hook mode the per-client snapshot is folded
+// into a single ConnectionStats via aggregateMultiStats so the daemon's
+// Node.Stats() continues to expose a single number for
+// GET /api/v1/stats even in multi-client mode.
 func (s *ServerApp) reportMultiStats(ctx context.Context) {
-	if s.multiStatsCh == nil {
+	if s.multiStatsCh == nil && s.statsHook == nil {
 		return
 	}
 	ticker := time.NewTicker(time.Second)
@@ -61,9 +98,14 @@ func (s *ServerApp) reportMultiStats(ctx context.Context) {
 			return
 		case <-ticker.C:
 			stats := s.collectMultiClientStats()
-			select {
-			case s.multiStatsCh <- stats:
-			default:
+			if s.multiStatsCh != nil {
+				select {
+				case s.multiStatsCh <- stats:
+				default:
+				}
+			}
+			if s.statsHook != nil {
+				s.statsHook(s.aggregateMultiStats(stats))
 			}
 		}
 	}

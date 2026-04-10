@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +29,13 @@ func setupTestHandlersServer(t *testing.T) (*APIServer, *httptest.Server) {
 		SampleRate: 48000,
 		Channels:   1,
 	}
-	node, err := echowarp.NewNode(cfg)
+	// Provide a no-op runner factory so node.Start() succeeds. Without it,
+	// Start returns a synchronous "no runner factory configured" error which
+	// handleStart now surfaces as HTTP 500 (see TestHandleStartErrorFeedback).
+	factory := func(_ echowarp.NodeConfig, _ *slog.Logger, _ ban.BanManager, _ *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		return &noopTestRunner{}, nil
+	}
+	node, err := echowarp.NewNode(cfg, echowarp.WithRunnerFactory(factory))
 	require.NoError(t, err)
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -48,6 +55,8 @@ func setupTestHandlersServer(t *testing.T) (*APIServer, *httptest.Server) {
 	mux.HandleFunc("PUT /api/v1/config", apiServer.handleConfig)
 	mux.HandleFunc("POST /api/v1/start", apiServer.handleStart)
 	mux.HandleFunc("POST /api/v1/stop", apiServer.handleStop)
+	mux.HandleFunc("POST /api/v1/connect", apiServer.handleConnect)
+	mux.HandleFunc("POST /api/v1/disconnect", apiServer.handleDisconnect)
 	mux.HandleFunc("POST /api/v1/pause", apiServer.handlePause)
 	mux.HandleFunc("POST /api/v1/resume", apiServer.handleResume)
 	mux.HandleFunc("POST /api/v1/shutdown", apiServer.handleShutdown)
@@ -191,6 +200,53 @@ func (r *blockingTestRunner) Run(ctx context.Context) error {
 	close(r.started)
 	<-ctx.Done()
 	return nil
+}
+
+// noopTestRunner exits immediately without streaming. Used in the default
+// test server setup so node.Start() has something to launch.
+type noopTestRunner struct{}
+
+func (r *noopTestRunner) Run(_ context.Context) error { return nil }
+
+// TestHandleStartErrorFeedback asserts that POST /api/v1/start surfaces
+// synchronous Node.Start() errors as HTTP 500 with an error body. Prior to
+// the fix, handleStart used a fire-and-forget goroutine that discarded the
+// error and always returned 200, making start failures invisible to API
+// consumers such as the Decky plugin.
+func TestHandleStartErrorFeedback(t *testing.T) {
+	cfg := echowarp.NodeConfig{
+		Mode:       echowarp.ModeServer,
+		Port:       0,
+		SampleRate: 48000,
+		Channels:   1,
+	}
+	// Node with no runner factory — Node.Start() returns a synchronous error
+	// ("no runner factory configured") that the handler must propagate.
+	node, err := echowarp.NewNode(cfg)
+	require.NoError(t, err)
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	apiServer := NewAPIServer(node, "127.0.0.1:0", "", logger, nil, nil, false)
+	apiServer.initMiddleware()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/start", apiServer.handleStart)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/start", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode,
+		"start failure must be reported as 500, not 200")
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.NotEmpty(t, result.Error, "error body must contain a message")
+	assert.Contains(t, strings.ToLower(result.Error), "runner",
+		"error should mention the missing runner factory")
 }
 
 func TestHandleStart_InvalidJSON(t *testing.T) {
@@ -549,6 +605,171 @@ func TestApplyConfigOverrides_PartialFields(t *testing.T) {
 	assert.Equal(t, uint32(2), cfg.Channels)
 }
 
+// TestConfigRequestExtended drives POST /api/v1/config with every phase 3
+// pointer field populated and asserts each one is reflected in the underlying
+// node config via the round-trip GET /api/v1/config.
+func TestConfigRequestExtended(t *testing.T) {
+	server, ts := setupTestHandlersServer(t)
+
+	duplex := true
+	conference := false
+	bitrate := 96000
+	complexity := 9
+	opusApp := "audio"
+	dtx := false
+	fec := false
+	maxClients := 7
+	nickname := "test-node"
+	hwid := true
+	loopback := true
+	aec := true
+	stun := []string{"stun:stun.example.com:3478", "stun:stun2.example.com:3478"}
+	tlsCert := "/tmp/cert.pem"
+	tlsKey := "/tmp/key.pem"
+	tlsInsecure := true
+
+	req := configRequest{
+		Duplex:          &duplex,
+		Conference:      &conference,
+		OpusBitrate:     &bitrate,
+		OpusComplexity:  &complexity,
+		OpusApplication: &opusApp,
+		OpusDTX:         &dtx,
+		OpusFEC:         &fec,
+		MaxClients:      &maxClients,
+		Nickname:        &nickname,
+		HWIDRequired:    &hwid,
+		Loopback:        &loopback,
+		AEC:             &aec,
+		STUNServers:     &stun,
+		TLSCert:         &tlsCert,
+		TLSKey:          &tlsKey,
+		TLSInsecure:     &tlsInsecure,
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	cfg := server.node.Config()
+	assert.True(t, cfg.Duplex)
+	assert.False(t, cfg.Conference)
+	assert.Equal(t, 96000, cfg.OpusBitrate)
+	assert.Equal(t, 9, cfg.OpusComplexity)
+	assert.Equal(t, "audio", cfg.OpusApplication)
+	assert.False(t, cfg.OpusDTX)
+	assert.False(t, cfg.OpusFEC)
+	assert.Equal(t, 7, cfg.MaxClients)
+	assert.Equal(t, "test-node", cfg.Nickname)
+	assert.True(t, cfg.HWIDRequired)
+	assert.Equal(t, stun, cfg.STUNServers)
+	assert.Equal(t, "/tmp/cert.pem", cfg.TLSCert)
+	assert.Equal(t, "/tmp/key.pem", cfg.TLSKey)
+	assert.True(t, cfg.TLSInsecure)
+	assert.True(t, cfg.Loopback)
+	assert.True(t, cfg.AEC)
+}
+
+// TestConfigRequestPartial verifies that pointer fields absent from the JSON
+// body do NOT clobber pre-existing values in the node config. This is the core
+// contract of the *T pointer types: nil = "not provided".
+func TestConfigRequestPartial(t *testing.T) {
+	server, ts := setupTestHandlersServer(t)
+
+	// Pre-populate node config with known values via Reconfigure.
+	base := server.node.Config()
+	base.OpusBitrate = 48000
+	base.OpusComplexity = 4
+	base.OpusApplication = "voip"
+	base.Nickname = "original"
+	base.MaxClients = 3
+	base.HWIDRequired = true
+	base.Duplex = true
+	base.Loopback = true
+	base.AEC = true
+	require.NoError(t, server.node.Reconfigure(base))
+
+	// Send partial update: only bitrate and nickname.
+	newBitrate := 128000
+	newNick := "updated"
+	req := configRequest{
+		OpusBitrate: &newBitrate,
+		Nickname:    &newNick,
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	cfg := server.node.Config()
+	// Updated fields:
+	assert.Equal(t, 128000, cfg.OpusBitrate)
+	assert.Equal(t, "updated", cfg.Nickname)
+	// Preserved fields (must not be zeroed):
+	assert.Equal(t, 4, cfg.OpusComplexity, "OpusComplexity must be preserved when not in request")
+	assert.Equal(t, "voip", cfg.OpusApplication, "OpusApplication must be preserved when not in request")
+	assert.Equal(t, 3, cfg.MaxClients, "MaxClients must be preserved when not in request")
+	assert.True(t, cfg.HWIDRequired, "HWIDRequired must be preserved when not in request")
+	assert.True(t, cfg.Duplex, "Duplex must be preserved when not in request")
+	assert.True(t, cfg.Loopback, "Loopback must be preserved when not in request")
+	assert.True(t, cfg.AEC, "AEC must be preserved when not in request")
+}
+
+// TestConfigRequestInvalidOpusApplication verifies that an unsupported value
+// for opus_application is rejected with HTTP 400 before touching the node.
+func TestConfigRequestInvalidOpusApplication(t *testing.T) {
+	server, ts := setupTestHandlersServer(t)
+
+	pre := server.node.Config()
+	origApp := pre.OpusApplication
+
+	body := []byte(`{"opus_application":"bogus"}`)
+	resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	var errResp errorResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&errResp))
+	assert.Contains(t, errResp.Error, "opus_application")
+
+	// Config must be untouched after the rejection.
+	post := server.node.Config()
+	assert.Equal(t, origApp, post.OpusApplication)
+}
+
+// TestConfigRequestOpusApplicationValidValues verifies that every value the
+// Opus encoder accepts is also accepted by the REST API. This guards against
+// drift between internal/api/handlers.go and pkg/echowarp/audio/opus.go where
+// previously "lowdelay" was advertised but would crash the encoder.
+func TestConfigRequestOpusApplicationValidValues(t *testing.T) {
+	validValues := []string{"voip", "audio", "restricted_lowdelay"}
+	for _, app := range validValues {
+		t.Run(app, func(t *testing.T) {
+			server, ts := setupTestHandlersServer(t)
+
+			appVal := app
+			req := configRequest{OpusApplication: &appVal}
+			body, err := json.Marshal(req)
+			require.NoError(t, err)
+
+			resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode, "value %q must be accepted", app)
+
+			cfg := server.node.Config()
+			assert.Equal(t, app, cfg.OpusApplication)
+		})
+	}
+}
+
 func TestStatusResponse_JSON(t *testing.T) {
 	resp := statusResponse{
 		Status: "streaming",
@@ -727,22 +948,12 @@ func TestHandleDiscover_ZeroTimeout_UsesDefault(t *testing.T) {
 
 // ── Device Control tests ─────────────────────────────────────────────────────
 
-func TestHandleDeviceMute_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"muted": true}`)
-	resp, err := http.Post(ts.URL+"/api/v1/devices/1/mute", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
+// NOTE: TestHandleDeviceMute_Returns501 / TestHandleDeviceVolume_Returns501
+// removed in phase 4a — the 501 stub was replaced by a real implementation
+// that forwards the command to the runner's DeviceCommandReceiver. The new
+// coverage lives in device_control_test.go (TestHandleDeviceMuteImplemented
+// et al.), which asserts both the HTTP 200 response and that the command
+// reached the runner via channel inspection.
 
 func TestHandleDeviceMute_InvalidJSON(t *testing.T) {
 	_, ts := setupTestHandlersServer(t)
@@ -757,23 +968,6 @@ func TestHandleDeviceMute_InvalidJSON(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Contains(t, result.Error, "invalid JSON")
-}
-
-func TestHandleDeviceVolume_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"volume": 0.75}`)
-	resp, err := http.Post(ts.URL+"/api/v1/devices/2/volume", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
 }
 
 func TestHandleDeviceVolume_InvalidRange(t *testing.T) {
@@ -820,37 +1014,16 @@ func TestHandleDeviceVolume_InvalidJSON(t *testing.T) {
 
 // ── Conference tests ─────────────────────────────────────────────────────────
 
-func TestHandleConferenceParticipants_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	resp, err := http.Get(ts.URL + "/api/v1/conference/participants")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
-
-func TestHandleConferenceParticipantMute_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"muted": true}`)
-	resp, err := http.Post(ts.URL+"/api/v1/conference/participants/p-1/mute", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
+// NOTE: TestHandleConferenceParticipants_Returns501 /
+// TestHandleConferenceParticipantMute_Returns501 /
+// TestHandleConferenceParticipantKick_Returns501 /
+// TestHandleConferenceParticipantVolume_Returns501 were removed in phase 4b —
+// the 4 handlers no longer return 501. Full end-to-end coverage lives in
+// internal/api/conference_control_test.go (uses a fake runner that
+// implements ParticipantLister + ParticipantCommandReceiver and asserts the
+// exact ParticipantCommand reaches the runner). The InvalidJSON / InvalidRange
+// tests below remain — they exercise the 400 paths which don't depend on
+// the runner.
 
 func TestHandleConferenceParticipantMute_InvalidJSON(t *testing.T) {
 	_, ts := setupTestHandlersServer(t)
@@ -865,37 +1038,6 @@ func TestHandleConferenceParticipantMute_InvalidJSON(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Contains(t, result.Error, "invalid JSON")
-}
-
-func TestHandleConferenceParticipantKick_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	resp, err := http.Post(ts.URL+"/api/v1/conference/participants/p-2/kick", "application/json", nil)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
-
-func TestHandleConferenceParticipantVolume_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"volume": 0.5}`)
-	resp, err := http.Post(ts.URL+"/api/v1/conference/participants/p-3/volume", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
 }
 
 func TestHandleConferenceParticipantVolume_InvalidRange(t *testing.T) {
@@ -1083,4 +1225,161 @@ func TestHandleReadyz_NodeNil(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Equal(t, "not ready", result["status"])
+}
+
+// TestHandleConnect asserts that POST /api/v1/connect configures the node in
+// client mode and transitions it through a Start cycle. The default test
+// setup uses a noopTestRunner so Start returns quickly — the node should end
+// up back in stopped state, but the handler must return 200 (fast success)
+// and must have applied the client config during Reconfigure.
+func TestHandleConnect(t *testing.T) {
+	apiServer, ts := setupTestHandlersServer(t)
+
+	body := `{"address":"127.0.0.1","port":4415,"password":"test","nickname":"bob"}`
+	resp, err := http.Post(ts.URL+"/api/v1/connect", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "fast connect should return 200")
+
+	var result map[string]string
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "connected", result["status"])
+
+	// The node config must reflect the new client-mode values.
+	cfg := apiServer.node.Config()
+	assert.Equal(t, echowarp.ModeClient, cfg.Mode, "node must be reconfigured to client mode")
+	assert.Equal(t, "127.0.0.1", cfg.Address)
+	assert.Equal(t, 4415, cfg.Port)
+	assert.Equal(t, "bob", cfg.Nickname)
+
+	// Noop runner returns immediately, so the node settles back in stopped state.
+	assert.Eventually(t, func() bool {
+		return apiServer.node.Status() == echowarp.StatusStopped
+	}, 500*time.Millisecond, 10*time.Millisecond)
+}
+
+// TestHandleConnectMissingAddress asserts that POST /api/v1/connect returns
+// 400 when neither address nor discover is set — the caller has no target.
+func TestHandleConnectMissingAddress(t *testing.T) {
+	_, ts := setupTestHandlersServer(t)
+
+	resp, err := http.Post(ts.URL+"/api/v1/connect", "application/json", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Contains(t, result.Error, "address")
+}
+
+// TestHandleConnectWhenRunning asserts that POST /api/v1/connect returns 409
+// when the node is already in a non-idle state — connect must not hijack a
+// running session.
+func TestHandleConnectWhenRunning(t *testing.T) {
+	cfg := echowarp.NodeConfig{
+		Mode:       echowarp.ModeServer,
+		Port:       0,
+		SampleRate: 48000,
+		Channels:   1,
+	}
+
+	blockingRunner := &blockingTestRunner{started: make(chan struct{})}
+	factory := func(_ echowarp.NodeConfig, _ *slog.Logger, _ ban.BanManager, _ *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		return blockingRunner, nil
+	}
+
+	node, err := echowarp.NewNode(cfg, echowarp.WithRunnerFactory(factory))
+	require.NoError(t, err)
+
+	go func() {
+		_ = node.Start(context.Background())
+	}()
+	<-blockingRunner.started
+	defer func() { _ = node.Stop() }()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	apiServer := NewAPIServer(node, "127.0.0.1:0", "", logger, nil, nil, false)
+	apiServer.initMiddleware()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/connect", apiServer.handleConnect)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	body := `{"address":"127.0.0.1"}`
+	resp, err := http.Post(ts.URL+"/api/v1/connect", "application/json", strings.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Contains(t, result.Error, "already running")
+}
+
+// TestHandleDisconnect asserts that POST /api/v1/disconnect is routed through
+// the same stop path as POST /api/v1/stop. With an idle node it must return
+// 409 (node not running) — the error body is identical to /stop.
+func TestHandleDisconnect(t *testing.T) {
+	_, ts := setupTestHandlersServer(t)
+
+	resp, err := http.Post(ts.URL+"/api/v1/disconnect", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	var result errorResponse
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Contains(t, result.Error, "not running")
+}
+
+// TestHandleDisconnectStopsRunningNode asserts that POST /api/v1/disconnect
+// successfully stops a running node — exercising the happy path of the
+// client-side semantic alias.
+func TestHandleDisconnectStopsRunningNode(t *testing.T) {
+	cfg := echowarp.NodeConfig{
+		Mode:       echowarp.ModeClient,
+		Port:       0,
+		SampleRate: 48000,
+		Channels:   1,
+	}
+
+	blockingRunner := &blockingTestRunner{started: make(chan struct{})}
+	factory := func(_ echowarp.NodeConfig, _ *slog.Logger, _ ban.BanManager, _ *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		return blockingRunner, nil
+	}
+	node, err := echowarp.NewNode(cfg, echowarp.WithRunnerFactory(factory))
+	require.NoError(t, err)
+
+	go func() { _ = node.Start(context.Background()) }()
+	<-blockingRunner.started
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+	apiServer := NewAPIServer(node, "127.0.0.1:0", "", logger, nil, nil, false)
+	apiServer.initMiddleware()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/disconnect", apiServer.handleDisconnect)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/disconnect", "application/json", nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result map[string]string
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	assert.Equal(t, "stopped", result["status"])
 }

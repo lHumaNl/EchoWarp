@@ -36,6 +36,8 @@ type ServerOption func(*APIServer)
 //	POST /api/v1/config        - Update configuration
 //	POST /api/v1/start         - Start streaming
 //	POST /api/v1/stop          - Stop streaming
+//	POST /api/v1/connect       - Connect to a server in client mode (alias + client config)
+//	POST /api/v1/disconnect    - Disconnect (semantic alias for /stop)
 //	POST /api/v1/pause         - Pause streaming
 //	POST /api/v1/resume        - Resume streaming
 //	POST /api/v1/shutdown      - Graceful shutdown
@@ -46,6 +48,13 @@ type ServerOption func(*APIServer)
 //	POST /api/v1/conference/participants/{id}/mute   - Mute participant (stub — 501)
 //	POST /api/v1/conference/participants/{id}/kick   - Kick participant (stub — 501)
 //	POST /api/v1/conference/participants/{id}/volume - Set participant volume (stub — 501)
+//	POST /api/v1/chat/send     - Send a chat message (broadcast or DM)
+//	GET    /api/v1/bans        - List active bans (IP/HWID/nickname)
+//	POST   /api/v1/bans        - Add a ban (body: {ip|hwid|nickname, reason?})
+//	DELETE /api/v1/bans/{id}   - Remove a ban by id ("<kind>:<subject>")
+//	POST /api/v1/recording/start  - Start recording (body: {"mode":"mix|tracks|both"})
+//	POST /api/v1/recording/stop   - Stop recording (returns {duration, size, files})
+//	GET  /api/v1/recording/status - Current recording status (idempotent)
 //	GET  /ws/v1/events         - WebSocket event stream
 //	GET  /metrics              - Prometheus metrics
 //
@@ -165,6 +174,13 @@ func NewAPIServerWithOptions(node *echowarp.Node, bindAddr string, token string,
 	return server
 }
 
+// WSHub returns the WebSocket hub used for broadcasting events to clients.
+// Exposed so external components (such as the EventBus → WS bridge) can push
+// events without going through an HTTP round trip.
+func (s *APIServer) WSHub() *WSHub {
+	return s.wsHub
+}
+
 // serverID returns the server UUID for the listening port, or "" if not yet generated.
 func (s *APIServer) serverID() string {
 	_, portStr, err := net.SplitHostPort(s.bindAddr)
@@ -213,6 +229,8 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/config", s.handleConfig)
 	mux.HandleFunc("POST /api/v1/start", s.handleStart)
 	mux.HandleFunc("POST /api/v1/stop", s.handleStop)
+	mux.HandleFunc("POST /api/v1/connect", s.handleConnect)
+	mux.HandleFunc("POST /api/v1/disconnect", s.handleDisconnect)
 	mux.HandleFunc("POST /api/v1/pause", s.handlePause)
 	mux.HandleFunc("POST /api/v1/resume", s.handleResume)
 	mux.HandleFunc("POST /api/v1/shutdown", s.handleShutdown)
@@ -223,6 +241,15 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/conference/participants/{id}/mute", s.handleConferenceParticipantMute)
 	mux.HandleFunc("POST /api/v1/conference/participants/{id}/kick", s.handleConferenceParticipantKick)
 	mux.HandleFunc("POST /api/v1/conference/participants/{id}/volume", s.handleConferenceParticipantVolume)
+	mux.HandleFunc("POST /api/v1/chat/send", s.handleChatSend)
+	mux.HandleFunc("GET /api/v1/bans", s.handleBanList)
+	mux.HandleFunc("POST /api/v1/bans", s.handleBanAdd)
+	mux.HandleFunc("DELETE /api/v1/bans/{id}", s.handleBanRemove)
+	mux.HandleFunc("POST /api/v1/recording/start", s.handleRecordingStart)
+	mux.HandleFunc("POST /api/v1/recording/stop", s.handleRecordingStop)
+	mux.HandleFunc("GET /api/v1/recording/status", s.handleRecordingStatus)
+	mux.HandleFunc("POST /api/v1/mute", s.handleMuteToggle)
+	mux.HandleFunc("POST /api/v1/discovery/publish", s.handleDiscoveryPublish)
 	mux.HandleFunc("GET /ws/v1/events", s.handleWebSocket)
 	mux.Handle("GET /metrics", promhttp.Handler())
 

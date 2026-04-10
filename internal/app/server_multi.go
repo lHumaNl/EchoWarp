@@ -273,10 +273,10 @@ func (s *ServerApp) checkMultiClientAccess(remoteAddr, clientID string) bool {
 
 func (s *ServerApp) registerMultiClient(conn net.Conn, clientID string) (*multiClient, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if len(s.clients) >= s.cfg.MaxClients {
 		s.logger.Warn("Max clients reached, rejecting connection", "clientID", clientID)
+		s.mu.Unlock()
 		return nil, false
 	}
 
@@ -287,6 +287,14 @@ func (s *ServerApp) registerMultiClient(conn net.Conn, clientID string) (*multiC
 	}
 	s.clients[clientID] = mc
 	s.notifyClientCount()
+	remoteAddr := ""
+	if conn != nil && conn.RemoteAddr() != nil {
+		remoteAddr = auth.ExtractIP(conn.RemoteAddr().String())
+	}
+	s.mu.Unlock()
+	if s.onClientJoin != nil {
+		s.onClientJoin(clientID, remoteAddr)
+	}
 	return mc, true
 }
 
@@ -306,6 +314,9 @@ func (s *ServerApp) unregisterMultiClient(mc *multiClient, clientID string, grac
 	}
 	s.notifyClientCount()
 	s.mu.Unlock()
+	if s.onClientLeave != nil {
+		s.onClientLeave(clientID)
+	}
 	if mc.peer != nil {
 		_ = mc.peer.Close() //nolint:errcheck
 	}
@@ -497,7 +508,8 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 	var chatCh <-chan []byte
 
 	// Start stats reporting immediately (same rationale as single-client flow).
-	if s.statsCh != nil {
+	// Also runs in daemon mode when only a statsHook is configured.
+	if s.statsCh != nil || s.statsHook != nil {
 		statsWg.Add(1)
 		go func() {
 			defer statsWg.Done()

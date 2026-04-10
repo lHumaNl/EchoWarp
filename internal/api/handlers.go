@@ -13,6 +13,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/version"
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 )
 
@@ -41,7 +42,12 @@ type errorResponse struct {
 }
 
 // configRequest is used for POST/PUT /api/v1/config.
-// Only non-nil fields are updated.
+// Only non-nil / non-zero fields are applied to the underlying NodeConfig.
+//
+// Pointer-typed fields distinguish "user explicitly sent value X" from "field
+// absent in the JSON body". Primitive-typed fields (Mode, Address, Port, …)
+// remain on the legacy "zero value = don't override" contract for backwards
+// compatibility with phase 1 / phase 2 clients.
 type configRequest struct {
 	Mode       string  `json:"mode,omitempty"`        // "server" or "client".
 	Address    string  `json:"address,omitempty"`     // Server address (client mode).
@@ -52,6 +58,33 @@ type configRequest struct {
 	SampleRate uint32  `json:"sample_rate,omitempty"` // Audio sample rate.
 	Channels   uint32  `json:"channels,omitempty"`    // Audio channels (1 or 2).
 	VirtualMic *bool   `json:"virtual_mic,omitempty"` // Create virtual microphone.
+	Loopback   *bool   `json:"loopback,omitempty"`    // Enable system-audio loopback capture.
+	AEC        *bool   `json:"aec,omitempty"`         // Enable software AEC (duplex/conference).
+
+	// Phase 3 extended optional fields. All pointer-typed so nil = unset.
+	Duplex          *bool     `json:"duplex,omitempty"`
+	Conference      *bool     `json:"conference,omitempty"`
+	OpusBitrate     *int      `json:"opus_bitrate,omitempty"`
+	OpusComplexity  *int      `json:"opus_complexity,omitempty"`
+	OpusApplication *string   `json:"opus_application,omitempty"` // "voip" | "audio" | "restricted_lowdelay"
+	OpusDTX         *bool     `json:"opus_dtx,omitempty"`
+	OpusFEC         *bool     `json:"opus_fec,omitempty"`
+	MaxClients      *int      `json:"max_clients,omitempty"`
+	Nickname        *string   `json:"nickname,omitempty"`
+	HWIDRequired    *bool     `json:"hwid_required,omitempty"`
+	STUNServers     *[]string `json:"stun_servers,omitempty"`
+	TLSCert         *string   `json:"tls_cert,omitempty"`
+	TLSKey          *string   `json:"tls_key,omitempty"`
+	TLSInsecure     *bool     `json:"tls_insecure,omitempty"`
+}
+
+// validOpusApplications enumerates the accepted values for configRequest.OpusApplication.
+// Values are sourced directly from pkg/echowarp/audio constants so the API
+// contract always matches what the encoder actually accepts.
+var validOpusApplications = map[string]struct{}{
+	audio.OpusApplicationVoIP:               {},
+	audio.OpusApplicationAudio:              {},
+	audio.OpusApplicationRestrictedLowDelay: {},
 }
 
 // writeJSON writes a JSON response with the given status code.
@@ -85,6 +118,21 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg})
 }
 
+// validateConfigRequest rejects requests whose enumerated fields carry invalid
+// values. Returns an error to be written as 400.
+func validateConfigRequest(req configRequest) error {
+	if req.OpusApplication != nil {
+		if _, ok := validOpusApplications[*req.OpusApplication]; !ok {
+			return fmt.Errorf("invalid opus_application %q (must be %s, %s, or %s)",
+				*req.OpusApplication,
+				audio.OpusApplicationVoIP,
+				audio.OpusApplicationAudio,
+				audio.OpusApplicationRestrictedLowDelay)
+		}
+	}
+	return nil
+}
+
 // applyConfigOverrides updates cfg with non-zero values from req.
 // Only fields that are set in the request are applied.
 func applyConfigOverrides(cfg *echowarp.NodeConfig, req configRequest) {
@@ -114,6 +162,56 @@ func applyConfigOverrides(cfg *echowarp.NodeConfig, req configRequest) {
 	}
 	if req.VirtualMic != nil {
 		cfg.VirtualMic = *req.VirtualMic
+	}
+	if req.Loopback != nil {
+		cfg.Loopback = *req.Loopback
+	}
+	if req.AEC != nil {
+		cfg.AEC = *req.AEC
+	}
+
+	// Phase 3 extended fields.
+	if req.Duplex != nil {
+		cfg.Duplex = *req.Duplex
+	}
+	if req.Conference != nil {
+		cfg.Conference = *req.Conference
+	}
+	if req.OpusBitrate != nil {
+		cfg.OpusBitrate = *req.OpusBitrate
+	}
+	if req.OpusComplexity != nil {
+		cfg.OpusComplexity = *req.OpusComplexity
+	}
+	if req.OpusApplication != nil {
+		cfg.OpusApplication = *req.OpusApplication
+	}
+	if req.OpusDTX != nil {
+		cfg.OpusDTX = *req.OpusDTX
+	}
+	if req.OpusFEC != nil {
+		cfg.OpusFEC = *req.OpusFEC
+	}
+	if req.MaxClients != nil {
+		cfg.MaxClients = *req.MaxClients
+	}
+	if req.Nickname != nil {
+		cfg.Nickname = *req.Nickname
+	}
+	if req.HWIDRequired != nil {
+		cfg.HWIDRequired = *req.HWIDRequired
+	}
+	if req.STUNServers != nil {
+		cfg.STUNServers = append([]string(nil), (*req.STUNServers)...)
+	}
+	if req.TLSCert != nil {
+		cfg.TLSCert = *req.TLSCert
+	}
+	if req.TLSKey != nil {
+		cfg.TLSKey = *req.TLSKey
+	}
+	if req.TLSInsecure != nil {
+		cfg.TLSInsecure = *req.TLSInsecure
 	}
 }
 
@@ -174,6 +272,10 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		if err := validateConfigRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		cfg := s.node.Config()
 		applyConfigOverrides(&cfg, req)
 		if err := s.node.Reconfigure(cfg); err != nil {
@@ -193,6 +295,10 @@ func (s *APIServer) handleStart(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		if err := validateConfigRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		cfg := s.node.Config()
 		applyConfigOverrides(&cfg, req)
 		if err := s.node.Reconfigure(cfg); err != nil {
@@ -206,11 +312,120 @@ func (s *APIServer) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start the node in a goroutine and wait up to 2s for a synchronous error.
+	// If the node fails fast (e.g., missing runner factory, invalid config) the
+	// caller gets a 500 with the error. If the node is still starting after
+	// the grace period we return 202 Accepted and keep it running in the
+	// background — further status can be polled via GET /api/v1/status.
+	errCh := make(chan error, 1)
 	go func() {
-		_ = s.node.Start(context.Background()) //nolint:errcheck
+		errCh <- s.node.Start(context.Background())
 	}()
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+	select {
+	case err := <-errCh:
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
+	case <-time.After(2 * time.Second):
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "starting"})
+	case <-r.Context().Done():
+		writeError(w, http.StatusRequestTimeout, "request canceled")
+	}
+}
+
+// connectRequest is the body for POST /api/v1/connect.
+// It configures the node in client mode and starts it. Either Address or
+// Discover must be set. Discover triggers mDNS auto-discovery (single server).
+type connectRequest struct {
+	Address  string  `json:"address,omitempty"`   // Target server address.
+	Port     int     `json:"port,omitempty"`      // Target TCP port (default 4415 from current cfg).
+	Password string  `json:"password,omitempty"`  // Authentication password.
+	DeviceID *uint32 `json:"device_id,omitempty"` // Audio device ID.
+	Nickname string  `json:"nickname,omitempty"`  // Chat display name.
+	Discover bool    `json:"discover,omitempty"`  // Auto-discover server via mDNS.
+}
+
+// handleConnect configures the node in client mode and starts it. This is the
+// client-side counterpart of handleStart: useful when the daemon was started
+// idle (no explicit mode) and the caller wants to switch to client mode on
+// demand — e.g., the Decky plugin connecting to a LAN server.
+//
+// Returns:
+//   - 400 if neither address nor discover is set.
+//   - 409 if the node is already running.
+//   - 500 if Node.Start() fails synchronously within 2s.
+//   - 202 if the node is still starting after 2s (ongoing in background).
+//   - 200 on fast successful start.
+func (s *APIServer) handleConnect(w http.ResponseWriter, r *http.Request) {
+	var req connectRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+	}
+
+	if req.Address == "" && !req.Discover {
+		writeError(w, http.StatusBadRequest, "address or discover must be set")
+		return
+	}
+
+	if s.node.Status() != echowarp.StatusIdle && s.node.Status() != echowarp.StatusStopped {
+		writeError(w, http.StatusConflict, "already running")
+		return
+	}
+
+	cfg := s.node.Config()
+	cfg.Mode = echowarp.ModeClient
+	if req.Address != "" {
+		cfg.Address = req.Address
+	}
+	if req.Port != 0 {
+		cfg.Port = req.Port
+	}
+	if req.Password != "" {
+		cfg.Password = req.Password
+	}
+	if req.DeviceID != nil {
+		cfg.DeviceID = req.DeviceID
+	}
+	if req.Nickname != "" {
+		cfg.Nickname = req.Nickname
+	}
+
+	if err := s.node.Reconfigure(cfg); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- s.node.Start(context.Background())
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "connected"})
+	case <-time.After(2 * time.Second):
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+	case <-r.Context().Done():
+		writeError(w, http.StatusRequestTimeout, "request canceled")
+	}
+}
+
+// handleDisconnect is a semantic alias for handleStop used by client-side
+// callers. It delegates to the same stop logic — the distinction is purely
+// for API clarity (Decky plugin disconnects from a server vs. stopping a
+// running server).
+func (s *APIServer) handleDisconnect(w http.ResponseWriter, r *http.Request) {
+	s.handleStop(w, r)
 }
 
 func (s *APIServer) handleStop(w http.ResponseWriter, r *http.Request) {
@@ -374,8 +589,19 @@ func parseDeviceID(r *http.Request, prefix string) (int, error) {
 	return id, nil
 }
 
-// handleDeviceMute toggles mute on a device.
-// TODO: implement when Node exposes per-device mute control.
+// handleDeviceMute sets the absolute mute state of a device.
+//
+// Response codes:
+//   - 200 on success (command successfully enqueued to the runner).
+//   - 400 on invalid device id or malformed JSON body.
+//   - 409 when the node is not running (no runner to receive the command).
+//   - 500 on any other error propagated from the runner (e.g. queue full).
+//
+// Note on task 013: the command is delivered to ServerApp/ClientApp's internal
+// device command channel. The consumer that actually applies it to the mixer
+// is wired up by task 013 — until that is complete, API calls reach the
+// channel but may be drained by a log-only consumer. The API itself returns
+// 200 only when the command is successfully queued.
 func (s *APIServer) handleDeviceMute(w http.ResponseWriter, r *http.Request) {
 	id, err := parseDeviceID(r, "/api/v1/devices")
 	if err != nil {
@@ -389,14 +615,23 @@ func (s *APIServer) handleDeviceMute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: call s.node.SetDeviceMute(id, req.Muted) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("device mute control not yet implemented (device_id=%d)", id),
+	if err := s.node.SetDeviceMute(id, req.Muted); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"device_id": id,
+		"muted":     req.Muted,
 	})
 }
 
-// handleDeviceVolume sets the volume for a device.
-// TODO: implement when Node exposes per-device volume control.
+// handleDeviceVolume sets the absolute volume multiplier of a device. Valid
+// range 0.0–1.5 (matching task 013 — the mixer caps volume at 1.5 to avoid
+// clipping).
+//
+// Response codes: see handleDeviceMute.
 func (s *APIServer) handleDeviceVolume(w http.ResponseWriter, r *http.Request) {
 	id, err := parseDeviceID(r, "/api/v1/devices")
 	if err != nil {
@@ -410,15 +645,32 @@ func (s *APIServer) handleDeviceVolume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Volume < 0.0 || req.Volume > 2.0 {
-		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 2.0")
+	if req.Volume < 0.0 || req.Volume > 1.5 {
+		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 1.5")
 		return
 	}
 
-	// TODO: call s.node.SetDeviceVolume(id, req.Volume) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("device volume control not yet implemented (device_id=%d)", id),
+	if err := s.node.SetDeviceVolume(id, req.Volume); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":    "ok",
+		"device_id": id,
+		"volume":    req.Volume,
 	})
+}
+
+// deviceCommandStatus maps a Node.SetDevice* error into an HTTP status code.
+// Errors originating from an idle/stopped node map to 409 Conflict (the
+// caller must Start the node first); every other error maps to 500.
+func deviceCommandStatus(status echowarp.NodeStatus) int {
+	switch status {
+	case echowarp.StatusIdle, echowarp.StatusStopped:
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
 }
 
 // ── Conference ───────────────────────────────────────────────────────────────
@@ -442,17 +694,36 @@ func parseParticipantID(r *http.Request) string {
 	return parts[0]
 }
 
-// handleConferenceParticipants lists current conference participants.
-// TODO: implement when Node exposes conference participant enumeration.
-func (s *APIServer) handleConferenceParticipants(w http.ResponseWriter, r *http.Request) {
-	// TODO: call s.node.Participants() once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "conference participant listing not yet implemented",
-	})
+// handleConferenceParticipants lists current conference participants as
+// reported by the running runner.
+//
+// Response codes:
+//   - 200 with a JSON array (possibly empty) on success.
+//
+// This handler is intentionally lenient: if the node is not running or
+// conference mode is not active, Node.Participants() returns an empty slice
+// and we still respond 200 with [] — clients distinguish "no participants"
+// from "node not running" via GET /api/v1/status.
+func (s *APIServer) handleConferenceParticipants(w http.ResponseWriter, _ *http.Request) {
+	participants := s.node.Participants()
+	if participants == nil {
+		participants = []echowarp.ParticipantInfo{}
+	}
+	writeJSON(w, http.StatusOK, participants)
 }
 
 // handleConferenceParticipantMute mutes or unmutes a conference participant.
-// TODO: implement when Node exposes per-participant mute control.
+//
+// Response codes:
+//   - 200 on success (command successfully enqueued to the runner).
+//   - 400 on missing participant id or malformed JSON body.
+//   - 409 when the node is not running.
+//   - 500 on any other error propagated from the runner.
+//
+// Note on task 013: the command is delivered to ServerApp's internal
+// participant command channel. The consumer that applies it to the
+// conference handler is wired up by task 013 — until then, API calls reach
+// the channel but no audible effect is produced.
 func (s *APIServer) handleConferenceParticipantMute(w http.ResponseWriter, r *http.Request) {
 	pid := parseParticipantID(r)
 	if pid == "" {
@@ -466,14 +737,20 @@ func (s *APIServer) handleConferenceParticipantMute(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// TODO: call s.node.MuteParticipant(pid, req.Muted) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("participant mute control not yet implemented (id=%s)", pid),
+	if err := s.node.MuteParticipant(pid, req.Muted); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"participant_id": pid,
+		"muted":          req.Muted,
 	})
 }
 
-// handleConferenceParticipantKick kicks a participant from the conference.
-// TODO: implement when Node exposes participant kick functionality.
+// handleConferenceParticipantKick disconnects a participant from the
+// conference. Response codes mirror handleConferenceParticipantMute.
 func (s *APIServer) handleConferenceParticipantKick(w http.ResponseWriter, r *http.Request) {
 	pid := parseParticipantID(r)
 	if pid == "" {
@@ -481,14 +758,21 @@ func (s *APIServer) handleConferenceParticipantKick(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// TODO: call s.node.KickParticipant(pid) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("participant kick not yet implemented (id=%s)", pid),
+	if err := s.node.KickParticipant(pid); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"participant_id": pid,
+		"kicked":         true,
 	})
 }
 
 // handleConferenceParticipantVolume sets a conference participant's volume.
-// TODO: implement when Node exposes per-participant volume control.
+// Valid range 0.0–1.5 (matching Node.SetParticipantVolume and phase 4a device
+// volume). Response codes mirror handleConferenceParticipantMute.
 func (s *APIServer) handleConferenceParticipantVolume(w http.ResponseWriter, r *http.Request) {
 	pid := parseParticipantID(r)
 	if pid == "" {
@@ -502,14 +786,20 @@ func (s *APIServer) handleConferenceParticipantVolume(w http.ResponseWriter, r *
 		return
 	}
 
-	if req.Volume < 0.0 || req.Volume > 2.0 {
-		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 2.0")
+	if req.Volume < 0.0 || req.Volume > 1.5 {
+		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 1.5")
 		return
 	}
 
-	// TODO: call s.node.SetParticipantVolume(pid, req.Volume) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("participant volume control not yet implemented (id=%s)", pid),
+	if err := s.node.SetParticipantVolume(pid, req.Volume); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"participant_id": pid,
+		"volume":         req.Volume,
 	})
 }
 

@@ -180,6 +180,15 @@ func LoadWithViper(configPath string, mode Mode) (Config, error) {
 	cfg := DefaultConfig()
 	cfg.Mode = mode
 
+	// Client-mode specific defaults. These are applied before file/env parsing
+	// so that explicit file or env values (via isSet below) naturally override
+	// them, while CLI flags (applied later via applyFlagOverrides) still win.
+	// This keeps the precedence chain: CLI > env > file > client-mode default.
+	if mode == ModeClient {
+		cfg.AutoReconnect = true
+		cfg.AutoReconnectAttempts = 5
+	}
+
 	v := viper.New()
 
 	// Configure environment variable support

@@ -13,6 +13,7 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
+	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
@@ -81,6 +82,21 @@ type ServerApp struct {
 	// Recording command channel for receiving start/stop commands from TUI.
 	recordingCmdCh <-chan RecordingCommand
 
+	// recState tracks recording metadata (mode, start time, output
+	// directory) that the underlying audio.ConferenceRecorder does not
+	// expose directly. Populated by the daemon-API RecordingController
+	// adapter in recording_adapter.go and consumed by RecordingStatus
+	// / StopRecording. The struct carries its own mutex so callers
+	// that hold s.mu do not need to coordinate here.
+	recState recordingAdapterState
+
+	// discoveryState owns the on/off lifecycle of the mDNS publisher
+	// goroutine spawned by SetDiscoveryPublish (phase 5d). The state
+	// lives next to recState for symmetry and to keep toggle adapters
+	// grouped — see toggles_adapter.go for the SetDiscoveryPublish
+	// implementation.
+	discoveryState discoveryAdapterState
+
 	// Callback invoked when client count changes (for probe/session info).
 	onClientCount func(int)
 
@@ -95,6 +111,13 @@ type ServerApp struct {
 
 	// Optional channel for forwarding chat messages to TUI.
 	chatMsgCh chan<- ChatMessage
+
+	// chatEventHook is an optional callback invoked on every ChatHub onMessage
+	// fan-out. It is intended for the daemon/API layer to re-emit chat traffic
+	// as an EventChatMessage on the Node's EventBus so WebSocket subscribers
+	// can receive chat in real time. nil when the server is driven by the TUI
+	// only.
+	chatEventHook func(ChatMessage)
 
 	// Auto-increment counter for assigning default nicknames ("Client-N").
 	nextNickname int
@@ -119,6 +142,39 @@ type ServerApp struct {
 	// sessions stores session entries for reconnect support.
 	// Protected by mu (same mutex as clients).
 	sessions map[string]*sessionEntry
+
+	// statsHook is an optional callback invoked on every stats tick with the
+	// same ConnectionStats value that would be sent to statsCh. The daemon
+	// wires it to Node.UpdateStats so GET /api/v1/stats returns live numbers
+	// without requiring a TUI statsCh. Safe to leave nil; additive to the
+	// TUI path — both sinks receive the same values.
+	statsHook func(transport.ConnectionStats)
+
+	// onClientJoin / onClientLeave are optional callbacks invoked on every
+	// client register/unregister event in both single- and multi-client
+	// modes. The daemon wires them to Node.AddClient/Node.RemoveClient so
+	// GET /api/v1/clients returns the real live roster. Safe to leave nil;
+	// additive to the TUI path.
+	onClientJoin  func(clientID, remoteAddr string)
+	onClientLeave func(clientID string)
+
+	// deviceCmdCh is the internal channel into which device control commands
+	// (mute/volume) are pushed by HandleDeviceCommand. A consumer goroutine
+	// that actually applies the commands to the mixer is wired up by the CLI
+	// / task 013 — the app layer only owns the buffered channel so the API
+	// layer has a non-blocking place to deliver commands.
+	deviceCmdCh chan DeviceCommand
+
+	// participantCmdChAPI is the internal channel into which participant
+	// control commands (mute/kick/volume) originating from the HTTP API are
+	// pushed by HandleParticipantCommand. It is intentionally distinct from
+	// the TUI-provided participantCmdCh (<-chan, owned by the TUI layer) —
+	// the two channels can coexist and are drained independently until
+	// task 013 unifies them. The consumer that applies API-level commands
+	// to the conference handler is wired up by task 013; until then the
+	// channel is a bounded buffer that accepts commands and returns 200
+	// from the API.
+	participantCmdChAPI chan ParticipantCommand
 }
 
 // sessionEntry stores data needed to restore a client's identity on reconnect.
@@ -149,23 +205,71 @@ type multiClient struct {
 // Uses default factories if none provided.
 func NewServerApp(cfg config.Config, logger *slog.Logger, banMgr ban.BanManager, tlsConfig *tls.Config, rateLimiter *auth.IPRateLimiter) *ServerApp {
 	return &ServerApp{
-		cfg:             cfg,
-		logger:          logger,
-		banMgr:          banMgr,
-		auth:            auth.NewAuthHandler(cfg.IsTLSEnabled(), cfg.Password),
-		tlsConfig:       tlsConfig,
-		rateLimiter:     rateLimiter,
-		signalerFactory: NewTCPSignalerFactory(),
-		peerFactory:     NewWebRTCPeerFactory(),
-		clients:         make(map[string]*multiClient),
-		sessions:        make(map[string]*sessionEntry),
+		cfg:                 cfg,
+		logger:              logger,
+		banMgr:              banMgr,
+		auth:                auth.NewAuthHandler(cfg.IsTLSEnabled(), cfg.Password),
+		tlsConfig:           tlsConfig,
+		rateLimiter:         rateLimiter,
+		signalerFactory:     NewTCPSignalerFactory(),
+		peerFactory:         NewWebRTCPeerFactory(),
+		clients:             make(map[string]*multiClient),
+		sessions:            make(map[string]*sessionEntry),
+		deviceCmdCh:         make(chan DeviceCommand, 16),
+		participantCmdChAPI: make(chan ParticipantCommand, 16),
 	}
+}
+
+// ParticipantCommandChannel returns the internal participant command channel
+// used for API-originated commands. Consumers (task 013) read from it to
+// apply commands to the conference handler. Returns nil only for zero-valued
+// ServerApps produced in tests that skip NewServerApp.
+//
+// This is distinct from the TUI-provided channel wired via
+// WithParticipantCommandChannel — the two channels coexist until task 013
+// unifies the delivery paths.
+func (s *ServerApp) ParticipantCommandChannel() <-chan ParticipantCommand {
+	return s.participantCmdChAPI
+}
+
+// DeviceCommandChannel returns the internal device command channel. Consumers
+// (e.g. the CLI-level HandleDeviceCommands goroutine wired in task 013) read
+// from this channel to apply commands to the mixer. Returns nil only for
+// zero-valued ServerApps produced in tests that skip NewServerApp.
+func (s *ServerApp) DeviceCommandChannel() <-chan DeviceCommand {
+	return s.deviceCmdCh
 }
 
 // WithStatsChannels configures optional channels for reporting statistics to TUI.
 func (s *ServerApp) WithStatsChannels(statsCh chan<- transport.ConnectionStats, errCh chan<- error) *ServerApp {
 	s.statsCh = statsCh
 	s.errCh = errCh
+	return s
+}
+
+// WithStatsHook installs a callback invoked on every stats tick (and on the
+// final "disconnected" stat) with the same ConnectionStats value that would
+// be delivered to the TUI statsCh. Primarily used by the daemon to forward
+// live stats into Node.UpdateStats so GET /api/v1/stats reflects non-zero
+// bytes during streaming. Safe to pass nil (equivalent to unset); additive
+// to the TUI path — both sinks receive the same values.
+func (s *ServerApp) WithStatsHook(fn func(transport.ConnectionStats)) *ServerApp {
+	s.statsHook = fn
+	return s
+}
+
+// WithClientTrackingHooks installs callbacks invoked on every client
+// register / unregister event in both single- and multi-client modes. The
+// daemon wires these to Node.AddClient / Node.RemoveClient so
+// GET /api/v1/clients returns the real live roster. Safe to pass nil
+// (equivalent to unset); additive to the TUI path — the TUI observes the
+// same events via the onClientCount callback.
+func (s *ServerApp) WithClientTrackingHooks(
+	onJoin func(clientID, remoteAddr string),
+	onLeave func(clientID string),
+) *ServerApp {
+	s.onClientJoin = onJoin
+	s.onClientLeave = onLeave
 	return s
 }
 
@@ -260,6 +364,15 @@ func (s *ServerApp) WithChatChannel(ch chan<- ChatMessage) *ServerApp {
 	return s
 }
 
+// WithChatEventHook installs a callback invoked on every chat message fan-out
+// from the ChatHub. The hook is primarily used by the daemon to re-emit chat
+// traffic as EventChatMessage on the Node's EventBus so WebSocket clients
+// receive chat in real time. Safe to pass nil (equivalent to unset).
+func (s *ServerApp) WithChatEventHook(fn func(ChatMessage)) *ServerApp {
+	s.chatEventHook = fn
+	return s
+}
+
 // WithServerPauseChannel sets the channel for receiving server participant pause toggles from TUI.
 func (s *ServerApp) WithServerPauseChannel(ch <-chan bool) *ServerApp {
 	s.serverPauseCh = ch
@@ -274,6 +387,24 @@ func (s *ServerApp) SendChatMessage(text string, toNickname ...string) {
 	}
 }
 
+// SendChat implements echowarp.ChatSender. It sends a chat message from the
+// server via the ChatHub. Empty to broadcasts; non-empty to is delivered as a
+// DM to that nickname. Returns an ErrNotRunning error if the ChatHub has not
+// been initialized yet (e.g., ServerApp constructed but Run not called, or
+// Run has already exited).
+func (s *ServerApp) SendChat(text, to string) error {
+	if s.chatHub == nil {
+		return ewerrors.NewError(ewerrors.ErrNotRunning, "Server chat hub not initialized").
+			WithSuggestion("Start the server before sending chat messages")
+	}
+	if to == "" {
+		s.chatHub.SendFromServer(text)
+	} else {
+		s.chatHub.SendFromServer(text, to)
+	}
+	return nil
+}
+
 // GetChatHub returns the chat hub (nil if not yet initialized).
 func (s *ServerApp) GetChatHub() *ChatHub {
 	return s.chatHub
@@ -283,6 +414,12 @@ func (s *ServerApp) GetChatHub() *ChatHub {
 // In single-client mode (MaxClients <= 1), handles one client at a time sequentially.
 // In multi-client mode (MaxClients > 1), accepts concurrent connections up to MaxClients.
 func (s *ServerApp) Run(ctx context.Context) error {
+	// Ensure any mDNS publisher started via the daemon API
+	// (SetDiscoveryPublish) is torn down when Run exits, so a Node.Stop
+	// followed by a fresh Node.Start does not leak the zeroconf
+	// goroutine.
+	defer func() { _ = s.SetDiscoveryPublish(false) }() //nolint:errcheck // adapter never errors on disable
+
 	// Initialize AEC processor for duplex mode.
 	if s.cfg.AEC && (s.cfg.Duplex || s.cfg.Conference) {
 		s.aec = audio.NewAECProcessor(audio.DefaultAECConfig())
@@ -296,6 +433,9 @@ func (s *ServerApp) Run(ctx context.Context) error {
 			case s.chatMsgCh <- msg:
 			default:
 			}
+		}
+		if s.chatEventHook != nil {
+			s.chatEventHook(msg)
 		}
 	})
 
