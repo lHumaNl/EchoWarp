@@ -694,17 +694,36 @@ func parseParticipantID(r *http.Request) string {
 	return parts[0]
 }
 
-// handleConferenceParticipants lists current conference participants.
-// TODO: implement when Node exposes conference participant enumeration.
-func (s *APIServer) handleConferenceParticipants(w http.ResponseWriter, r *http.Request) {
-	// TODO: call s.node.Participants() once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "conference participant listing not yet implemented",
-	})
+// handleConferenceParticipants lists current conference participants as
+// reported by the running runner.
+//
+// Response codes:
+//   - 200 with a JSON array (possibly empty) on success.
+//
+// This handler is intentionally lenient: if the node is not running or
+// conference mode is not active, Node.Participants() returns an empty slice
+// and we still respond 200 with [] — clients distinguish "no participants"
+// from "node not running" via GET /api/v1/status.
+func (s *APIServer) handleConferenceParticipants(w http.ResponseWriter, _ *http.Request) {
+	participants := s.node.Participants()
+	if participants == nil {
+		participants = []echowarp.ParticipantInfo{}
+	}
+	writeJSON(w, http.StatusOK, participants)
 }
 
 // handleConferenceParticipantMute mutes or unmutes a conference participant.
-// TODO: implement when Node exposes per-participant mute control.
+//
+// Response codes:
+//   - 200 on success (command successfully enqueued to the runner).
+//   - 400 on missing participant id or malformed JSON body.
+//   - 409 when the node is not running.
+//   - 500 on any other error propagated from the runner.
+//
+// Note on task 013: the command is delivered to ServerApp's internal
+// participant command channel. The consumer that applies it to the
+// conference handler is wired up by task 013 — until then, API calls reach
+// the channel but no audible effect is produced.
 func (s *APIServer) handleConferenceParticipantMute(w http.ResponseWriter, r *http.Request) {
 	pid := parseParticipantID(r)
 	if pid == "" {
@@ -718,14 +737,20 @@ func (s *APIServer) handleConferenceParticipantMute(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// TODO: call s.node.MuteParticipant(pid, req.Muted) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("participant mute control not yet implemented (id=%s)", pid),
+	if err := s.node.MuteParticipant(pid, req.Muted); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"participant_id": pid,
+		"muted":          req.Muted,
 	})
 }
 
-// handleConferenceParticipantKick kicks a participant from the conference.
-// TODO: implement when Node exposes participant kick functionality.
+// handleConferenceParticipantKick disconnects a participant from the
+// conference. Response codes mirror handleConferenceParticipantMute.
 func (s *APIServer) handleConferenceParticipantKick(w http.ResponseWriter, r *http.Request) {
 	pid := parseParticipantID(r)
 	if pid == "" {
@@ -733,14 +758,21 @@ func (s *APIServer) handleConferenceParticipantKick(w http.ResponseWriter, r *ht
 		return
 	}
 
-	// TODO: call s.node.KickParticipant(pid) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("participant kick not yet implemented (id=%s)", pid),
+	if err := s.node.KickParticipant(pid); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"participant_id": pid,
+		"kicked":         true,
 	})
 }
 
 // handleConferenceParticipantVolume sets a conference participant's volume.
-// TODO: implement when Node exposes per-participant volume control.
+// Valid range 0.0–1.5 (matching Node.SetParticipantVolume and phase 4a device
+// volume). Response codes mirror handleConferenceParticipantMute.
 func (s *APIServer) handleConferenceParticipantVolume(w http.ResponseWriter, r *http.Request) {
 	pid := parseParticipantID(r)
 	if pid == "" {
@@ -754,14 +786,20 @@ func (s *APIServer) handleConferenceParticipantVolume(w http.ResponseWriter, r *
 		return
 	}
 
-	if req.Volume < 0.0 || req.Volume > 2.0 {
-		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 2.0")
+	if req.Volume < 0.0 || req.Volume > 1.5 {
+		writeError(w, http.StatusBadRequest, "volume must be between 0.0 and 1.5")
 		return
 	}
 
-	// TODO: call s.node.SetParticipantVolume(pid, req.Volume) once the Node exposes it.
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": fmt.Sprintf("participant volume control not yet implemented (id=%s)", pid),
+	if err := s.node.SetParticipantVolume(pid, req.Volume); err != nil {
+		writeError(w, deviceCommandStatus(s.node.Status()), err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":         "ok",
+		"participant_id": pid,
+		"volume":         req.Volume,
 	})
 }
 

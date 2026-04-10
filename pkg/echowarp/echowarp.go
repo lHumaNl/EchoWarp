@@ -753,6 +753,121 @@ func (n *Node) deviceCommandReceiver() (DeviceCommandReceiver, error) {
 	return receiver, nil
 }
 
+// Participants returns a snapshot of the current conference participants as
+// reported by the running runner. Returns an empty (non-nil) slice if the
+// node is not running or the runner does not implement ParticipantLister.
+//
+// Safe for concurrent use.
+func (n *Node) Participants() []ParticipantInfo {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return []ParticipantInfo{}
+	}
+	lister, ok := runner.(ParticipantLister)
+	if !ok {
+		return []ParticipantInfo{}
+	}
+	parts := lister.Participants()
+	if parts == nil {
+		return []ParticipantInfo{}
+	}
+	return parts
+}
+
+// MuteParticipant sets the mute state of the given conference participant on
+// the running runner. Returns an error if the id is empty, the node has no
+// runner (not started), or the runner does not implement
+// ParticipantCommandReceiver.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's
+// HandleParticipantCommand which is expected to enqueue with a bounded timeout.
+func (n *Node) MuteParticipant(id string, muted bool) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid participant id").
+			WithSuggestion("Participant id must be non-empty")
+	}
+	receiver, err := n.participantCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleParticipantCommand(ParticipantCommand{
+		Action: ParticipantActionMute,
+		ID:     id,
+		Muted:  muted,
+	})
+}
+
+// KickParticipant disconnects the given conference participant from the
+// running runner. Returns an error if the id is empty, the node has no
+// runner, or the runner does not implement ParticipantCommandReceiver.
+//
+// Safe for concurrent use.
+func (n *Node) KickParticipant(id string) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid participant id").
+			WithSuggestion("Participant id must be non-empty")
+	}
+	receiver, err := n.participantCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleParticipantCommand(ParticipantCommand{
+		Action: ParticipantActionKick,
+		ID:     id,
+	})
+}
+
+// SetParticipantVolume sets the volume multiplier (0.0–1.5) of the given
+// conference participant on the running runner. Returns an error if the id
+// is empty, the volume is out of range, the node has no runner, or the
+// runner does not implement ParticipantCommandReceiver.
+//
+// Safe for concurrent use.
+func (n *Node) SetParticipantVolume(id string, volume float64) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid participant id").
+			WithSuggestion("Participant id must be non-empty")
+	}
+	if volume < 0.0 || volume > 1.5 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Volume out of range").
+			WithContext("volume", volume).
+			WithSuggestion("Volume must be in the range 0.0–1.5")
+	}
+	receiver, err := n.participantCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleParticipantCommand(ParticipantCommand{
+		Action: ParticipantActionSetVolume,
+		ID:     id,
+		Volume: volume,
+	})
+}
+
+// participantCommandReceiver returns the current runner as a
+// ParticipantCommandReceiver or a structured error if the node is not running
+// or the runner does not support participant commands.
+func (n *Node) participantCommandReceiver() (ParticipantCommandReceiver, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(n.Status())).
+			WithSuggestion("Start the node before issuing participant commands")
+	}
+	receiver, ok := runner.(ParticipantCommandReceiver)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support participant commands").
+			WithSuggestion("Use a runner implementation that implements ParticipantCommandReceiver")
+	}
+	return receiver, nil
+}
+
 // Devices returns a list of all available audio input and output devices on the system.
 // This is a package-level convenience function equivalent to Node.Devices().
 func Devices() ([]AudioDevice, error) {

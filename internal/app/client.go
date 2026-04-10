@@ -130,6 +130,14 @@ type ClientApp struct {
 	// consumer goroutine that actually applies the commands to the mixer
 	// is wired up by the CLI / task 013.
 	deviceCmdCh chan DeviceCommand
+
+	// participantCmdChAPI is the internal channel for participant control
+	// commands originating from the HTTP API. Client mode does not own the
+	// conference mixer, so commands pushed here are accepted (for API
+	// contract consistency with server mode) but never applied — the
+	// consumer is a no-op. See Participants() / HandleParticipantCommand
+	// in participant_handler.go.
+	participantCmdChAPI chan ParticipantCommand
 }
 
 // NewClientApp creates a new client application with the given configuration.
@@ -137,14 +145,24 @@ type ClientApp struct {
 // Uses default factories if none provided.
 func NewClientApp(cfg config.Config, logger *slog.Logger, tlsConfig *tls.Config) *ClientApp {
 	return &ClientApp{
-		cfg:             cfg,
-		logger:          logger,
-		auth:            auth.NewAuthHandler(cfg.IsTLSEnabled(), cfg.Password),
-		tlsConfig:       tlsConfig,
-		signalerFactory: NewTCPSignalerFactory(),
-		peerFactory:     NewWebRTCPeerFactory(),
-		deviceCmdCh:     make(chan DeviceCommand, 16),
+		cfg:                 cfg,
+		logger:              logger,
+		auth:                auth.NewAuthHandler(cfg.IsTLSEnabled(), cfg.Password),
+		tlsConfig:           tlsConfig,
+		signalerFactory:     NewTCPSignalerFactory(),
+		peerFactory:         NewWebRTCPeerFactory(),
+		deviceCmdCh:         make(chan DeviceCommand, 16),
+		participantCmdChAPI: make(chan ParticipantCommand, 16),
 	}
+}
+
+// ParticipantCommandChannel returns the internal participant command channel
+// used for API-originated commands. Returns nil only for zero-valued
+// ClientApps built outside NewClientApp. See server.go ParticipantCommandChannel
+// for the server-mode counterpart; in client mode commands are accepted but
+// never applied.
+func (c *ClientApp) ParticipantCommandChannel() <-chan ParticipantCommand {
+	return c.participantCmdChAPI
 }
 
 // DeviceCommandChannel returns the internal device command channel for

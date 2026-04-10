@@ -69,12 +69,32 @@ const (
 	ParticipantMutePersist
 	// ParticipantUnmutePersist unmutes and removes from persistent mute list.
 	ParticipantUnmutePersist
+	// ParticipantKick disconnects a participant from the conference.
+	// Consumed by the API-level HandleParticipantCommand path; TUI currently
+	// does not emit this action.
+	ParticipantKick
+	// ParticipantSetVolume sets an absolute volume multiplier (carried on
+	// the Volume field of ParticipantCommand). Used by the API path — TUI
+	// still uses the VolumeUp/VolumeDown toggle actions.
+	ParticipantSetVolume
+	// ParticipantSetMute sets an absolute mute state (carried on the Muted
+	// field of ParticipantCommand). Used by the API path — TUI uses the
+	// Mute/Unmute toggle actions.
+	ParticipantSetMute
 )
 
-// ParticipantCommand is sent from TUI to control conference participants.
+// ParticipantCommand is sent from TUI or the daemon HTTP API to control
+// conference participants.
+//
+// The Muted / Volume fields are only consumed for the API-originating
+// actions (ParticipantSetMute / ParticipantSetVolume). TUI-originating
+// actions (Mute / Unmute / VolumeUp / VolumeDown) leave them at their
+// zero values.
 type ParticipantCommand struct {
 	Action        ParticipantAction
 	ParticipantID string
+	Muted         bool    // absolute value for ParticipantSetMute (ignored otherwise)
+	Volume        float64 // absolute value for ParticipantSetVolume, range 0.0–1.5
 }
 
 // ConferenceStatsPayload is sent from server to TUI with participant states and recording status.

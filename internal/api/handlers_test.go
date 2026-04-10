@@ -1014,37 +1014,16 @@ func TestHandleDeviceVolume_InvalidJSON(t *testing.T) {
 
 // ── Conference tests ─────────────────────────────────────────────────────────
 
-func TestHandleConferenceParticipants_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	resp, err := http.Get(ts.URL + "/api/v1/conference/participants")
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
-
-func TestHandleConferenceParticipantMute_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"muted": true}`)
-	resp, err := http.Post(ts.URL+"/api/v1/conference/participants/p-1/mute", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
+// NOTE: TestHandleConferenceParticipants_Returns501 /
+// TestHandleConferenceParticipantMute_Returns501 /
+// TestHandleConferenceParticipantKick_Returns501 /
+// TestHandleConferenceParticipantVolume_Returns501 were removed in phase 4b —
+// the 4 handlers no longer return 501. Full end-to-end coverage lives in
+// internal/api/conference_control_test.go (uses a fake runner that
+// implements ParticipantLister + ParticipantCommandReceiver and asserts the
+// exact ParticipantCommand reaches the runner). The InvalidJSON / InvalidRange
+// tests below remain — they exercise the 400 paths which don't depend on
+// the runner.
 
 func TestHandleConferenceParticipantMute_InvalidJSON(t *testing.T) {
 	_, ts := setupTestHandlersServer(t)
@@ -1059,37 +1038,6 @@ func TestHandleConferenceParticipantMute_InvalidJSON(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&result)
 	require.NoError(t, err)
 	assert.Contains(t, result.Error, "invalid JSON")
-}
-
-func TestHandleConferenceParticipantKick_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	resp, err := http.Post(ts.URL+"/api/v1/conference/participants/p-2/kick", "application/json", nil)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
-}
-
-func TestHandleConferenceParticipantVolume_Returns501(t *testing.T) {
-	_, ts := setupTestHandlersServer(t)
-
-	body := bytes.NewBufferString(`{"volume": 0.5}`)
-	resp, err := http.Post(ts.URL+"/api/v1/conference/participants/p-3/volume", "application/json", body)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusNotImplemented, resp.StatusCode)
-
-	var result map[string]string
-	err = json.NewDecoder(resp.Body).Decode(&result)
-	require.NoError(t, err)
-	assert.Contains(t, result["error"], "not yet implemented")
 }
 
 func TestHandleConferenceParticipantVolume_InvalidRange(t *testing.T) {

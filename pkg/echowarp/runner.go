@@ -33,6 +33,34 @@ type DeviceCommandReceiver interface {
 	HandleDeviceCommand(cmd DeviceCommand) error
 }
 
+// ParticipantLister is an optional interface that Runner implementations may
+// satisfy to expose a snapshot of the current conference participants via
+// Node.Participants(). Runners that do not implement this interface cause
+// Node.Participants() to return an empty slice (see echowarp.go).
+type ParticipantLister interface {
+	// Participants returns a snapshot of the current conference participants.
+	// The returned slice is owned by the caller and must not be mutated by
+	// the runner after being returned.
+	Participants() []ParticipantInfo
+}
+
+// ParticipantCommandReceiver is an optional interface that Runner
+// implementations may satisfy to accept conference-participant-level control
+// commands (mute / kick / volume) issued via the public Node API
+// (Node.MuteParticipant, Node.KickParticipant, Node.SetParticipantVolume).
+//
+// Runners that do not implement this interface cause the corresponding Node
+// methods to return an ErrInternalState-class error. This keeps the core
+// Runner contract minimal while still allowing typed participant control
+// without the caller knowing the concrete runner type.
+type ParticipantCommandReceiver interface {
+	// HandleParticipantCommand enqueues a participant command for processing
+	// by the runner. Implementations should return quickly (non-blocking, or
+	// with a short timeout) and must be safe to call from any goroutine
+	// while the runner is executing Run(ctx).
+	HandleParticipantCommand(cmd ParticipantCommand) error
+}
+
 // RunnerFactory creates a Runner instance based on configuration.
 // This function bridges the pkg/echowarp package with internal/app implementations,
 // avoiding direct imports that would break the package boundary.

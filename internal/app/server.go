@@ -126,6 +126,17 @@ type ServerApp struct {
 	// / task 013 — the app layer only owns the buffered channel so the API
 	// layer has a non-blocking place to deliver commands.
 	deviceCmdCh chan DeviceCommand
+
+	// participantCmdChAPI is the internal channel into which participant
+	// control commands (mute/kick/volume) originating from the HTTP API are
+	// pushed by HandleParticipantCommand. It is intentionally distinct from
+	// the TUI-provided participantCmdCh (<-chan, owned by the TUI layer) —
+	// the two channels can coexist and are drained independently until
+	// task 013 unifies them. The consumer that applies API-level commands
+	// to the conference handler is wired up by task 013; until then the
+	// channel is a bounded buffer that accepts commands and returns 200
+	// from the API.
+	participantCmdChAPI chan ParticipantCommand
 }
 
 // sessionEntry stores data needed to restore a client's identity on reconnect.
@@ -156,18 +167,31 @@ type multiClient struct {
 // Uses default factories if none provided.
 func NewServerApp(cfg config.Config, logger *slog.Logger, banMgr ban.BanManager, tlsConfig *tls.Config, rateLimiter *auth.IPRateLimiter) *ServerApp {
 	return &ServerApp{
-		cfg:             cfg,
-		logger:          logger,
-		banMgr:          banMgr,
-		auth:            auth.NewAuthHandler(cfg.IsTLSEnabled(), cfg.Password),
-		tlsConfig:       tlsConfig,
-		rateLimiter:     rateLimiter,
-		signalerFactory: NewTCPSignalerFactory(),
-		peerFactory:     NewWebRTCPeerFactory(),
-		clients:         make(map[string]*multiClient),
-		sessions:        make(map[string]*sessionEntry),
-		deviceCmdCh:     make(chan DeviceCommand, 16),
+		cfg:                 cfg,
+		logger:              logger,
+		banMgr:              banMgr,
+		auth:                auth.NewAuthHandler(cfg.IsTLSEnabled(), cfg.Password),
+		tlsConfig:           tlsConfig,
+		rateLimiter:         rateLimiter,
+		signalerFactory:     NewTCPSignalerFactory(),
+		peerFactory:         NewWebRTCPeerFactory(),
+		clients:             make(map[string]*multiClient),
+		sessions:            make(map[string]*sessionEntry),
+		deviceCmdCh:         make(chan DeviceCommand, 16),
+		participantCmdChAPI: make(chan ParticipantCommand, 16),
 	}
+}
+
+// ParticipantCommandChannel returns the internal participant command channel
+// used for API-originated commands. Consumers (task 013) read from it to
+// apply commands to the conference handler. Returns nil only for zero-valued
+// ServerApps produced in tests that skip NewServerApp.
+//
+// This is distinct from the TUI-provided channel wired via
+// WithParticipantCommandChannel — the two channels coexist until task 013
+// unifies the delivery paths.
+func (s *ServerApp) ParticipantCommandChannel() <-chan ParticipantCommand {
+	return s.participantCmdChAPI
 }
 
 // DeviceCommandChannel returns the internal device command channel. Consumers
