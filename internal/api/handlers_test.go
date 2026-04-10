@@ -605,6 +605,171 @@ func TestApplyConfigOverrides_PartialFields(t *testing.T) {
 	assert.Equal(t, uint32(2), cfg.Channels)
 }
 
+// TestConfigRequestExtended drives POST /api/v1/config with every phase 3
+// pointer field populated and asserts each one is reflected in the underlying
+// node config via the round-trip GET /api/v1/config.
+func TestConfigRequestExtended(t *testing.T) {
+	server, ts := setupTestHandlersServer(t)
+
+	duplex := true
+	conference := false
+	bitrate := 96000
+	complexity := 9
+	opusApp := "audio"
+	dtx := false
+	fec := false
+	maxClients := 7
+	nickname := "test-node"
+	hwid := true
+	loopback := true
+	aec := true
+	stun := []string{"stun:stun.example.com:3478", "stun:stun2.example.com:3478"}
+	tlsCert := "/tmp/cert.pem"
+	tlsKey := "/tmp/key.pem"
+	tlsInsecure := true
+
+	req := configRequest{
+		Duplex:          &duplex,
+		Conference:      &conference,
+		OpusBitrate:     &bitrate,
+		OpusComplexity:  &complexity,
+		OpusApplication: &opusApp,
+		OpusDTX:         &dtx,
+		OpusFEC:         &fec,
+		MaxClients:      &maxClients,
+		Nickname:        &nickname,
+		HWIDRequired:    &hwid,
+		Loopback:        &loopback,
+		AEC:             &aec,
+		STUNServers:     &stun,
+		TLSCert:         &tlsCert,
+		TLSKey:          &tlsKey,
+		TLSInsecure:     &tlsInsecure,
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	cfg := server.node.Config()
+	assert.True(t, cfg.Duplex)
+	assert.False(t, cfg.Conference)
+	assert.Equal(t, 96000, cfg.OpusBitrate)
+	assert.Equal(t, 9, cfg.OpusComplexity)
+	assert.Equal(t, "audio", cfg.OpusApplication)
+	assert.False(t, cfg.OpusDTX)
+	assert.False(t, cfg.OpusFEC)
+	assert.Equal(t, 7, cfg.MaxClients)
+	assert.Equal(t, "test-node", cfg.Nickname)
+	assert.True(t, cfg.HWIDRequired)
+	assert.Equal(t, stun, cfg.STUNServers)
+	assert.Equal(t, "/tmp/cert.pem", cfg.TLSCert)
+	assert.Equal(t, "/tmp/key.pem", cfg.TLSKey)
+	assert.True(t, cfg.TLSInsecure)
+	assert.True(t, cfg.Loopback)
+	assert.True(t, cfg.AEC)
+}
+
+// TestConfigRequestPartial verifies that pointer fields absent from the JSON
+// body do NOT clobber pre-existing values in the node config. This is the core
+// contract of the *T pointer types: nil = "not provided".
+func TestConfigRequestPartial(t *testing.T) {
+	server, ts := setupTestHandlersServer(t)
+
+	// Pre-populate node config with known values via Reconfigure.
+	base := server.node.Config()
+	base.OpusBitrate = 48000
+	base.OpusComplexity = 4
+	base.OpusApplication = "voip"
+	base.Nickname = "original"
+	base.MaxClients = 3
+	base.HWIDRequired = true
+	base.Duplex = true
+	base.Loopback = true
+	base.AEC = true
+	require.NoError(t, server.node.Reconfigure(base))
+
+	// Send partial update: only bitrate and nickname.
+	newBitrate := 128000
+	newNick := "updated"
+	req := configRequest{
+		OpusBitrate: &newBitrate,
+		Nickname:    &newNick,
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	cfg := server.node.Config()
+	// Updated fields:
+	assert.Equal(t, 128000, cfg.OpusBitrate)
+	assert.Equal(t, "updated", cfg.Nickname)
+	// Preserved fields (must not be zeroed):
+	assert.Equal(t, 4, cfg.OpusComplexity, "OpusComplexity must be preserved when not in request")
+	assert.Equal(t, "voip", cfg.OpusApplication, "OpusApplication must be preserved when not in request")
+	assert.Equal(t, 3, cfg.MaxClients, "MaxClients must be preserved when not in request")
+	assert.True(t, cfg.HWIDRequired, "HWIDRequired must be preserved when not in request")
+	assert.True(t, cfg.Duplex, "Duplex must be preserved when not in request")
+	assert.True(t, cfg.Loopback, "Loopback must be preserved when not in request")
+	assert.True(t, cfg.AEC, "AEC must be preserved when not in request")
+}
+
+// TestConfigRequestInvalidOpusApplication verifies that an unsupported value
+// for opus_application is rejected with HTTP 400 before touching the node.
+func TestConfigRequestInvalidOpusApplication(t *testing.T) {
+	server, ts := setupTestHandlersServer(t)
+
+	pre := server.node.Config()
+	origApp := pre.OpusApplication
+
+	body := []byte(`{"opus_application":"bogus"}`)
+	resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	var errResp errorResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&errResp))
+	assert.Contains(t, errResp.Error, "opus_application")
+
+	// Config must be untouched after the rejection.
+	post := server.node.Config()
+	assert.Equal(t, origApp, post.OpusApplication)
+}
+
+// TestConfigRequestOpusApplicationValidValues verifies that every value the
+// Opus encoder accepts is also accepted by the REST API. This guards against
+// drift between internal/api/handlers.go and pkg/echowarp/audio/opus.go where
+// previously "lowdelay" was advertised but would crash the encoder.
+func TestConfigRequestOpusApplicationValidValues(t *testing.T) {
+	validValues := []string{"voip", "audio", "restricted_lowdelay"}
+	for _, app := range validValues {
+		t.Run(app, func(t *testing.T) {
+			server, ts := setupTestHandlersServer(t)
+
+			appVal := app
+			req := configRequest{OpusApplication: &appVal}
+			body, err := json.Marshal(req)
+			require.NoError(t, err)
+
+			resp, err := http.Post(ts.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode, "value %q must be accepted", app)
+
+			cfg := server.node.Config()
+			assert.Equal(t, app, cfg.OpusApplication)
+		})
+	}
+}
+
 func TestStatusResponse_JSON(t *testing.T) {
 	resp := statusResponse{
 		Status: "streaming",

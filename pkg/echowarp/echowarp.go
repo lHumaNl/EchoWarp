@@ -138,11 +138,18 @@ type NodeConfig struct {
 	Channels uint32
 	// VirtualMic enables creation of a virtual microphone device.
 	VirtualMic bool
+	// Loopback enables capture of system audio output (requires BlackHole on
+	// macOS, WASAPI loopback on Windows, PulseAudio monitor source on Linux).
+	Loopback bool
+	// AEC enables software acoustic echo cancellation. Only relevant in duplex
+	// and conference modes where the local speaker signal can bleed into the
+	// microphone capture.
+	AEC bool
 
 	// Opus configuration parameters.
 	OpusBitrate     int    // Target bitrate in bits per second.
 	OpusComplexity  int    // Encoder complexity (0-10).
-	OpusApplication string // Application type: "voip", "audio", or "lowdelay".
+	OpusApplication string // Application type: "voip", "audio", or "restricted_lowdelay".
 	OpusDTX         bool   // Enable discontinuous transmission.
 	OpusFEC         bool   // Enable in-band forward error correction.
 

@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/lHumaNl/echowarp/internal/app"
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/daemon"
@@ -1375,15 +1377,21 @@ func TestCreateRunnerFactory_ServerModeRoute(t *testing.T) {
 }
 
 // TestApplyDaemonClientOverrides asserts that applyDaemonClientOverrides
-// correctly copies client-mode CLI flags into the config and applies the
-// documented defaults when flags are unset.
+// correctly copies client-mode CLI flags into the config. Client-mode defaults
+// (auto-reconnect=true, attempts=5) are seeded by LoadWithViper and are NOT
+// reapplied here — see TestLoadWithViperClientModeDefaults below.
 func TestApplyDaemonClientOverrides(t *testing.T) {
 	cmd := newDaemonStartCmd()
 	_ = cmd.Flags().Set("address", "10.0.0.5")
 	_ = cmd.Flags().Set("nickname", "alice")
 	_ = cmd.Flags().Set("tls-insecure", "true")
 
-	cfg := config.Config{Mode: config.ModeServer}
+	// Simulate the post-LoadWithViper(ModeClient) state: defaults already seeded.
+	cfg := config.Config{
+		Mode:                  config.ModeServer,
+		AutoReconnect:         true,
+		AutoReconnectAttempts: 5,
+	}
 	applyDaemonClientOverrides(cmd, &cfg)
 
 	if cfg.Mode != config.ModeClient {
@@ -1398,12 +1406,98 @@ func TestApplyDaemonClientOverrides(t *testing.T) {
 	if !cfg.TLSInsecure {
 		t.Error("expected tls-insecure=true")
 	}
-	// auto-reconnect default should kick in (flag not Changed).
+	// Defaults preserved because no flag was passed.
 	if !cfg.AutoReconnect {
-		t.Error("expected auto-reconnect default=true")
+		t.Error("expected auto-reconnect default=true to be preserved")
 	}
 	if cfg.AutoReconnectAttempts != 5 {
 		t.Errorf("expected auto-reconnect-attempts default=5, got %d", cfg.AutoReconnectAttempts)
+	}
+}
+
+// TestDaemonFlagsExtended verifies each phase 3 CLI flag is registered on the
+// daemon start command and parses into the expected type/value.
+func TestDaemonFlagsExtended(t *testing.T) {
+	cases := []struct {
+		name     string
+		arg      string
+		lookup   func(cmd *cobra.Command) (any, error)
+		expected any
+	}{
+		{"duplex", "--duplex=true", func(c *cobra.Command) (any, error) { return c.Flags().GetBool("duplex") }, true},
+		{"conference", "--conference=true", func(c *cobra.Command) (any, error) { return c.Flags().GetBool("conference") }, true},
+		{"loopback", "--loopback=true", func(c *cobra.Command) (any, error) { return c.Flags().GetBool("loopback") }, true},
+		{"aec", "--aec=true", func(c *cobra.Command) (any, error) { return c.Flags().GetBool("aec") }, true},
+		{"server-muted", "--server-muted=true", func(c *cobra.Command) (any, error) { return c.Flags().GetBool("server-muted") }, true},
+		{"hwid-required", "--hwid-required=true", func(c *cobra.Command) (any, error) { return c.Flags().GetBool("hwid-required") }, true},
+		{"record", "--record=mix", func(c *cobra.Command) (any, error) { return c.Flags().GetString("record") }, "mix"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := newDaemonStartCmd()
+			if cmd.Flags().Lookup(tc.name) == nil {
+				t.Fatalf("daemon start command missing --%s flag", tc.name)
+			}
+			if err := cmd.ParseFlags([]string{tc.arg}); err != nil {
+				t.Fatalf("ParseFlags(%q) failed: %v", tc.arg, err)
+			}
+			if !cmd.Flags().Changed(tc.name) {
+				t.Errorf("flag --%s should be marked Changed after ParseFlags", tc.name)
+			}
+			got, err := tc.lookup(cmd)
+			if err != nil {
+				t.Fatalf("GetFlag error: %v", err)
+			}
+			if got != tc.expected {
+				t.Errorf("flag --%s: got %v, want %v", tc.name, got, tc.expected)
+			}
+		})
+	}
+}
+
+// TestDaemonAutoReconnectRespectsFile is the phase 3 regression guard for the
+// phase 2 follow-up warning. It simulates a file-loaded config with
+// auto_reconnect=false and verifies that applyDaemonClientOverrides no longer
+// forces the default back to true when the CLI flag is not explicitly passed.
+func TestDaemonAutoReconnectRespectsFile(t *testing.T) {
+	cmd := newDaemonStartCmd()
+	_ = cmd.Flags().Set("address", "10.0.0.5")
+	// Note: --auto-reconnect is NOT Set here, so Changed() returns false.
+
+	// File-loaded config: user explicitly disabled auto-reconnect.
+	cfg := config.Config{
+		Mode:                  config.ModeClient,
+		AutoReconnect:         false,
+		AutoReconnectAttempts: 0,
+	}
+	applyDaemonClientOverrides(cmd, &cfg)
+
+	if cfg.AutoReconnect {
+		t.Error("auto-reconnect must remain false when file disabled it and no flag passed")
+	}
+	if cfg.AutoReconnectAttempts != 0 {
+		t.Errorf("auto-reconnect-attempts must remain 0 when no flag passed, got %d", cfg.AutoReconnectAttempts)
+	}
+}
+
+// TestLoadWithViperClientModeDefaults verifies that LoadWithViper seeds
+// client-mode defaults (auto-reconnect=true, attempts=5) before any file or
+// env parsing, ensuring defaults fire when nothing is explicitly configured.
+func TestLoadWithViperClientModeDefaults(t *testing.T) {
+	// Isolate from any ambient env vars.
+	t.Setenv("ECHOWARP_AUTO_RECONNECT", "")
+	t.Setenv("ECHOWARP_AUTO_RECONNECT_ATTEMPTS", "")
+
+	cfg, err := config.LoadWithViper("", config.ModeClient)
+	if err != nil {
+		t.Fatalf("LoadWithViper error: %v", err)
+	}
+	if !cfg.AutoReconnect {
+		t.Error("expected client-mode default auto-reconnect=true")
+	}
+	if cfg.AutoReconnectAttempts != 5 {
+		t.Errorf("expected client-mode default attempts=5, got %d", cfg.AutoReconnectAttempts)
 	}
 }
 
@@ -1430,5 +1524,96 @@ func TestRunDaemonStart_ClientModeMissingAddress(t *testing.T) {
 	if !bytes.Contains([]byte(err.Error()), []byte("address")) &&
 		!bytes.Contains([]byte(err.Error()), []byte("discover")) {
 		t.Errorf("error should mention --address or --discover: %v", err)
+	}
+}
+
+// TestLoadWithViperFileOverridesClientDefaults is the end-to-end regression
+// guard for the phase 2 follow-up warning: a file-backed client config that
+// explicitly disables auto-reconnect must survive LoadWithViper's default
+// seeding AND applyDaemonClientOverrides when no --auto-reconnect flag is set.
+func TestLoadWithViperFileOverridesClientDefaults(t *testing.T) {
+	// Isolate from any ambient env vars that could clobber the file values.
+	t.Setenv("ECHOWARP_AUTO_RECONNECT", "")
+	t.Setenv("ECHOWARP_AUTO_RECONNECT_ATTEMPTS", "")
+
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "daemon.yaml")
+	const body = "auto_reconnect: false\nauto_reconnect_attempts: 99\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+
+	cfg, err := config.LoadWithViper(cfgPath, config.ModeClient)
+	if err != nil {
+		t.Fatalf("LoadWithViper: %v", err)
+	}
+	if cfg.AutoReconnect {
+		t.Error("file value auto_reconnect=false must win over client-mode default")
+	}
+	if cfg.AutoReconnectAttempts != 99 {
+		t.Errorf("file value auto_reconnect_attempts=99 must win, got %d", cfg.AutoReconnectAttempts)
+	}
+
+	// Build a fresh command where no flags are Changed: applyDaemonClientOverrides
+	// must NOT clobber the file-provided values.
+	cmd := newDaemonStartCmd()
+	applyDaemonClientOverrides(cmd, &cfg)
+
+	if cfg.AutoReconnect {
+		t.Error("applyDaemonClientOverrides must preserve file auto_reconnect=false when no flag is set")
+	}
+	if cfg.AutoReconnectAttempts != 99 {
+		t.Errorf("applyDaemonClientOverrides must preserve file auto_reconnect_attempts=99, got %d", cfg.AutoReconnectAttempts)
+	}
+}
+
+// TestValidateDaemonRecordMode_Invalid asserts that unknown --record values are
+// rejected with a clear error listing the valid options.
+func TestValidateDaemonRecordMode_Invalid(t *testing.T) {
+	err := validateDaemonRecordMode("bogus")
+	if err == nil {
+		t.Fatal("expected error for bogus record mode")
+	}
+	msg := err.Error()
+	for _, want := range []string{"record", "mix", "tracks", "both"} {
+		if !bytes.Contains([]byte(msg), []byte(want)) {
+			t.Errorf("error should mention %q; got %q", want, msg)
+		}
+	}
+}
+
+// TestValidateDaemonRecordMode_Valid verifies that all accepted --record values
+// pass validation without error.
+func TestValidateDaemonRecordMode_Valid(t *testing.T) {
+	for _, mode := range []string{"", "mix", "tracks", "both"} {
+		if err := validateDaemonRecordMode(mode); err != nil {
+			t.Errorf("validateDaemonRecordMode(%q): unexpected error %v", mode, err)
+		}
+	}
+}
+
+// TestDaemonRecordInvalidValue exercises the full runDaemonStart path with
+// --record=bogus and asserts the error surfaces before any side effect (no PID
+// file written).
+func TestDaemonRecordInvalidValue(t *testing.T) {
+	tmpDir := t.TempDir()
+	pidFile := filepath.Join(tmpDir, "daemon.pid")
+	logFile := filepath.Join(tmpDir, "daemon.log")
+
+	cmd := newDaemonStartCmd()
+	_ = cmd.Flags().Set("password", "test")
+	_ = cmd.Flags().Set("pid-file", pidFile)
+	_ = cmd.Flags().Set("log-file", logFile)
+	_ = cmd.Flags().Set("record", "bogus")
+
+	err := runDaemonStart(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for --record=bogus")
+	}
+	if !bytes.Contains([]byte(err.Error()), []byte("record")) {
+		t.Errorf("error should mention 'record': %v", err)
+	}
+	if _, statErr := os.Stat(pidFile); statErr == nil {
+		t.Error("PID file must not be written when --record validation fails")
 	}
 }

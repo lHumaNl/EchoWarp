@@ -13,6 +13,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/version"
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 )
 
@@ -41,7 +42,12 @@ type errorResponse struct {
 }
 
 // configRequest is used for POST/PUT /api/v1/config.
-// Only non-nil fields are updated.
+// Only non-nil / non-zero fields are applied to the underlying NodeConfig.
+//
+// Pointer-typed fields distinguish "user explicitly sent value X" from "field
+// absent in the JSON body". Primitive-typed fields (Mode, Address, Port, …)
+// remain on the legacy "zero value = don't override" contract for backwards
+// compatibility with phase 1 / phase 2 clients.
 type configRequest struct {
 	Mode       string  `json:"mode,omitempty"`        // "server" or "client".
 	Address    string  `json:"address,omitempty"`     // Server address (client mode).
@@ -52,6 +58,33 @@ type configRequest struct {
 	SampleRate uint32  `json:"sample_rate,omitempty"` // Audio sample rate.
 	Channels   uint32  `json:"channels,omitempty"`    // Audio channels (1 or 2).
 	VirtualMic *bool   `json:"virtual_mic,omitempty"` // Create virtual microphone.
+	Loopback   *bool   `json:"loopback,omitempty"`    // Enable system-audio loopback capture.
+	AEC        *bool   `json:"aec,omitempty"`         // Enable software AEC (duplex/conference).
+
+	// Phase 3 extended optional fields. All pointer-typed so nil = unset.
+	Duplex          *bool     `json:"duplex,omitempty"`
+	Conference      *bool     `json:"conference,omitempty"`
+	OpusBitrate     *int      `json:"opus_bitrate,omitempty"`
+	OpusComplexity  *int      `json:"opus_complexity,omitempty"`
+	OpusApplication *string   `json:"opus_application,omitempty"` // "voip" | "audio" | "restricted_lowdelay"
+	OpusDTX         *bool     `json:"opus_dtx,omitempty"`
+	OpusFEC         *bool     `json:"opus_fec,omitempty"`
+	MaxClients      *int      `json:"max_clients,omitempty"`
+	Nickname        *string   `json:"nickname,omitempty"`
+	HWIDRequired    *bool     `json:"hwid_required,omitempty"`
+	STUNServers     *[]string `json:"stun_servers,omitempty"`
+	TLSCert         *string   `json:"tls_cert,omitempty"`
+	TLSKey          *string   `json:"tls_key,omitempty"`
+	TLSInsecure     *bool     `json:"tls_insecure,omitempty"`
+}
+
+// validOpusApplications enumerates the accepted values for configRequest.OpusApplication.
+// Values are sourced directly from pkg/echowarp/audio constants so the API
+// contract always matches what the encoder actually accepts.
+var validOpusApplications = map[string]struct{}{
+	audio.OpusApplicationVoIP:               {},
+	audio.OpusApplicationAudio:              {},
+	audio.OpusApplicationRestrictedLowDelay: {},
 }
 
 // writeJSON writes a JSON response with the given status code.
@@ -85,6 +118,21 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg})
 }
 
+// validateConfigRequest rejects requests whose enumerated fields carry invalid
+// values. Returns an error to be written as 400.
+func validateConfigRequest(req configRequest) error {
+	if req.OpusApplication != nil {
+		if _, ok := validOpusApplications[*req.OpusApplication]; !ok {
+			return fmt.Errorf("invalid opus_application %q (must be %s, %s, or %s)",
+				*req.OpusApplication,
+				audio.OpusApplicationVoIP,
+				audio.OpusApplicationAudio,
+				audio.OpusApplicationRestrictedLowDelay)
+		}
+	}
+	return nil
+}
+
 // applyConfigOverrides updates cfg with non-zero values from req.
 // Only fields that are set in the request are applied.
 func applyConfigOverrides(cfg *echowarp.NodeConfig, req configRequest) {
@@ -114,6 +162,56 @@ func applyConfigOverrides(cfg *echowarp.NodeConfig, req configRequest) {
 	}
 	if req.VirtualMic != nil {
 		cfg.VirtualMic = *req.VirtualMic
+	}
+	if req.Loopback != nil {
+		cfg.Loopback = *req.Loopback
+	}
+	if req.AEC != nil {
+		cfg.AEC = *req.AEC
+	}
+
+	// Phase 3 extended fields.
+	if req.Duplex != nil {
+		cfg.Duplex = *req.Duplex
+	}
+	if req.Conference != nil {
+		cfg.Conference = *req.Conference
+	}
+	if req.OpusBitrate != nil {
+		cfg.OpusBitrate = *req.OpusBitrate
+	}
+	if req.OpusComplexity != nil {
+		cfg.OpusComplexity = *req.OpusComplexity
+	}
+	if req.OpusApplication != nil {
+		cfg.OpusApplication = *req.OpusApplication
+	}
+	if req.OpusDTX != nil {
+		cfg.OpusDTX = *req.OpusDTX
+	}
+	if req.OpusFEC != nil {
+		cfg.OpusFEC = *req.OpusFEC
+	}
+	if req.MaxClients != nil {
+		cfg.MaxClients = *req.MaxClients
+	}
+	if req.Nickname != nil {
+		cfg.Nickname = *req.Nickname
+	}
+	if req.HWIDRequired != nil {
+		cfg.HWIDRequired = *req.HWIDRequired
+	}
+	if req.STUNServers != nil {
+		cfg.STUNServers = append([]string(nil), (*req.STUNServers)...)
+	}
+	if req.TLSCert != nil {
+		cfg.TLSCert = *req.TLSCert
+	}
+	if req.TLSKey != nil {
+		cfg.TLSKey = *req.TLSKey
+	}
+	if req.TLSInsecure != nil {
+		cfg.TLSInsecure = *req.TLSInsecure
 	}
 }
 
@@ -174,6 +272,10 @@ func (s *APIServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
+		if err := validateConfigRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		cfg := s.node.Config()
 		applyConfigOverrides(&cfg, req)
 		if err := s.node.Reconfigure(cfg); err != nil {
@@ -191,6 +293,10 @@ func (s *APIServer) handleStart(w http.ResponseWriter, r *http.Request) {
 		var req configRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			return
+		}
+		if err := validateConfigRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		cfg := s.node.Config()

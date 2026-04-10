@@ -90,6 +90,14 @@ func newDaemonStartCmd() *cobra.Command {
 	cmd.Flags().String("api-token", "", "API authentication token")
 	cmd.Flags().Bool("enable-pprof", false, "Enable pprof profiling endpoints")
 	cmd.Flags().StringSlice("trusted-proxies", nil, "Trusted proxy IPs/CIDRs for X-Forwarded-For processing")
+	// Phase 3 extended flags: flow into cfg via applyFlagOverrides (server_config.go).
+	cmd.Flags().Bool("duplex", false, "Enable duplex mode (bidirectional audio)")
+	cmd.Flags().Bool("conference", false, "Enable conference mode (multi-participant)")
+	cmd.Flags().Bool("loopback", false, "Enable loopback capture of system audio")
+	cmd.Flags().Bool("aec", false, "Enable acoustic echo cancellation (duplex mode)")
+	cmd.Flags().Bool("server-muted", false, "Server does not contribute audio in conference mode")
+	cmd.Flags().String("record", "", "Start recording immediately: mix, tracks, or both (conference mode)")
+	cmd.Flags().Bool("hwid-required", false, "Require clients to send hardware ID (for bans)")
 	return cmd
 }
 
@@ -169,6 +177,10 @@ func setupDaemon(cmd *cobra.Command) (*daemon.Daemon, config.Config, *slog.Logge
 				return nil, config.Config{}, nil, fmt.Errorf("client mode requires --address or --discover")
 			}
 		}
+	}
+
+	if rerr := validateDaemonRecordMode(cfg.RecordMode); rerr != nil {
+		return nil, config.Config{}, nil, rerr
 	}
 
 	if errs := cfg.Validate(); len(errs) > 0 {
@@ -380,6 +392,8 @@ func convertToNodeConfig(cfg config.Config) echowarp.NodeConfig {
 		SampleRate:      cfg.SampleRate,
 		Channels:        cfg.Channels,
 		VirtualMic:      cfg.VirtualMic,
+		Loopback:        cfg.Loopback,
+		AEC:             cfg.AEC,
 		OpusBitrate:     cfg.OpusBitrate,
 		OpusComplexity:  cfg.OpusComplexity,
 		OpusApplication: cfg.OpusApplication,
@@ -414,6 +428,25 @@ func createRunnerFactory(cfg config.Config, logger *slog.Logger, rateLimiter *au
 	}
 }
 
+// validDaemonRecordModes enumerates the accepted values for the --record flag.
+// Kept in sync with the switch in internal/app/server_multi.go so users get a
+// fail-fast error at CLI level instead of a silent fallback to "mix".
+var validDaemonRecordModes = map[string]struct{}{
+	"":       {}, // Empty = recording disabled.
+	"mix":    {},
+	"tracks": {},
+	"both":   {},
+}
+
+// validateDaemonRecordMode rejects unknown --record values before the daemon
+// writes its PID file, matching phase 1 handleStart's fail-fast philosophy.
+func validateDaemonRecordMode(mode string) error {
+	if _, ok := validDaemonRecordModes[mode]; !ok {
+		return fmt.Errorf("invalid --record value %q (must be one of: mix, tracks, both)", mode)
+	}
+	return nil
+}
+
 // applyDaemonClientOverrides applies client-specific CLI flags to the config when
 // the daemon is running in client mode. Called only from setupDaemon; server mode
 // silently skips these overrides so the same binary/flags work for both modes.
@@ -425,16 +458,14 @@ func applyDaemonClientOverrides(cmd *cobra.Command, cfg *config.Config) {
 	if cmd.Flags().Changed("nickname") {
 		cfg.Nickname, _ = cmd.Flags().GetString("nickname")
 	}
+	// Only override from CLI when the flag was explicitly passed. Client-mode
+	// defaults (auto-reconnect=true, attempts=5) are seeded in LoadWithViper, so
+	// file/env values are preserved here when no flag was given.
 	if cmd.Flags().Changed("auto-reconnect") {
 		cfg.AutoReconnect, _ = cmd.Flags().GetBool("auto-reconnect")
-	} else {
-		// Default for client mode: enable auto-reconnect (spec default=true).
-		cfg.AutoReconnect = true
 	}
 	if cmd.Flags().Changed("auto-reconnect-attempts") {
 		cfg.AutoReconnectAttempts, _ = cmd.Flags().GetInt("auto-reconnect-attempts")
-	} else if cfg.AutoReconnectAttempts == 0 {
-		cfg.AutoReconnectAttempts = 5
 	}
 	if cmd.Flags().Changed("tls-insecure") {
 		cfg.TLSInsecure, _ = cmd.Flags().GetBool("tls-insecure")
