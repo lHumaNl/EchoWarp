@@ -188,6 +188,51 @@ func TestCollectPresetDevices_NonVirtualOutputHasNoVirtualSinkPreset(t *testing.
 	assert.Nil(t, p.Devices[0].VirtualSink, "non-virtual output should not have VirtualSinkPreset")
 }
 
+// TestCollectModePreset_IncludesDevicesAndServerFields verifies that
+// CollectModePreset captures BOTH device selection and server-side settings
+// (port, password, max_clients, tls*) from the TUI fields in a single snapshot.
+func TestCollectModePreset_IncludesDevicesAndServerFields(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 1, Name: "Mic", IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{
+			selectKeyFor(1, "Mic", true): {Capture: true},
+		},
+	)
+	// Populate server fields on the model.
+	for i := range m.Fields {
+		switch m.Fields[i].Key {
+		case "port":
+			m.Fields[i].SetValue("5000", SourceUser)
+		case "password":
+			m.Fields[i].SetValue("pw", SourceUser)
+		case "max_clients":
+			m.Fields[i].SetValue("7", SourceUser)
+		}
+	}
+	for i := range m.AdvancedFields {
+		switch m.AdvancedFields[i].Key {
+		case "tls":
+			m.AdvancedFields[i].SetValue("on", SourceUser)
+		case "tls_cert":
+			m.AdvancedFields[i].SetValue("/etc/ssl/a.crt", SourceUser)
+		case "tls_key":
+			m.AdvancedFields[i].SetValue("/etc/ssl/a.key", SourceUser)
+		}
+	}
+
+	mp := m.CollectModePreset("normal")
+
+	require.Len(t, mp.Devices, 1)
+	assert.Equal(t, "Mic", mp.Devices[0].Name)
+	assert.Equal(t, 5000, mp.Port)
+	assert.Equal(t, "pw", mp.Password)
+	assert.Equal(t, 7, mp.MaxClients)
+	assert.True(t, mp.TLS)
+	assert.Equal(t, "/etc/ssl/a.crt", mp.TLSCert)
+	assert.Equal(t, "/etc/ssl/a.key", mp.TLSKey)
+}
+
 func TestMatchPresetDevices_VirtualSinkMatchesByName(t *testing.T) {
 	preset := recent.DevicePreset{
 		Devices: []recent.PresetDevice{

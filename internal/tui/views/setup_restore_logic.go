@@ -94,12 +94,13 @@ func (m *SetupModel) tryShowServerRestoreOverlay() tea.Cmd {
 		return nil
 	}
 
+	devPreset := recent.DevicePreset{Devices: p.Devices}
 	// Skip if current selection already matches the preset
-	if m.currentSelectionMatchesPreset(*p) {
+	if m.currentSelectionMatchesPreset(devPreset) {
 		return nil
 	}
 
-	return m.autoRestore(*p, mode)
+	return m.autoRestore(devPreset, mode)
 }
 
 // autoRestore silently restores matched devices and shows overlay only for missing virtual devices.
@@ -292,9 +293,33 @@ func (m *SetupModel) applyRestore(preset recent.DevicePreset, skipVirtual bool) 
 	return nil
 }
 
-// restoreServerSettings applies saved server settings to the TUI fields.
-// Fields that have a zero/empty value in the settings are skipped (backward compat).
-func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
+// restoreLastMode applies the saved top-level last_mode to the Mode field, if set.
+// last_mode is the canonical English key ("normal"/"reverse"/"duplex"/"conference");
+// it is reverse-looked-up against the current locale's Mode options.
+func (m *SetupModel) restoreLastMode(lastMode string) {
+	if lastMode == "" {
+		return
+	}
+	for i := range m.Fields {
+		if m.Fields[i].Key != "mode" {
+			continue
+		}
+		for _, opt := range m.Fields[i].Options {
+			if modeKeyFromValue(opt) == lastMode {
+				m.Fields[i].SetValue(opt, SourceConfig)
+				break
+			}
+		}
+		break
+	}
+}
+
+// restoreModePreset applies a per-mode preset snapshot to the TUI fields.
+// All server fields (port, password, max_clients, tls*) are sourced from the
+// ModePreset; fields whose values are zero in the preset are left untouched
+// so the user's current in-flight values survive when a preset is only
+// partially populated.
+func (m *SetupModel) restoreModePreset(mp presetpkg.ModePreset) {
 	setIfNonEmpty := func(fields []SetupField, key, value string) {
 		if value == "" {
 			return
@@ -307,45 +332,60 @@ func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
 		}
 	}
 
-	if s.LastMode != "" {
-		// Mode field stores LOCALIZED descriptive values (e.g. "normale (server → client)"
-		// in Italian); s.LastMode is the canonical English key ("normal" / "reverse" /
-		// "duplex" / "conference"). Match by reverse-lookup through modeKeyFromValue,
-		// which returns the canonical key for a localized option in the current locale.
-		// Silently skips restore when s.LastMode is not a known canonical key — this
-		// gracefully handles legacy preset files written before the modeKeyFromValue
-		// fix, which may contain localized values like "normale" or "thường".
-		for i := range m.Fields {
-			if m.Fields[i].Key != "mode" {
-				continue
-			}
-			for _, opt := range m.Fields[i].Options {
-				if modeKeyFromValue(opt) == s.LastMode {
-					m.Fields[i].SetValue(opt, SourceConfig)
-					break
-				}
-			}
-			break
+	if mp.Port != 0 {
+		setIfNonEmpty(m.Fields, "port", fmt.Sprintf("%d", mp.Port))
+	}
+	setIfNonEmpty(m.Fields, "password", mp.Password)
+	if mp.MaxClients != 0 {
+		setIfNonEmpty(m.Fields, "max_clients", fmt.Sprintf("%d", mp.MaxClients))
+	}
+
+	if mp.TLS {
+		setIfNonEmpty(m.AdvancedFields, "tls", "on")
+	}
+	setIfNonEmpty(m.AdvancedFields, "tls_cert", mp.TLSCert)
+	setIfNonEmpty(m.AdvancedFields, "tls_key", mp.TLSKey)
+
+	m.applyFieldDependencies()
+}
+
+// loadPresetForMode applies the preset for the given mode if one exists, otherwise
+// resets server fields to DefaultsFor(mode). Called on explicit mode switches in the
+// TUI so each mode behaves as a self-contained snapshot.
+func (m *SetupModel) loadPresetForMode(mode string) {
+	var mp presetpkg.ModePreset
+	if m.serverPresets != nil {
+		if p := m.serverPresets.Get(mode); p != nil {
+			mp = *p
 		}
 	}
-
-	if s.Port != 0 {
-		setIfNonEmpty(m.Fields, "port", fmt.Sprintf("%d", s.Port))
+	d := presetpkg.DefaultsFor(mode)
+	if mp.Port == 0 {
+		mp.Port = d.Port
 	}
-	setIfNonEmpty(m.Fields, "password", s.Password)
-	if s.MaxClients != 0 {
-		setIfNonEmpty(m.Fields, "max_clients", fmt.Sprintf("%d", s.MaxClients))
+	if mp.MaxClients == 0 {
+		mp.MaxClients = d.MaxClients
 	}
-
+	// Reset password/tls/cert/key to blank so the preset values fully drive the UI
+	// when switching modes. If the preset has nothing, they come out blank (defaults).
+	setField := func(fields []SetupField, key, value string) {
+		for i := range fields {
+			if fields[i].Key == key {
+				fields[i].SetValue(value, SourceConfig)
+				return
+			}
+		}
+	}
+	setField(m.Fields, "port", fmt.Sprintf("%d", mp.Port))
+	setField(m.Fields, "password", mp.Password)
+	setField(m.Fields, "max_clients", fmt.Sprintf("%d", mp.MaxClients))
 	tlsVal := "off"
-	if s.TLS {
+	if mp.TLS {
 		tlsVal = "on"
 	}
-	if s.TLS {
-		setIfNonEmpty(m.AdvancedFields, "tls", tlsVal)
-	}
-	setIfNonEmpty(m.AdvancedFields, "tls_cert", s.TLSCert)
-	setIfNonEmpty(m.AdvancedFields, "tls_key", s.TLSKey)
+	setField(m.AdvancedFields, "tls", tlsVal)
+	setField(m.AdvancedFields, "tls_cert", mp.TLSCert)
+	setField(m.AdvancedFields, "tls_key", mp.TLSKey)
 
 	m.applyFieldDependencies()
 }
