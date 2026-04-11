@@ -308,13 +308,19 @@ func (m *SetupModel) restoreServerSettings(s presetpkg.ServerSettings) {
 	}
 
 	if s.LastMode != "" {
-		// Mode field stores values like "normal (server → client)" — match by prefix.
+		// Mode field stores LOCALIZED descriptive values (e.g. "normale (server → client)"
+		// in Italian); s.LastMode is the canonical English key ("normal" / "reverse" /
+		// "duplex" / "conference"). Match by reverse-lookup through modeKeyFromValue,
+		// which returns the canonical key for a localized option in the current locale.
+		// Silently skips restore when s.LastMode is not a known canonical key — this
+		// gracefully handles legacy preset files written before the modeKeyFromValue
+		// fix, which may contain localized values like "normale" or "thường".
 		for i := range m.Fields {
 			if m.Fields[i].Key != "mode" {
 				continue
 			}
 			for _, opt := range m.Fields[i].Options {
-				if strings.SplitN(opt, " ", 2)[0] == s.LastMode {
+				if modeKeyFromValue(opt) == s.LastMode {
 					m.Fields[i].SetValue(opt, SourceConfig)
 					break
 				}

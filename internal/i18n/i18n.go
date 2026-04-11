@@ -18,19 +18,19 @@ const (
 // displayNames maps language codes to their native display names
 // (endonyms — how the language refers to itself).
 var displayNames = map[Language]string{
-	English:  "English",
-	Russian:  "Русский",
-	"de":     "Deutsch",
-	"fr":     "Français",
-	"es":     "Español",
-	"pt":     "Português",
-	"it":     "Italiano",
-	"pl":     "Polski",
-	"tr":     "Türkçe",
-	"vi":     "Tiếng Việt",
-	"zh":     "中文",
-	"ja":     "日本語",
-	"ko":     "한국어",
+	English: "English",
+	Russian: "Русский",
+	"de":    "Deutsch",
+	"fr":    "Français",
+	"es":    "Español",
+	"pt":    "Português",
+	"it":    "Italiano",
+	"pl":    "Polski",
+	"tr":    "Türkçe",
+	"vi":    "Tiếng Việt",
+	"zh":    "中文",
+	"ja":    "日本語",
+	"ko":    "한국어",
 }
 
 // DisplayName returns the native name of the language (e.g. "Deutsch" for "de").
