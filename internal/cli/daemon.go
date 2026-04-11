@@ -16,6 +16,7 @@ import (
 	"github.com/lHumaNl/echowarp/internal/app"
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/daemon"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/logging"
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
@@ -28,8 +29,8 @@ import (
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Daemon management commands",
-		Long:  "Commands to start, stop, and check the status of the EchoWarp daemon.",
+		Short: i18n.T("cli_daemon_short"),
+		Long:  i18n.T("cli_daemon_long"),
 	}
 	cmd.AddCommand(
 		newDaemonStartCmd(),
@@ -50,8 +51,8 @@ func newDaemonCmd() *cobra.Command {
 func newDaemonStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start the EchoWarp daemon",
-		Long:  "Start the EchoWarp daemon in the background as a server.",
+		Short: i18n.T("cli_daemon_start_short"),
+		Long:  i18n.T("cli_daemon_start_long"),
 		RunE:  runDaemonStart,
 	}
 
@@ -355,8 +356,8 @@ func startAPIServer(ctx context.Context, node *echowarp.Node, flags daemonFlags,
 func newDaemonStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the EchoWarp daemon",
-		Long:  "Stop the running EchoWarp daemon by sending SIGTERM.",
+		Short: i18n.T("cli_daemon_stop_short"),
+		Long:  i18n.T("cli_daemon_stop_long"),
 		RunE:  runDaemonStop,
 	}
 
@@ -388,8 +389,8 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 func newDaemonStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Check daemon status",
-		Long:  "Check if the EchoWarp daemon is running and display its PID.",
+		Short: i18n.T("cli_daemon_status_short"),
+		Long:  i18n.T("cli_daemon_status_long"),
 		RunE:  runDaemonStatus,
 	}
 

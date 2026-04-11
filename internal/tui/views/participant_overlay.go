@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -56,12 +57,12 @@ func (o *ParticipantOverlay) options() []struct {
 		opts = append(opts, struct {
 			label  string
 			action ParticipantOverlayAction
-		}{"Unmute", ParticipantOverlayUnmute})
+		}{i18n.T("overlay_participant_unmute"), ParticipantOverlayUnmute})
 	} else {
 		opts = append(opts, struct {
 			label  string
 			action ParticipantOverlayAction
-		}{"Mute", ParticipantOverlayMute})
+		}{i18n.T("overlay_participant_mute"), ParticipantOverlayMute})
 	}
 
 	// Server participant can only be muted, not kicked/banned
@@ -70,11 +71,11 @@ func (o *ParticipantOverlay) options() []struct {
 			struct {
 				label  string
 				action ParticipantOverlayAction
-			}{"Kick", ParticipantOverlayKick},
+			}{i18n.T("overlay_participant_kick"), ParticipantOverlayKick},
 			struct {
 				label  string
 				action ParticipantOverlayAction
-			}{"Ban", ParticipantOverlayBan},
+			}{i18n.T("overlay_participant_ban"), ParticipantOverlayBan},
 		)
 	}
 
@@ -137,7 +138,7 @@ func (o *ParticipantOverlay) Render(width, height int) string {
 		lines = append(lines, cursor+label)
 	}
 
-	lines = append(lines, "", styles.SetupDimValue.Render("  enter: confirm  esc: cancel"))
+	lines = append(lines, "", styles.SetupDimValue.Render(i18n.T("overlay_participant_help")))
 
 	content := strings.Join(lines, "\n")
 

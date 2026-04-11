@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
@@ -132,12 +133,12 @@ func ConferenceView(p ConferenceParams) string {
 
 // renderConferenceSummaryLine renders the top summary line for conference view.
 func renderConferenceSummaryLine(p ConferenceParams) string {
-	dirText := "▸ conference mode"
+	dirText := i18n.T("streaming_dir_conference")
 	if p.HubMode {
-		dirText = "▸ conference mode (hub)"
+		dirText = i18n.T("streaming_dir_conference_hub")
 	}
 	if p.Paused {
-		dirText += " [PAUSED]"
+		dirText += " " + i18n.T("streaming_badge_paused")
 	}
 
 	var style lipgloss.Style
@@ -168,7 +169,7 @@ func buildConferenceList(p ConferenceParams) []conferenceListEntry {
 		// Server mode: server entry (if not hub) + all network clients.
 		if !p.HubMode {
 			entries = append(entries, conferenceListEntry{
-				label:     "server (me)",
+				label:     i18n.T("multi_server_me"),
 				isServer:  true,
 				clientIdx: -1,
 			})
@@ -199,7 +200,7 @@ func buildConferenceList(p ConferenceParams) []conferenceListEntry {
 				}
 				// Check if this is "me"
 				if nick == p.MyNickname {
-					entry.label = nick + " (me)"
+					entry.label = nick + i18n.T("streaming_me_suffix")
 				}
 				// Try to find matching client index
 				for i, c := range p.Stats.Clients {
@@ -256,7 +257,7 @@ func renderConferenceLeftColumn(p ConferenceParams, colWidth int) []string {
 	entries := buildConferenceList(p)
 
 	if len(entries) == 0 {
-		lines = append(lines, "  "+styles.EmptyState.Render("No participants"))
+		lines = append(lines, "  "+styles.EmptyState.Render(i18n.T("multi_no_participants")))
 		return lines
 	}
 
@@ -277,7 +278,7 @@ func renderConferenceListItem(entry conferenceListEntry, p ConferenceParams, sel
 	nick := entry.label
 
 	// For client-side "me" entries, use bullet prefix
-	if !p.IsServer && strings.HasSuffix(nick, " (me)") && !selected {
+	if !p.IsServer && strings.HasSuffix(nick, i18n.T("streaming_me_suffix")) && !selected {
 		prefix = styles.ParticipantBullet.Render(" • ")
 	}
 
@@ -402,9 +403,9 @@ func renderConferenceDetailHeader(p ConferenceParams, entries []conferenceListEn
 		maxParticipants++
 	}
 
-	capacity := fmt.Sprintf("Participants %d/%d", totalParticipants, maxParticipants)
+	capacity := i18n.Tf("multi_participants_capacity", totalParticipants, maxParticipants)
 	if p.MuteAll {
-		capacity += " 🔇 ALL"
+		capacity += " " + i18n.T("multi_mute_all_badge")
 	}
 
 	if len(entries) == 0 || p.SelectedIndex >= len(entries) {
@@ -415,7 +416,7 @@ func renderConferenceDetailHeader(p ConferenceParams, entries []conferenceListEn
 
 	// For server entry, just show capacity
 	if entry.isServer {
-		return styles.DetailHeader.Render(capacity) + "  " + styles.ClientListItem.Render(styles.CursorGlyph+" server (me)")
+		return styles.DetailHeader.Render(capacity) + "  " + styles.ClientListItem.Render(styles.CursorGlyph+" "+i18n.T("multi_server_me"))
 	}
 
 	// For client entry, show client info
@@ -449,7 +450,7 @@ func renderConferenceDetailPanel(p ConferenceParams, entries []conferenceListEnt
 	lines = append(lines, renderConferenceDetailHeader(p, entries, detailWidth), styles.Separator.Render(strings.Repeat("─", detailWidth)))
 
 	if len(entries) == 0 || p.SelectedIndex >= len(entries) {
-		lines = append(lines, styles.EmptyState.Render("Waiting for participants…"))
+		lines = append(lines, styles.EmptyState.Render(i18n.T("multi_waiting_participants")))
 		return strings.Join(lines, "\n")
 	}
 
@@ -457,7 +458,7 @@ func renderConferenceDetailPanel(p ConferenceParams, entries []conferenceListEnt
 
 	// Server entry: no network stats available
 	if entry.isServer {
-		lines = append(lines, styles.StatLabel.Render("  Local participant — no network stats"))
+		lines = append(lines, styles.StatLabel.Render(i18n.T("multi_local_participant_no_stats")))
 		return strings.Join(lines, "\n")
 	}
 
@@ -572,15 +573,15 @@ func renderConferenceStacked(p ConferenceParams) string {
 	if p.IsServer && !p.HubMode {
 		totalParticipants++
 	}
-	stackedCapacity := fmt.Sprintf("Participants %d/%d", totalParticipants, p.Stats.MaxClients)
+	stackedCapacity := i18n.Tf("multi_participants_capacity", totalParticipants, p.Stats.MaxClients)
 	if p.MuteAll {
-		stackedCapacity += " 🔇 ALL"
+		stackedCapacity += " " + i18n.T("multi_mute_all_badge")
 	}
 	lines = append(lines, styles.DetailHeader.Render(stackedCapacity))
 
 	// Participant list
 	if len(entries) == 0 {
-		lines = append(lines, "  "+styles.EmptyState.Render("Waiting for participants…"))
+		lines = append(lines, "  "+styles.EmptyState.Render(i18n.T("multi_waiting_participants")))
 	} else {
 		w := p.Width
 		if w < leftColumnWidthMin {
@@ -601,7 +602,7 @@ func renderConferenceStacked(p ConferenceParams) string {
 	}
 
 	if selectedEntry.isServer {
-		lines = append(lines, styles.StatLabel.Render("  Local participant — no network stats"))
+		lines = append(lines, styles.StatLabel.Render(i18n.T("multi_local_participant_no_stats")))
 	} else if selectedEntry.clientIdx >= 0 {
 		jitterHist := p.SelectedJitterHist
 		rttHist := p.SelectedRTTHist
@@ -623,7 +624,7 @@ func renderConferenceStacked(p ConferenceParams) string {
 		)
 		lines = append(lines, statsLines...)
 	} else {
-		lines = append(lines, styles.EmptyState.Render("Waiting for participants…"))
+		lines = append(lines, styles.EmptyState.Render(i18n.T("multi_waiting_participants")))
 	}
 
 	return strings.Join(lines, "\n")

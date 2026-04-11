@@ -15,6 +15,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/app"
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/logging"
 	"github.com/lHumaNl/echowarp/internal/tui"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
@@ -39,37 +40,37 @@ import (
 func newClientCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "client",
-		Short: "Start EchoWarp in client mode",
-		Long:  "Start EchoWarp as a client, connecting to a server for audio streaming.",
+		Short: i18n.T("cli_client_short"),
+		Long:  i18n.T("cli_client_long"),
 		RunE:  runClient,
 	}
 
-	cmd.Flags().StringP("address", "a", "", "Server address (IP or hostname)")
-	cmd.Flags().IntP("port", "p", 4415, "Server TCP port")
-	cmd.Flags().UintP("device", "d", 0, "Audio device ID (repeatable in multi-device mode)")
-	cmd.Flags().UintSlice("capture-device", nil, "Capture device ID (duplex mode, repeatable)")
-	cmd.Flags().UintSlice("playback-device", nil, "Playback device ID (duplex mode, repeatable)")
-	cmd.Flags().StringP("password", "P", "", "Password for authentication")
-	cmd.Flags().Int("max-reconnect", 5, "Max reconnect attempts (0=infinite)")
-	cmd.Flags().Bool("auto-reconnect", false, "Auto-reconnect after server shutdown")
-	cmd.Flags().Int("auto-reconnect-attempts", 0, "Max auto-reconnect attempts (0=infinite)")
-	cmd.Flags().Bool("virtual-mic", false, "Create virtual microphone")
-	cmd.Flags().StringSlice("stun-server", nil, "STUN servers")
-	cmd.Flags().Bool("tls-insecure", false, "Accept self-signed TLS certificates")
-	cmd.Flags().StringP("config", "c", "", "Path to YAML config file")
-	cmd.Flags().StringP("save-config", "s", "", "Save current settings to file")
-	cmd.Flags().String("log-level", "info", "Log level (debug, info, warn, error)")
-	cmd.Flags().String("log-file", "", "Log to file")
-	cmd.Flags().Bool("discover", true, "Search for LAN servers")
-	cmd.Flags().Duration("discover-timeout", 3*time.Second, "Discovery timeout")
-	cmd.Flags().Bool("no-simd-optimization", false, "Disable SIMD audio optimizations (use pure Go)")
-	cmd.Flags().Bool("no-pool-warmup", false, "Disable audio buffer pool warmup on startup")
-	cmd.Flags().StringP("device-name", "D", "", "Select audio device by name substring (case-insensitive)")
-	cmd.Flags().Bool("dry-run", false, "Validate config and check device, then exit without starting")
-	cmd.Flags().Bool("loopback", false, "Enable loopback capture of system audio (macOS, requires BlackHole)")
-	cmd.Flags().Bool("no-interactive", false, "Disable TUI: requires --device, logs to stdout/file")
-	cmd.Flags().Bool("aec", false, "Enable acoustic echo cancellation (duplex mode)")
-	cmd.Flags().StringP("nickname", "n", "", "Chat display name (max 20 chars)")
+	cmd.Flags().StringP("address", "a", "", i18n.T("cli_flag_address"))
+	cmd.Flags().IntP("port", "p", 4415, i18n.T("cli_flag_port_client"))
+	cmd.Flags().UintP("device", "d", 0, i18n.T("cli_flag_device"))
+	cmd.Flags().UintSlice("capture-device", nil, i18n.T("cli_flag_capture_device"))
+	cmd.Flags().UintSlice("playback-device", nil, i18n.T("cli_flag_playback_device"))
+	cmd.Flags().StringP("password", "P", "", i18n.T("cli_flag_password"))
+	cmd.Flags().Int("max-reconnect", 5, i18n.T("cli_flag_max_reconnect"))
+	cmd.Flags().Bool("auto-reconnect", false, i18n.T("cli_flag_auto_reconnect"))
+	cmd.Flags().Int("auto-reconnect-attempts", 0, i18n.T("cli_flag_auto_reconnect_attempts"))
+	cmd.Flags().Bool("virtual-mic", false, i18n.T("cli_flag_virtual_mic"))
+	cmd.Flags().StringSlice("stun-server", nil, i18n.T("cli_flag_stun_server"))
+	cmd.Flags().Bool("tls-insecure", false, i18n.T("cli_flag_tls_insecure"))
+	cmd.Flags().StringP("config", "c", "", i18n.T("cli_flag_config"))
+	cmd.Flags().StringP("save-config", "s", "", i18n.T("cli_flag_save_config"))
+	cmd.Flags().String("log-level", "info", i18n.T("cli_flag_log_level"))
+	cmd.Flags().String("log-file", "", i18n.T("cli_flag_log_file"))
+	cmd.Flags().Bool("discover", true, i18n.T("cli_flag_discover"))
+	cmd.Flags().Duration("discover-timeout", 3*time.Second, i18n.T("cli_flag_discover_timeout"))
+	cmd.Flags().Bool("no-simd-optimization", false, i18n.T("cli_flag_no_simd"))
+	cmd.Flags().Bool("no-pool-warmup", false, i18n.T("cli_flag_no_pool_warmup"))
+	cmd.Flags().StringP("device-name", "D", "", i18n.T("cli_flag_device_name"))
+	cmd.Flags().Bool("dry-run", false, i18n.T("cli_flag_dry_run"))
+	cmd.Flags().Bool("loopback", false, i18n.T("cli_flag_loopback"))
+	cmd.Flags().Bool("no-interactive", false, i18n.T("cli_flag_no_interactive"))
+	cmd.Flags().Bool("aec", false, i18n.T("cli_flag_aec"))
+	cmd.Flags().StringP("nickname", "n", "", i18n.T("cli_flag_nickname"))
 	_ = cmd.Flags().MarkHidden("no-simd-optimization")
 	_ = cmd.Flags().MarkHidden("no-pool-warmup")
 

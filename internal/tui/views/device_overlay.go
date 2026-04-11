@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -43,13 +44,13 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 		}
 	}
 
-	title := styles.AppTitle.Render("Devices")
+	title := styles.AppTitle.Render(i18n.T("overlay_device_title"))
 
 	var sections []string
 
 	// Input section (hidden when no input devices)
 	if len(inputs) > 0 {
-		inputHeader := "🎤 Input"
+		inputHeader := i18n.T("overlay_device_input")
 		if p.Section == 0 {
 			inputHeader = styles.SelectedItem.Render(inputHeader)
 		} else {
@@ -68,7 +69,7 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 
 	// Output section (hidden when no output devices)
 	if len(outputs) > 0 {
-		outputHeader := "🔊 Output"
+		outputHeader := i18n.T("overlay_device_output")
 		if p.Section == 1 {
 			outputHeader = styles.SelectedItem.Render(outputHeader)
 		} else {
@@ -81,11 +82,11 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 	}
 
 	// Build help line — only show Tab when both sections have devices.
-	helpParts := "↑↓: select  +/-: volume  space: AGC  enter: mute"
+	helpParts := i18n.T("overlay_device_help")
 	if len(inputs) > 0 && len(outputs) > 0 {
-		helpParts += "  Tab: section"
+		helpParts += i18n.T("overlay_device_help_tab")
 	}
-	helpParts += "  Esc: close"
+	helpParts += i18n.T("overlay_device_help_close")
 	help := styles.Help.Render(helpParts)
 
 	content := title + "\n\n" + strings.Join(sections, "\n") + "\n\n" + help
@@ -142,7 +143,7 @@ func renderDeviceOverlayRow(d DeviceOverlayItem, selected bool) string {
 	volPct := fmt.Sprintf("%3d%%", int(d.Volume*100))
 	if d.Muted {
 		volBar = styles.Help.Render("░░░░░░░░░░")
-		volPct = styles.Help.Render("MUTE")
+		volPct = styles.Help.Render(i18n.T("overlay_device_mute_label"))
 	}
 
 	// AGC indicator

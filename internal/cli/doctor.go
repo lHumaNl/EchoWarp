@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 )
 
@@ -56,7 +57,7 @@ const doctorDialTimeout = 3 * time.Second
 func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "Run diagnostic checks on the EchoWarp environment",
+		Short: i18n.T("cli_doctor_short"),
 		Long: `Run a series of diagnostic checks and report their status.
 
 Checks performed:

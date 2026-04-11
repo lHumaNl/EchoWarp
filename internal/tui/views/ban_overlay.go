@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -42,10 +43,10 @@ type BanOverlayParams struct {
 
 // RenderBanOverlay renders the ban criteria + reason overlay centered on screen.
 func RenderBanOverlay(p BanOverlayParams) string {
-	title := styles.AppTitle.Render(fmt.Sprintf("Ban %s", p.ClientNickname))
+	title := styles.AppTitle.Render(i18n.Tf("overlay_ban_title", p.ClientNickname))
 
 	// --- Criteria section ---
-	criteriaHeader := styles.StatValueNeutral.Render("Ban by:")
+	criteriaHeader := styles.StatValueNeutral.Render(i18n.T("overlay_ban_by"))
 	type criterion struct {
 		checked bool
 		label   string
@@ -53,15 +54,15 @@ func RenderBanOverlay(p BanOverlayParams) string {
 		suffix  string
 	}
 	criteria := []criterion{
-		{p.CriteriaIP, "IP", p.IP, ""},
-		{p.CriteriaNick, "Nickname", p.Nickname, ""},
+		{p.CriteriaIP, i18n.T("overlay_ban_crit_ip"), p.IP, ""},
+		{p.CriteriaNick, i18n.T("overlay_ban_crit_nickname"), p.Nickname, ""},
 	}
 	if p.HWIDAvailable {
 		hwid := p.HWID
 		if len(hwid) > 12 {
 			hwid = hwid[:4] + "..." + hwid[len(hwid)-4:]
 		}
-		criteria = append(criteria, criterion{p.CriteriaHWID, "HWID", hwid, "  (+ IP fallback)"})
+		criteria = append(criteria, criterion{p.CriteriaHWID, i18n.T("overlay_ban_crit_hwid"), hwid, i18n.T("overlay_ban_hwid_fallback")})
 	}
 
 	criteriaLines := make([]string, 0, len(criteria))
@@ -82,14 +83,14 @@ func RenderBanOverlay(p BanOverlayParams) string {
 	}
 
 	// --- Reason section ---
-	reasonHeader := styles.StatValueNeutral.Render("Reason (optional):")
+	reasonHeader := styles.StatValueNeutral.Render(i18n.T("overlay_ban_reason_header"))
 	var reasonLines []string
 	for i, reason := range p.Reasons {
 		if p.RecentStartIndex > 0 && i == p.RecentStartIndex {
-			reasonLines = append(reasonLines, styles.Help.Render("  ── recent ──"))
+			reasonLines = append(reasonLines, styles.Help.Render(i18n.T("overlay_kick_recent_sep")))
 		}
 		if i == p.CustomStartIndex {
-			reasonLines = append(reasonLines, styles.Help.Render("  ──────────"))
+			reasonLines = append(reasonLines, styles.Help.Render(i18n.T("overlay_kick_custom_sep")))
 		}
 
 		prefix := "  "
@@ -100,20 +101,20 @@ func RenderBanOverlay(p BanOverlayParams) string {
 		if p.CustomEditing && i == p.CustomStartIndex {
 			cursor := "█"
 			inputText := p.CustomText + cursor
-			reasonLines = append(reasonLines, prefix+styles.StatValueNeutral.Render("Custom: ")+inputText)
+			reasonLines = append(reasonLines, prefix+styles.StatValueNeutral.Render(i18n.T("overlay_kick_custom_label"))+inputText)
 		} else {
 			reasonLines = append(reasonLines, prefix+reason)
 		}
 	}
 
 	// --- Buttons ---
-	confirmBtn := "  [Confirm]  "
-	cancelBtn := "  [Cancel]  "
+	confirmBtn := i18n.T("overlay_ban_confirm_btn")
+	cancelBtn := i18n.T("overlay_cancel_btn")
 	if p.FocusSection == 2 && p.ButtonFocus == 0 {
-		confirmBtn = styles.SelectedItem.Render(styles.CursorGlyph + " [Confirm]  ")
+		confirmBtn = styles.SelectedItem.Render(styles.CursorGlyph + i18n.T("overlay_ban_confirm_btn_selected"))
 	}
 	if p.FocusSection == 2 && p.ButtonFocus == 1 {
-		cancelBtn = styles.SelectedItem.Render(styles.CursorGlyph + " [Cancel]  ")
+		cancelBtn = styles.SelectedItem.Render(styles.CursorGlyph + i18n.T("overlay_cancel_btn_selected"))
 	}
 	buttons := confirmBtn + "  " + cancelBtn
 
@@ -123,7 +124,7 @@ func RenderBanOverlay(p BanOverlayParams) string {
 		validationLine = "\n" + styles.StatValueError.Render(p.ValidationError)
 	}
 
-	help := styles.Help.Render("Tab: section   ↑↓: navigate   Space: toggle   Enter: confirm   Esc: cancel")
+	help := styles.Help.Render(i18n.T("overlay_ban_help"))
 
 	content := title + "\n\n" +
 		criteriaHeader + "\n" + strings.Join(criteriaLines, "\n") + "\n\n" +

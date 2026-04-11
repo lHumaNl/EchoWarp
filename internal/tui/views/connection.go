@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -40,35 +41,35 @@ func ConnectionView(p ConnectionParams) string {
 	mainMsg := buildMainMessage(p.IsServer, p.Address, p.Port)
 
 	if p.ReconnectAttempt > 0 {
-		attemptInfo := fmt.Sprintf(" (attempt %d", p.ReconnectAttempt)
+		attemptInfo := i18n.Tf("connection_attempt_info", p.ReconnectAttempt)
 		if p.MaxAttempts > 0 {
 			attemptInfo += fmt.Sprintf("/%d", p.MaxAttempts)
 		}
 		attemptInfo += ")"
 		if p.IsServer {
-			mainMsg = fmt.Sprintf("Reconnecting on :%d...%s", p.Port, attemptInfo)
+			mainMsg = i18n.Tf("connection_reconnecting_server", p.Port, attemptInfo)
 		} else {
-			mainMsg = fmt.Sprintf("Reconnecting to %s:%d...%s", p.Address, p.Port, attemptInfo)
+			mainMsg = i18n.Tf("connection_reconnecting_client", p.Address, p.Port, attemptInfo)
 		}
 	}
 
 	// Session params
 	sections = append(sections,
 		styles.ConnMessage.Render(fmt.Sprintf("  %s %s", spinText, mainMsg)),
-		renderParam("Direction:", buildModeTextFull(p.Reverse, p.Duplex, p.Conference)),
+		renderParam(i18n.T("connection_label_direction"), buildModeTextFull(p.Reverse, p.Duplex, p.Conference)),
 	)
 	if p.DeviceName != "" {
-		sections = append(sections, renderParam("Device:", p.DeviceName))
+		sections = append(sections, renderParam(i18n.T("connection_label_device"), p.DeviceName))
 	}
-	securityText := "AES+DTLS (E2E encryption)"
+	securityText := i18n.T("connection_security_aes_dtls")
 	if p.TLSEnabled {
 		if p.TLSSelfSigned {
-			securityText = "TLS (self-signed)"
+			securityText = i18n.T("connection_security_tls_self_signed")
 		} else {
-			securityText = "TLS"
+			securityText = i18n.T("connection_security_tls")
 		}
 	}
-	sections = append(sections, renderParam("Security:", securityText))
+	sections = append(sections, renderParam(i18n.T("connection_label_security"), securityText))
 
 	// Logs (if any)
 	if len(p.Logs) > 0 {
@@ -101,25 +102,25 @@ func renderParam(label, value string) string {
 
 func buildMainMessage(isServer bool, address string, port int) string {
 	if isServer {
-		return fmt.Sprintf("Waiting for client connection on :%d...", port)
+		return i18n.Tf("connection_waiting_for_client", port)
 	}
-	return fmt.Sprintf("Connecting to %s:%d...", address, port)
+	return i18n.Tf("connection_connecting_to", address, port)
 }
 
 func buildModeText(reverse bool) string {
 	if reverse {
-		return "client → server (reverse)"
+		return i18n.T("connection_mode_reverse")
 	}
-	return "server → client (normal)"
+	return i18n.T("connection_mode_normal")
 }
 
 // buildModeTextFull returns a direction string that also handles duplex and conference modes.
 func buildModeTextFull(reverse, duplex, conference bool) string {
 	if conference {
-		return "conference (multi-party)"
+		return i18n.T("connection_mode_conference")
 	}
 	if duplex {
-		return "server ↔ client (duplex)"
+		return i18n.T("connection_mode_duplex")
 	}
 	return buildModeText(reverse)
 }

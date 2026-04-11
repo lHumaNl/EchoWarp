@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/views"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
@@ -418,7 +419,7 @@ func (m Model) buildRecordingSources() (capture, playback, clients []views.Recor
 
 // openBanOverlay builds the reason list and opens the ban overlay for the given client.
 func (m Model) openBanOverlay(clientID, nickname, ip, hwid string) Model {
-	reasons := []string{"(no reason)"}
+	reasons := []string{i18n.T("reason_no_reason")}
 	reasons = append(reasons, PredefinedReasons...)
 
 	recentStart := -1
@@ -431,7 +432,7 @@ func (m Model) openBanOverlay(clientID, nickname, ip, hwid string) Model {
 	}
 
 	customStart := len(reasons)
-	reasons = append(reasons, "Custom reason...")
+	reasons = append(reasons, i18n.T("reason_custom"))
 
 	m.overlay = OverlayBan
 	m.banClientID = clientID
@@ -775,8 +776,12 @@ func (m *Model) openClientPopup(clientID, clientNick string) {
 				break
 			}
 		}
+		outLabel := i18n.T("popup_mute_outgoing")
+		if isActive {
+			outLabel = i18n.T("popup_unmute_outgoing")
+		}
 		items = append(items, views.PopupMenuItem{
-			Label:    "Mute outgoing",
+			Label:    outLabel,
 			Action:   "mute_outgoing",
 			IsToggle: true,
 			IsActive: isActive,
@@ -791,8 +796,12 @@ func (m *Model) openClientPopup(clientID, clientNick string) {
 				break
 			}
 		}
+		inLabel := i18n.T("popup_mute_incoming")
+		if isActiveIncoming {
+			inLabel = i18n.T("popup_unmute_incoming")
+		}
 		items = append(items, views.PopupMenuItem{
-			Label:    "Mute incoming",
+			Label:    inLabel,
 			Action:   "mute_incoming",
 			IsToggle: true,
 			IsActive: isActiveIncoming,
@@ -800,9 +809,9 @@ func (m *Model) openClientPopup(clientID, clientNick string) {
 	}
 
 	items = append(items,
-		views.PopupMenuItem{Label: "Kick", Hotkey: "Ctrl+K", Action: "kick"},
-		views.PopupMenuItem{Label: "Ban", Hotkey: "Ctrl+B", Action: "ban"},
-		views.PopupMenuItem{Label: "Cancel", Hotkey: "Esc", Action: "cancel"},
+		views.PopupMenuItem{Label: i18n.T("popup_kick"), Hotkey: "Ctrl+K", Action: "kick"},
+		views.PopupMenuItem{Label: i18n.T("popup_ban"), Hotkey: "Ctrl+B", Action: "ban"},
+		views.PopupMenuItem{Label: i18n.T("popup_cancel"), Hotkey: "Esc", Action: "cancel"},
 	)
 
 	m.popupItems = items
@@ -887,7 +896,7 @@ func (m Model) dispatchPopupAction(action string) (tea.Model, tea.Cmd) {
 
 // openKickOverlay builds the reason list and opens the kick overlay for the given client.
 func (m Model) openKickOverlay(clientID, nickname string) Model {
-	reasons := []string{"(no reason)"}
+	reasons := []string{i18n.T("reason_no_reason")}
 	reasons = append(reasons, PredefinedReasons...)
 
 	recentStart := -1
@@ -900,7 +909,7 @@ func (m Model) openKickOverlay(clientID, nickname string) Model {
 	}
 
 	customStart := len(reasons)
-	reasons = append(reasons, "Custom reason...")
+	reasons = append(reasons, i18n.T("reason_custom"))
 
 	m.overlay = OverlayKick
 	m.kickClientID = clientID

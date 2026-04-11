@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 )
 
@@ -16,7 +17,7 @@ import (
 func newDevicesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "devices",
-		Short: "List available audio devices",
+		Short: i18n.T("cli_devices_short"),
 		RunE:  runDevices,
 	}
 	cmd.Flags().Bool("input", false, "Show only input (capture) devices")

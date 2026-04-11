@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -395,7 +396,7 @@ func (o *RecordingOverlay) renderStart(width int) string {
 
 	if len(o.items) == 0 {
 		// No selectable items — just show hint.
-		lines = append(lines, dimStyle.Render("All available sources will be recorded."))
+		lines = append(lines, dimStyle.Render(i18n.T("overlay_recording_all_sources")))
 	} else {
 		itemIdx := 0
 		sectionHeaders := o.sectionHeaderNames()
@@ -423,10 +424,10 @@ func (o *RecordingOverlay) renderStart(width int) string {
 	}
 
 	// Hint line.
-	hint := dimStyle.Render("↑↓: move  space: toggle  enter: start  esc: cancel")
+	hint := dimStyle.Render(i18n.T("overlay_recording_hint"))
 	content := strings.Join(lines, "\n") + "\n\n" + hint
 
-	return o.wrapBox(content, " Start recording ", width)
+	return o.wrapBox(content, i18n.T("overlay_recording_title"), width)
 }
 
 func (o *RecordingOverlay) renderStatus(width int) string {
@@ -441,12 +442,12 @@ func (o *RecordingOverlay) renderStatus(width int) string {
 	} else if o.RecordingDir != "" {
 		lines = append(lines, fmt.Sprintf("  %s", filepath.Base(o.RecordingDir)))
 	}
-	lines = append(lines, fmt.Sprintf("  Size: %s", formatSize(o.RecordingSize)))
+	lines = append(lines, i18n.Tf("overlay_recording_size", formatSize(o.RecordingSize)))
 
-	hint := dimStyle.Render("[Enter] Stop      [Esc] Close")
+	hint := dimStyle.Render(i18n.T("overlay_recording_status_hint"))
 	content := strings.Join(lines, "\n") + "\n\n" + hint
 
-	title := fmt.Sprintf(" Recording ● %s ", durStr)
+	title := i18n.Tf("overlay_recording_status_title", durStr)
 	return o.wrapBox(content, title, width)
 }
 
@@ -454,16 +455,16 @@ func (o *RecordingOverlay) renderStatus(width int) string {
 func (o *RecordingOverlay) sectionHeaderNames() []string {
 	var names []string
 	if o.showCapture {
-		names = append(names, "Capture devices:")
+		names = append(names, i18n.T("overlay_recording_section_capture"))
 	}
 	if o.showPlayback {
-		names = append(names, "Playback devices:")
+		names = append(names, i18n.T("overlay_recording_section_playback"))
 	}
 	if o.showClients {
-		names = append(names, "Clients:")
+		names = append(names, i18n.T("overlay_recording_section_clients"))
 	}
 	if o.showMode {
-		names = append(names, "Mode:")
+		names = append(names, i18n.T("overlay_recording_section_mode"))
 	}
 	return names
 }
@@ -497,17 +498,17 @@ func (o *RecordingOverlay) formatItem(it recordingItem, isCurrent bool) string {
 		line = fmt.Sprintf("  %s %s", check, d.Name)
 	case itemClientAll:
 		check := checkbox(o.clientsAllSelected)
-		line = fmt.Sprintf("  %s All", check)
+		line = fmt.Sprintf("  %s %s", check, i18n.T("overlay_recording_all"))
 	case itemClient:
 		s := o.Clients[it.sourceIdx]
 		check := checkbox(s.Selected)
 		line = fmt.Sprintf("  %s %s", check, s.Name)
 	case itemModeMix:
-		line = o.formatModeItem(0, "Mix (single file)")
+		line = o.formatModeItem(0, i18n.T("overlay_recording_mode_mix"))
 	case itemModeTracks:
-		line = o.formatModeItem(1, "Separate tracks")
+		line = o.formatModeItem(1, i18n.T("overlay_recording_mode_tracks"))
 	case itemModeBoth:
-		line = o.formatModeItem(2, "Mix + tracks")
+		line = o.formatModeItem(2, i18n.T("overlay_recording_mode_both"))
 	}
 
 	if isCurrent {

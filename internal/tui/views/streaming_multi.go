@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
@@ -87,7 +88,7 @@ func MultiClientView(p MultiClientParams) string {
 
 	// Duplex warning
 	if p.Duplex {
-		sections = append(sections, styles.StatValueWarn.Render("  ⚠ Duplex mode: headphones recommended to avoid echo"))
+		sections = append(sections, styles.StatValueWarn.Render(i18n.T("streaming_duplex_warning")))
 	}
 
 	// Separator
@@ -116,7 +117,7 @@ func MultiClientView(p MultiClientParams) string {
 		}
 		sections = append(sections, renderSep(p.Width))
 		if p.FocusedArea == 2 { // FocusLogs
-			sections = append(sections, styles.FocusedLabel.Render("Logs ▾"))
+			sections = append(sections, styles.FocusedLabel.Render(i18n.T("streaming_label_logs")))
 			remaining--
 		}
 		logPanel := renderLogPanelWithMax(p.Logs, p.LogScrollOffset, p.Width, remaining-1) // -1 for sep
@@ -133,21 +134,21 @@ func renderMultiSummaryLine(p MultiClientParams) string {
 
 	if p.Paused {
 		if p.Duplex {
-			dirText = "⇄ server ↔ clients (duplex) [PAUSED]"
+			dirText = i18n.T("streaming_dir_multi_duplex_paused")
 		} else if p.Reverse {
-			dirText = "▸ clients → server (reverse) [PAUSED]"
+			dirText = i18n.T("streaming_dir_multi_reverse_paused")
 		} else {
-			dirText = "▸ server → clients (normal) [PAUSED]"
+			dirText = i18n.T("streaming_dir_multi_normal_paused")
 		}
 		style = styles.Paused
 	} else if p.Duplex {
-		dirText = "⇄ server ↔ clients (duplex)"
+		dirText = i18n.T("streaming_dir_multi_duplex")
 		style = styles.Direction
 	} else if p.Reverse {
-		dirText = "▸ clients → server (reverse)"
+		dirText = i18n.T("streaming_dir_multi_reverse")
 		style = styles.DirectionReverse
 	} else {
-		dirText = "▸ server → clients (normal)"
+		dirText = i18n.T("streaming_dir_multi_normal")
 		style = styles.Direction
 	}
 
@@ -189,7 +190,7 @@ func renderLeftColumn(p MultiClientParams, colWidth int) []string {
 
 	// Client list
 	if len(p.Stats.Clients) == 0 {
-		lines = append(lines, "  "+styles.EmptyState.Render("No clients"))
+		lines = append(lines, "  "+styles.EmptyState.Render(i18n.T("multi_no_clients")))
 	} else {
 		for i, c := range p.Stats.Clients {
 			var q QualityLevel
@@ -313,7 +314,7 @@ func renderClientListItem(c transport.ClientInfo, q QualityLevel, selected bool,
 // renderDetailHeader renders the detail panel header: "Clients N/M  ▸ Nick — IP    duration"
 func renderDetailHeader(p MultiClientParams, detailWidth int) string {
 	nClients := len(p.Stats.Clients)
-	capacity := fmt.Sprintf("Clients %d/%d", nClients, p.Stats.MaxClients)
+	capacity := i18n.Tf("multi_clients_capacity", nClients, p.Stats.MaxClients)
 
 	if nClients == 0 || p.SelectedIndex >= nClients {
 		return styles.DetailHeader.Render(capacity)
@@ -360,7 +361,7 @@ func renderDetailPanel(p MultiClientParams, detailWidth int) string {
 	lines = append(lines, renderDetailHeader(p, detailWidth), styles.Separator.Render(strings.Repeat("─", detailWidth)))
 
 	if len(p.Stats.Clients) == 0 || p.SelectedIndex >= len(p.Stats.Clients) {
-		lines = append(lines, styles.EmptyState.Render("Waiting for clients…"))
+		lines = append(lines, styles.EmptyState.Render(i18n.T("multi_waiting_clients")))
 		return strings.Join(lines, "\n")
 	}
 
@@ -470,11 +471,11 @@ func renderStackedLayout(p MultiClientParams) string {
 
 	// Capacity
 	nClients := len(p.Stats.Clients)
-	lines = append(lines, styles.DetailHeader.Render(fmt.Sprintf("Clients %d/%d", nClients, p.Stats.MaxClients)))
+	lines = append(lines, styles.DetailHeader.Render(i18n.Tf("multi_clients_capacity", nClients, p.Stats.MaxClients)))
 
 	// Client list (compact)
 	if nClients == 0 {
-		lines = append(lines, "  "+styles.EmptyState.Render("Waiting for clients…"))
+		lines = append(lines, "  "+styles.EmptyState.Render(i18n.T("multi_waiting_clients")))
 	} else {
 		w := p.Width
 		if w < leftColumnWidthMin {
@@ -522,7 +523,7 @@ func renderStackedLayout(p MultiClientParams) string {
 		}
 		lines = append(lines, statsLines...)
 	} else {
-		lines = append(lines, styles.EmptyState.Render("Waiting for clients…"))
+		lines = append(lines, styles.EmptyState.Render(i18n.T("multi_waiting_clients")))
 	}
 
 	return strings.Join(lines, "\n")

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
@@ -100,7 +101,7 @@ func StreamingView(p StreamingParams) string {
 
 	// Duplex warning + latency estimation
 	if p.Duplex {
-		sections = append(sections, styles.StatValueWarn.Render("  ⚠ Duplex mode: headphones recommended to avoid echo"))
+		sections = append(sections, styles.StatValueWarn.Render(i18n.T("streaming_duplex_warning")))
 		// Latency estimation: codec (20ms × 2 encode+decode) + RTT/2 + jitter buffer
 		codecMs := 40.0 // 20ms encode + 20ms decode
 		jitterBuf := p.Stats.Jitter * 2
@@ -109,8 +110,9 @@ func StreamingView(p StreamingParams) string {
 		}
 		oneWayMs := codecMs + p.Stats.RoundTrip/2 + jitterBuf
 		latStyle := getValueStyle(oneWayMs, 80, 150, styles.StatValueGood, styles.StatValueWarn, styles.StatValueError)
-		sections = append(sections, fmt.Sprintf("  Estimated latency: %s",
-			latStyle.Render(fmt.Sprintf("%.0f ms (one-way)", oneWayMs))))
+		sections = append(sections, fmt.Sprintf("  %s%s",
+			i18n.T("streaming_latency_estimated"),
+			latStyle.Render(i18n.Tf("streaming_latency_oneway", oneWayMs))))
 	}
 
 	// Remote address
@@ -153,7 +155,7 @@ func StreamingView(p StreamingParams) string {
 		}
 		sections = append(sections, renderSep(p.Width))
 		if p.FocusedArea == 2 { // FocusLogs
-			sections = append(sections, styles.FocusedLabel.Render("Logs ▾"))
+			sections = append(sections, styles.FocusedLabel.Render(i18n.T("streaming_label_logs")))
 			remaining--
 		}
 		logPanel := renderLogPanelWithMax(p.Logs, p.LogScrollOffset, p.Width, remaining-1)
@@ -168,7 +170,7 @@ func renderParticipantSidebar(participants []string, maxClients int, myNickname 
 	lines := make([]string, 0, 2+len(participants))
 
 	// Header: "Online (N/M)"
-	header := fmt.Sprintf("Online (%d/%d)", len(participants), maxClients)
+	header := i18n.Tf("streaming_online_count", len(participants), maxClients)
 	lines = append(lines, styles.StatLabel.Render(header), styles.Separator.Render(strings.Repeat("─", leftColumnWidth)))
 
 	// Participant list with bullets
@@ -176,7 +178,7 @@ func renderParticipantSidebar(participants []string, maxClients int, myNickname 
 		bullet := styles.ParticipantBullet.Render(" • ")
 		entry := nick
 		if nick == myNickname {
-			entry += " (me)"
+			entry += i18n.T("streaming_me_suffix")
 		}
 		// Truncate if too wide
 		maxNameW := leftColumnWidth - 3 // " • " prefix
@@ -230,31 +232,31 @@ func renderSummaryLine(reverse, duplex, paused, sourcePaused, serverMuted bool, 
 
 	if paused {
 		if duplex {
-			dirText = "⇄ server ↔ client (duplex) [PAUSED]"
+			dirText = i18n.T("streaming_dir_duplex_paused")
 		} else if reverse {
-			dirText = "▸ client → server (reverse) [PAUSED]"
+			dirText = i18n.T("streaming_dir_reverse_paused")
 		} else {
-			dirText = "▸ server → client (normal) [PAUSED]"
+			dirText = i18n.T("streaming_dir_normal_paused")
 		}
 		style = styles.Paused
 	} else if duplex {
-		dirText = "⇄ server ↔ client (duplex)"
+		dirText = i18n.T("streaming_dir_duplex")
 		style = styles.Direction
 	} else if reverse {
-		dirText = "▸ client → server (reverse)"
+		dirText = i18n.T("streaming_dir_reverse")
 		style = styles.DirectionReverse
 	} else {
-		dirText = "▸ server → client (normal)"
+		dirText = i18n.T("streaming_dir_normal")
 		style = styles.Direction
 	}
 
 	if sourcePaused && !paused {
-		dirText += " [SOURCE PAUSED]"
+		dirText += " " + i18n.T("streaming_badge_source_paused")
 		style = styles.Paused
 	}
 
 	if serverMuted {
-		dirText += " [MUTED]"
+		dirText += " " + i18n.T("streaming_badge_muted")
 		style = styles.Paused
 	}
 
@@ -276,7 +278,7 @@ func renderSummaryLine(reverse, duplex, paused, sourcePaused, serverMuted bool, 
 }
 
 func renderRemoteLine(remoteAddr string, _ int) string {
-	return styles.StatLabel.Render("Remote: ") + styles.StatValueGood.Render(remoteAddr)
+	return styles.StatLabel.Render(i18n.T("streaming_label_remote")) + styles.StatValueGood.Render(remoteAddr)
 }
 
 func renderSep(width int) string {
@@ -292,7 +294,7 @@ const thresholdBarWidth = 10
 
 // renderQualityLine renders a single quality indicator line above stats.
 func renderQualityLine(q QualityLevel) string {
-	return styles.StatLabel.Render("Connection Quality  ") + RenderQualityBadge(q)
+	return styles.StatLabel.Render(i18n.T("streaming_label_connection_quality")) + RenderQualityBadge(q)
 }
 
 // renderStatsLines builds the left-column stats lines (jitter, RTT, loss, traffic).
@@ -308,9 +310,9 @@ func renderStatsLines(stats transport.ConnectionStats, jitterHist, rttHist []flo
 	rttBar := RTTBar(stats.RoundTrip, thresholdBarWidth)
 	lossBar := LossBar(stats.PacketsLost, thresholdBarWidth)
 
-	jitterText := fmt.Sprintf("Jitter %s  %s", jitterStyle.Render(fmt.Sprintf("%5.1f ms", stats.Jitter)), jitterBar)
-	rttText := fmt.Sprintf("RTT    %s  %s", rttStyle.Render(fmt.Sprintf("%5.1f ms", stats.RoundTrip)), rttBar)
-	lossText := fmt.Sprintf("Loss   %s  %s", lossStyle.Render(fmt.Sprintf("%d / %.1f%%", stats.PacketsLost, packetLossPct)), lossBar)
+	jitterText := fmt.Sprintf("%-6s %s  %s", i18n.T("streaming_label_jitter"), jitterStyle.Render(fmt.Sprintf("%5.1f ms", stats.Jitter)), jitterBar)
+	rttText := fmt.Sprintf("%-6s %s  %s", i18n.T("streaming_label_rtt"), rttStyle.Render(fmt.Sprintf("%5.1f ms", stats.RoundTrip)), rttBar)
+	lossText := fmt.Sprintf("%-6s %s  %s", i18n.T("streaming_label_loss"), lossStyle.Render(fmt.Sprintf("%d / %.1f%%", stats.PacketsLost, packetLossPct)), lossBar)
 
 	if jitterSpark != "" {
 		jitterText += "  " + styles.StatLabel.Render(jitterSpark)
@@ -328,8 +330,8 @@ func renderStatsLines(stats transport.ConnectionStats, jitterHist, rttHist []flo
 
 	var sentPrefix, recvPrefix string
 	if duplex {
-		sentPrefix = "Sending   "
-		recvPrefix = "Receiving "
+		sentPrefix = i18n.T("streaming_label_sending")
+		recvPrefix = i18n.T("streaming_label_receiving")
 	}
 	sent := fmt.Sprintf("%s↑ %*s  %*s", sentPrefix, bytesW, sentBytes, rateW, sentRate)
 	recv := fmt.Sprintf("%s↓ %*s  %*s", recvPrefix, bytesW, recvBytes, rateW, recvRate)
@@ -487,9 +489,9 @@ func formatKbps(kbps float64) string {
 
 func renderDevicePanel(devices []DeviceDisplayState, globalMuted bool) string {
 	lines := make([]string, 0, 1+len(devices))
-	header := "Devices"
+	header := i18n.T("streaming_label_devices")
 	if globalMuted {
-		header += "  " + styles.StatValueError.Render("[GLOBAL MUTE]")
+		header += "  " + styles.StatValueError.Render(i18n.T("streaming_label_global_mute"))
 	}
 	lines = append(lines, styles.StatLabel.Render(header))
 
@@ -504,9 +506,9 @@ func renderDevicePanel(devices []DeviceDisplayState, globalMuted bool) string {
 
 		muteIcon := ""
 		if dev.Disconnected {
-			muteIcon = " " + styles.StatValueError.Render("[disconnected]")
+			muteIcon = " " + styles.StatValueError.Render(i18n.T("streaming_label_disconnected"))
 		} else if dev.Muted || globalMuted {
-			muteIcon = " " + styles.StatValueError.Render("MUTED")
+			muteIcon = " " + styles.StatValueError.Render(i18n.T("streaming_label_muted_cap"))
 		}
 
 		prefix := "  "
@@ -598,7 +600,7 @@ func renderLogPanelInner(logs []string, scrollOffset, width, maxVisible int) str
 	}
 
 	if scrollOffset > 0 {
-		hint := styles.ScrollHint.Render(fmt.Sprintf("[SCROLLED ↑%d]", scrollOffset))
+		hint := styles.ScrollHint.Render(i18n.Tf("streaming_scrolled", scrollOffset))
 		sb.WriteString(hint)
 	}
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/version"
 )
 
@@ -14,7 +15,7 @@ import (
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the version of EchoWarp",
+		Short: i18n.T("cli_version_short"),
 		Run: func(cmd *cobra.Command, args []string) {
 			var info strings.Builder
 			fmt.Fprintf(&info, "EchoWarp v%s\n", version.Version)

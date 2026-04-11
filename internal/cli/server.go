@@ -16,6 +16,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/app"
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/logging"
 	"github.com/lHumaNl/echowarp/internal/tui"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
@@ -39,55 +40,55 @@ import (
 func newServerCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "server",
-		Short: "Start EchoWarp in server mode",
-		Long:  "Start EchoWarp as a server, capturing audio and streaming to connected clients.",
+		Short: i18n.T("cli_server_short"),
+		Long:  i18n.T("cli_server_long"),
 		RunE:  runServer,
 	}
 
-	cmd.Flags().IntP("port", "p", 4415, "TCP port for signaling")
-	cmd.Flags().UintP("device", "d", 0, "Audio device ID (repeatable in multi-device mode)")
-	cmd.Flags().UintSlice("capture-device", nil, "Capture device ID (duplex mode, repeatable)")
-	cmd.Flags().UintSlice("playback-device", nil, "Playback device ID (duplex mode, repeatable)")
-	cmd.Flags().StringP("password", "P", "", "Password for authentication")
-	cmd.Flags().StringP("mode", "m", "normal", "Audio mode: normal, reverse, duplex, conference")
-	cmd.Flags().BoolP("reverse", "r", false, "Alias for --mode=reverse")
-	cmd.Flags().BoolP("duplex", "X", false, "Alias for --mode=duplex")
-	cmd.Flags().Int("sample-rate", 48000, "Sample rate")
-	cmd.Flags().Int("channels", 1, "Number of channels (1=mono, 2=stereo)")
-	cmd.Flags().Int("max-clients", 1, "Maximum number of clients")
-	cmd.Flags().Int("max-auth-failures", 5, "Max failed auth attempts before ban (0=disabled)")
+	cmd.Flags().IntP("port", "p", 4415, i18n.T("cli_flag_port_server"))
+	cmd.Flags().UintP("device", "d", 0, i18n.T("cli_flag_device"))
+	cmd.Flags().UintSlice("capture-device", nil, i18n.T("cli_flag_capture_device"))
+	cmd.Flags().UintSlice("playback-device", nil, i18n.T("cli_flag_playback_device"))
+	cmd.Flags().StringP("password", "P", "", i18n.T("cli_flag_password"))
+	cmd.Flags().StringP("mode", "m", "normal", i18n.T("cli_flag_mode"))
+	cmd.Flags().BoolP("reverse", "r", false, i18n.T("cli_flag_reverse"))
+	cmd.Flags().BoolP("duplex", "X", false, i18n.T("cli_flag_duplex"))
+	cmd.Flags().Int("sample-rate", 48000, i18n.T("cli_flag_sample_rate"))
+	cmd.Flags().Int("channels", 1, i18n.T("cli_flag_channels"))
+	cmd.Flags().Int("max-clients", 1, i18n.T("cli_flag_max_clients"))
+	cmd.Flags().Int("max-auth-failures", 5, i18n.T("cli_flag_max_auth_failures"))
 	cmd.Flags().Int("max-failed", 5, "")
 	_ = cmd.Flags().MarkHidden("max-failed")
 	_ = cmd.Flags().MarkDeprecated("max-failed", "use --max-auth-failures instead")
-	cmd.Flags().Int("max-reconnect", 5, "Max reconnect attempts (0=infinite)")
-	cmd.Flags().Bool("virtual-mic", false, "Create virtual microphone")
-	cmd.Flags().StringSlice("stun-server", nil, "STUN servers")
-	cmd.Flags().String("tls-cert", "", "TLS certificate path")
-	cmd.Flags().String("tls-key", "", "TLS key path")
-	cmd.Flags().StringP("config", "c", "", "Path to YAML config file")
-	cmd.Flags().StringP("save-config", "s", "", "Save current settings to file")
-	cmd.Flags().String("log-level", "info", "Log level (debug, info, warn, error)")
-	cmd.Flags().String("log-file", "", "Log to file")
-	cmd.Flags().String("ban-file", "", "Ban list file path")
-	cmd.Flags().Bool("no-discovery", false, "Don't publish via mDNS")
-	cmd.Flags().StringP("device-name", "D", "", "Select audio device by name substring (case-insensitive)")
-	cmd.Flags().String("server-name", "", "Custom server name (defaults to hostname)")
-	cmd.Flags().Int("rate-limit", 5, "Max connections per second per IP (0=disabled)")
-	cmd.Flags().Bool("no-simd-optimization", false, "Disable SIMD audio optimizations (use pure Go)")
-	cmd.Flags().Bool("no-pool-warmup", false, "Disable audio buffer pool warmup on startup")
-	cmd.Flags().Int("audio-buffer-frames", 5, "Audio channel buffer size in frames (each frame=20ms). Lower=less latency, higher=more stability")
-	cmd.Flags().Bool("dry-run", false, "Validate config and check device, then exit without starting")
-	cmd.Flags().Bool("loopback", false, "Enable loopback capture of system audio (macOS, requires BlackHole)")
-	cmd.Flags().Bool("no-interactive", false, "Disable TUI: requires --device, logs to stdout/file")
-	cmd.Flags().Bool("aec", false, "Enable acoustic echo cancellation (duplex mode)")
-	cmd.Flags().Bool("conference", false, "Alias for --mode=conference")
+	cmd.Flags().Int("max-reconnect", 5, i18n.T("cli_flag_max_reconnect"))
+	cmd.Flags().Bool("virtual-mic", false, i18n.T("cli_flag_virtual_mic"))
+	cmd.Flags().StringSlice("stun-server", nil, i18n.T("cli_flag_stun_server"))
+	cmd.Flags().String("tls-cert", "", i18n.T("cli_flag_tls_cert"))
+	cmd.Flags().String("tls-key", "", i18n.T("cli_flag_tls_key"))
+	cmd.Flags().StringP("config", "c", "", i18n.T("cli_flag_config"))
+	cmd.Flags().StringP("save-config", "s", "", i18n.T("cli_flag_save_config"))
+	cmd.Flags().String("log-level", "info", i18n.T("cli_flag_log_level"))
+	cmd.Flags().String("log-file", "", i18n.T("cli_flag_log_file"))
+	cmd.Flags().String("ban-file", "", i18n.T("cli_flag_ban_file"))
+	cmd.Flags().Bool("no-discovery", false, i18n.T("cli_flag_no_discovery"))
+	cmd.Flags().StringP("device-name", "D", "", i18n.T("cli_flag_device_name"))
+	cmd.Flags().String("server-name", "", i18n.T("cli_flag_server_name"))
+	cmd.Flags().Int("rate-limit", 5, i18n.T("cli_flag_rate_limit"))
+	cmd.Flags().Bool("no-simd-optimization", false, i18n.T("cli_flag_no_simd"))
+	cmd.Flags().Bool("no-pool-warmup", false, i18n.T("cli_flag_no_pool_warmup"))
+	cmd.Flags().Int("audio-buffer-frames", 5, i18n.T("cli_flag_audio_buffer_frames"))
+	cmd.Flags().Bool("dry-run", false, i18n.T("cli_flag_dry_run"))
+	cmd.Flags().Bool("loopback", false, i18n.T("cli_flag_loopback"))
+	cmd.Flags().Bool("no-interactive", false, i18n.T("cli_flag_no_interactive"))
+	cmd.Flags().Bool("aec", false, i18n.T("cli_flag_aec"))
+	cmd.Flags().Bool("conference", false, i18n.T("cli_flag_conference"))
 	cmd.Flags().Bool("conf", false, "Alias for --conference")
 	_ = cmd.Flags().MarkHidden("conf")
 	_ = cmd.Flags().MarkHidden("no-simd-optimization")
 	_ = cmd.Flags().MarkHidden("no-pool-warmup")
-	cmd.Flags().Bool("server-muted", false, "Server does not contribute audio in conference mode")
-	cmd.Flags().String("record", "", "Start recording immediately: mix, tracks, or both (conference mode)")
-	cmd.Flags().Bool("hwid-required", false, "Require clients to send hardware ID (for bans)")
+	cmd.Flags().Bool("server-muted", false, i18n.T("cli_flag_server_muted"))
+	cmd.Flags().String("record", "", i18n.T("cli_flag_record"))
+	cmd.Flags().Bool("hwid-required", false, i18n.T("cli_flag_hwid_required"))
 
 	applyGroupedUsage(cmd, []flagGroup{
 		{"Audio", []string{"device", "device-name", "capture-device", "playback-device", "sample-rate", "channels", "virtual-mic", "loopback", "aec", "audio-buffer-frames"}},

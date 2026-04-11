@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 )
 
 // newConfigCmd creates the "config" command group for configuration management.
@@ -16,7 +17,7 @@ import (
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Manage EchoWarp configuration",
+		Short: i18n.T("cli_config_short"),
 	}
 
 	cmd.AddCommand(newConfigInitCmd())
@@ -33,7 +34,7 @@ func newConfigInitCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Create a configuration file",
+		Short: i18n.T("cli_config_init_short"),
 		Long:  `Create a configuration file for EchoWarp with sensible defaults.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if outputPath == "" {
@@ -63,7 +64,7 @@ func newConfigShowCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "show",
-		Short: "Show the effective configuration",
+		Short: i18n.T("cli_config_show_short"),
 		Long: `Load and display the effective EchoWarp configuration.
 
 Merges values from the config file, environment variables (ECHOWARP_*),
@@ -101,7 +102,7 @@ func newConfigValidateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "validate",
-		Short: "Validate a configuration file",
+		Short: i18n.T("cli_config_validate_short"),
 		Long: `Load and validate a configuration file.
 
 Checks all fields for valid values and required settings.

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -24,13 +25,13 @@ const (
 func (q QualityLevel) String() string {
 	switch q {
 	case QualityExcellent:
-		return "Excellent"
+		return i18n.T("quality_excellent")
 	case QualityGood:
-		return "Good"
+		return i18n.T("quality_good")
 	case QualityFair:
-		return "Fair"
+		return i18n.T("quality_fair")
 	case QualityPoor:
-		return "Poor"
+		return i18n.T("quality_poor")
 	default:
 		return ""
 	}

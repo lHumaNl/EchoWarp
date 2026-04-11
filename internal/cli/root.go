@@ -30,7 +30,7 @@ func NewRootCmd() *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:   "echowarp",
-		Short: "EchoWarp — network audio streaming tool",
+		Short: i18n.T("cli_root_short"),
 		Long: fmt.Sprintf(`EchoWarp v%s — network audio streaming tool
 
 EchoWarp is a network tool for real-time audio streaming between two hosts.
@@ -363,7 +363,7 @@ func (m quickStartModel) handleChoice(choice quickStartChoice) (tea.Model, tea.C
 		content := renderDevicesContent(m.width)
 		m.viewport.SetContent(content)
 		m.viewport.GotoTop()
-		m.resultTitle = "Audio Devices"
+		m.resultTitle = i18n.T("layout_result_title_devices")
 		m.screen = qsScreenResult
 		return m, nil
 
@@ -371,7 +371,7 @@ func (m quickStartModel) handleChoice(choice quickStartChoice) (tea.Model, tea.C
 		content := renderConfigContent(m.cfgPath, m.width)
 		m.viewport.SetContent(content)
 		m.viewport.GotoTop()
-		m.resultTitle = "Configuration"
+		m.resultTitle = i18n.T("layout_result_title_config")
 		m.screen = qsScreenResult
 		return m, nil
 
@@ -379,7 +379,7 @@ func (m quickStartModel) handleChoice(choice quickStartChoice) (tea.Model, tea.C
 		content := renderHelpContent(m.width)
 		m.viewport.SetContent(content)
 		m.viewport.GotoTop()
-		m.resultTitle = "Help"
+		m.resultTitle = i18n.T("layout_result_title_help")
 		m.screen = qsScreenResult
 		return m, nil
 
@@ -391,7 +391,7 @@ func (m quickStartModel) handleChoice(choice quickStartChoice) (tea.Model, tea.C
 			func() tea.Msg {
 				var sb strings.Builder
 				RunDoctorToWriter(&sb, "", 4415, "", cfgPath)
-				return resultReadyMsg{title: "Diagnostics", content: sb.String()}
+				return resultReadyMsg{title: i18n.T("layout_result_title_diagnostics"), content: sb.String()}
 			},
 		)
 	}
@@ -491,7 +491,7 @@ func (m quickStartModel) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			resultHeaderStyle.Render(fmt.Sprintf("EchoWarp v%s", version.Version)),
 			"",
-			loadingStyle.Render(fmt.Sprintf("%s Running diagnostics, please wait…", m.spinner.View())),
+			loadingStyle.Render(i18n.Tf("layout_loading_diagnostics", m.spinner.View())),
 		)
 
 	case qsScreenResult:
@@ -512,7 +512,7 @@ func (m quickStartModel) viewResult() string {
 		scrollInfo = fmt.Sprintf(" %d%%", pct)
 	}
 
-	footerText := "esc: back  ↑↓: scroll  ^Q: quit" + scrollInfo
+	footerText := i18n.T("layout_result_footer") + scrollInfo
 	footer := resultFooterStyle.Render(footerText)
 
 	separator := lipgloss.NewStyle().

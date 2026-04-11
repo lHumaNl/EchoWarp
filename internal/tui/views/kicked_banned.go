@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -37,15 +38,15 @@ var (
 func RenderKickedView(p KickedViewParams) string {
 	var b strings.Builder
 
-	b.WriteString(kickBanTitle.Render("Kicked by server"))
+	b.WriteString(kickBanTitle.Render(i18n.T("kicked_title")))
 	b.WriteString("\n")
 	if p.Reason != "" {
-		b.WriteString(kickBanLabel.Render(fmt.Sprintf("Reason: %s", p.Reason)))
+		b.WriteString(kickBanLabel.Render(i18n.Tf("kickban_label_reason", p.Reason)))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 
-	buttons := []string{"Reconnect", "Settings", "Quit"}
+	buttons := []string{i18n.T("kickban_btn_reconnect"), i18n.T("kickban_btn_settings"), i18n.T("kickban_btn_quit")}
 	b.WriteString(renderButtons(buttons, p.SelectedButton))
 
 	maxW := p.Width - 8
@@ -59,19 +60,19 @@ func RenderKickedView(p KickedViewParams) string {
 func RenderBannedView(p BannedViewParams) string {
 	var b strings.Builder
 
-	b.WriteString(kickBanTitle.Render("Banned by server"))
+	b.WriteString(kickBanTitle.Render(i18n.T("banned_title")))
 	b.WriteString("\n")
 	if p.Reason != "" {
-		b.WriteString(kickBanLabel.Render(fmt.Sprintf("Reason: %s", p.Reason)))
+		b.WriteString(kickBanLabel.Render(i18n.Tf("kickban_label_reason", p.Reason)))
 		b.WriteString("\n")
 	}
 	if len(p.Criteria) > 0 {
-		b.WriteString(kickBanLabel.Render(fmt.Sprintf("Criteria: %s", strings.Join(p.Criteria, ", "))))
+		b.WriteString(kickBanLabel.Render(i18n.Tf("kickban_label_criteria", strings.Join(p.Criteria, ", "))))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
 
-	buttons := []string{"Settings", "Quit"}
+	buttons := []string{i18n.T("kickban_btn_settings"), i18n.T("kickban_btn_quit")}
 	b.WriteString(renderButtons(buttons, p.SelectedButton))
 
 	maxW := p.Width - 8

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -24,11 +25,11 @@ type BanListParams struct {
 
 // BanListView renders the ban list overlay centered on the screen.
 func BanListView(p BanListParams) string {
-	title := styles.AppTitle.Render("Banned IPs")
+	title := styles.AppTitle.Render(i18n.T("overlay_banlist_title"))
 
 	var lines []string
 	if len(p.BannedIPs) == 0 {
-		lines = append(lines, styles.StatLabel.Render("  No banned IPs"))
+		lines = append(lines, styles.StatLabel.Render(i18n.T("overlay_banlist_empty")))
 	} else {
 		for i, ip := range p.BannedIPs {
 			prefix := "  "
@@ -39,7 +40,7 @@ func BanListView(p BanListParams) string {
 		}
 	}
 
-	help := styles.Help.Render("↑↓: select   enter: unban   esc: close")
+	help := styles.Help.Render(i18n.T("overlay_banlist_help"))
 
 	content := title + "\n\n" + strings.Join(lines, "\n") + "\n\n" + help
 
