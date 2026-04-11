@@ -1,0 +1,137 @@
+app_name: "EchoWarp"
+mode_server: "服务器"
+mode_client: "客户端"
+mode_diagnostic: "诊断"
+btn_start: "启动"
+btn_cancel: "取消"
+
+# Setup view — column headers
+setup_select_input_device: "选择输入设备"
+setup_select_output_device: "选择输出设备"
+setup_settings: "设置"
+setup_devices: "设备"
+setup_audio_devices: "音频设备"
+setup_input_device_mic: "输入设备（麦克风）"
+setup_output_device_speaker: "输出设备（扬声器）"
+
+# Device section headers
+setup_section_input: "输入"
+setup_section_output: "输出"
+setup_col_select: "✓ 选择"
+setup_no_devices: "（无设备）"
+setup_virtual_legend: "⟡ 虚拟"
+setup_loopback_legend: "🔄 环回"
+
+# Device status hints
+setup_capture_playback_count: "✓ %d 采集，%d 回放"
+setup_hub_mode_no_devices: "✓ 中枢模式 — 无需设备"
+setup_conference_select_mic_speaker: "✗ 会议 — 请选择麦克风和扬声器"
+setup_select_capture_playback: "✗ 至少选择 1 个采集和 1 个回放设备"
+setup_n_selected: "✓ 已选 %d 个"
+setup_select_at_least_one: "✗ 至少选择一个设备"
+
+# Client placeholder
+setup_select_server_to_configure: "选择要配置的服务器"
+setup_audio_devices_placeholder: "音频设备"
+
+# Ready hints
+setup_probing_server: "⠋ 正在探测服务器..."
+setup_select_server_to_start: "选择要启动的服务器"
+setup_server_not_reachable: "✗ 无法连接到服务器"
+setup_field_required: "✗ %s 为必填项"
+setup_field_invalid: "✗ %s：%s"
+setup_settings_ok: "✓ 设置正常"
+
+# Discovery
+setup_discovering_servers: "正在发现服务器..."
+
+# Help keys — setup overlays
+help_summary_overlay: "enter: 启动  esc: 返回  ^Y: 复制命令"
+help_virtual_device_overlay: "↑↓: 导航  enter: 编辑/新建  space: 切换  esc: 取消"
+help_restore_overlay: "←→: 选择  enter: 确认  esc: 跳过"
+help_config_save_overlay: "enter: 保存  esc: 取消"
+help_config_load_overlay: "↑↓: 浏览  enter: 加载  ^D: 删除  esc: 取消"
+help_virtual_sink_lifecycle: "↑↓: 导航  ←→/space: 切换  enter: 保存  esc: 默认"
+help_editing: "enter: 确认  esc: 取消"
+help_devices_unified_duplex: "↑↓: 设备  tab: 区域  space: 切换  +/-: 音量  →: AGC  ^E: 虚拟  ↵: 启动  ^Q: 退出"
+help_devices_duplex: "/: 过滤  ↑↓: 设备  ^↑^↓: 区域  tab: 设置  ↵: 启动  ^Q: 退出"
+help_devices_normal: "/: 过滤  ↑↓: 设备  ^E: 虚拟  tab: 设置  ↵: 启动  ^Q: 退出"
+help_settings_column: "↑↓: 导航  enter/space: 编辑  tab: 设备  ^W: 语言  ^S: 保存  ^L: 加载  ^H: 摘要  ^Q: 退出"
+help_language_overlay: "↑↓: 选择  enter: 确认  esc: 取消"
+
+# Scroll indicator
+setup_scroll_indicator: "（%d–%d / %d）"
+
+# Field labels
+field_server_address: "服务器地址"
+field_port: "端口"
+field_password: "密码"
+field_nickname: "昵称"
+field_max_clients: "最大客户端数"
+field_mode: "模式"
+field_max_auth_fail: "最大认证失败次数"
+field_max_reconnect: "最大重连次数"
+field_auto_reconnect: "自动重连"
+field_reconnect_limit: "重连次数限制"
+field_echo_cancellation: "回声消除"
+field_virtual_mic: "虚拟麦克风"
+field_log_level: "日志级别"
+field_tls: "TLS"
+field_tls_cert: "TLS 证书"
+field_tls_key: "TLS 密钥"
+field_rate_limit: "速率限制"
+field_sample_rate: "采样率"
+field_channels: "声道数"
+field_opus_bitrate: "Opus 比特率"
+field_use_simd: "启用 SIMD"
+field_hwid_collection: "HWID 收集"
+
+# Field hints
+hint_server: "（服务器）"
+hint_nickname: "（可选，最多 20 字符）"
+hint_pulse_audio: "(PulseAudio)"
+hint_rate_limit: "请求/秒（0=关闭）"
+hint_simd: "（加速 2+ 路音频混合）"
+hint_hwid: "（收集设备 ID 用于封禁）"
+hint_tls_self_signed: "⚠ 自签名"
+hint_reconnect_after: "（服务器关闭后重连）"
+hint_reconnect_unlimited: "（0 = 无限制）"
+
+# Action labels
+action_advanced: "高级 ▸"
+action_create_virtual: "创建 ▸"
+
+# Mode options
+mode_normal: "普通（服务器 → 客户端）"
+mode_reverse: "反向（客户端 → 服务器）"
+mode_duplex: "双工（双向）"
+mode_conference: "会议（多用户）"
+
+# Field values
+value_none: "（无）"
+
+# Validation
+# Language overlay
+lang_overlay_title: "语言"
+lang_overlay_hint: "[Enter] 选择  [Esc] 取消"
+
+# Quick-start menu
+qs_server_title: "🎙  服务器"
+qs_server_desc: "创建音频服务器（客户端连接以接收流）"
+qs_client_title: "🎧  客户端"
+qs_client_desc: "连接到运行中的服务器"
+qs_config_title: "📋  配置"
+qs_config_desc: "显示当前配置"
+qs_doctor_title: "🩺  诊断"
+qs_doctor_desc: "检查音频与网络状态"
+qs_devices_title: "🔊  设备"
+qs_devices_desc: "列出音频输入/输出设备"
+qs_help_title: "❓  帮助"
+qs_help_desc: "命令、选项与示例"
+qs_footer: "↑↓: 导航  enter: 选择  tab/→: 语言  ^Q: 退出"
+
+validation_required: "必填"
+validation_must_be_number: "必须是数字"
+validation_range: "范围：%d–%d"
+validation_too_long: "过长"
+validation_invalid_char: "无效字符"

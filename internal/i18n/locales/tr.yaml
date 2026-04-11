@@ -1,0 +1,137 @@
+app_name: "EchoWarp"
+mode_server: "Sunucu"
+mode_client: "İstemci"
+mode_diagnostic: "Tanılama"
+btn_start: "Başlat"
+btn_cancel: "İptal"
+
+# Setup view — column headers
+setup_select_input_device: "Giriş Aygıtını Seç"
+setup_select_output_device: "Çıkış Aygıtını Seç"
+setup_settings: "Ayarlar"
+setup_devices: "Aygıtlar"
+setup_audio_devices: "Ses Aygıtları"
+setup_input_device_mic: "Giriş Aygıtı (mikrofon)"
+setup_output_device_speaker: "Çıkış Aygıtı (hoparlör)"
+
+# Device section headers
+setup_section_input: "Giriş"
+setup_section_output: "Çıkış"
+setup_col_select: "✓ Seçim"
+setup_no_devices: "(aygıt yok)"
+setup_virtual_legend: "⟡ sanal"
+setup_loopback_legend: "🔄 loopback"
+
+# Device status hints
+setup_capture_playback_count: "✓ %d yakalama, %d oynatma"
+setup_hub_mode_no_devices: "✓ Hub modu — aygıt gerekmez"
+setup_conference_select_mic_speaker: "✗ Konferans — mikrofon ve hoparlör seçin"
+setup_select_capture_playback: "✗ En az 1 yakalama ve 1 oynatma seçin"
+setup_n_selected: "✓ %d seçildi"
+setup_select_at_least_one: "✗ En az bir aygıt seçin"
+
+# Client placeholder
+setup_select_server_to_configure: "Yapılandırmak için sunucu seçin"
+setup_audio_devices_placeholder: "ses aygıtları"
+
+# Ready hints
+setup_probing_server: "⠋ Sunucu kontrol ediliyor..."
+setup_select_server_to_start: "Başlatmak için sunucu seçin"
+setup_server_not_reachable: "✗ Sunucuya ulaşılamıyor"
+setup_field_required: "✗ %s gerekli"
+setup_field_invalid: "✗ %s: %s"
+setup_settings_ok: "✓ Ayarlar tamam"
+
+# Discovery
+setup_discovering_servers: "Sunucular aranıyor..."
+
+# Help keys — setup overlays
+help_summary_overlay: "enter: başlat  esc: geri  ^Y: komut kopyala"
+help_virtual_device_overlay: "↑↓: gezin  enter: düzenle/oluştur  space: değiştir  esc: iptal"
+help_restore_overlay: "←→: seç  enter: onayla  esc: atla"
+help_config_save_overlay: "enter: kaydet  esc: iptal"
+help_config_load_overlay: "↑↓: gözat  enter: yükle  ^D: sil  esc: iptal"
+help_virtual_sink_lifecycle: "↑↓: gezin  ←→/space: değiştir  enter: kaydet  esc: varsayılan"
+help_editing: "enter: onayla  esc: iptal"
+help_devices_unified_duplex: "↑↓: aygıt  tab: bölüm  space: değiştir  +/-: ses  →: AGC  ^E: sanal  ↵: başlat  ^Q: çıkış"
+help_devices_duplex: "/: filtre  ↑↓: aygıt  ^↑^↓: bölüm  tab: ayarlar  ↵: başlat  ^Q: çıkış"
+help_devices_normal: "/: filtre  ↑↓: aygıt  ^E: sanal  tab: ayarlar  ↵: başlat  ^Q: çıkış"
+help_settings_column: "↑↓: gezin  enter/space: düzenle  tab: aygıtlar  ^W: dil  ^S: kaydet  ^L: yükle  ^H: özet  ^Q: çıkış"
+help_language_overlay: "↑↓: seç  enter: onayla  esc: iptal"
+
+# Scroll indicator
+setup_scroll_indicator: "(%d–%d / %d)"
+
+# Field labels
+field_server_address: "Sunucu adresi"
+field_port: "Port"
+field_password: "Parola"
+field_nickname: "Takma ad"
+field_max_clients: "Maks. istemci"
+field_mode: "Mod"
+field_max_auth_fail: "Maks. yetkilendirme hatası"
+field_max_reconnect: "Maks. yeniden bağlantı"
+field_auto_reconnect: "Otomatik yeniden bağlan"
+field_reconnect_limit: "Yeniden bağlantı sınırı"
+field_echo_cancellation: "Yankı giderme"
+field_virtual_mic: "Sanal mikrofon"
+field_log_level: "Log seviyesi"
+field_tls: "TLS"
+field_tls_cert: "TLS Sertifikası"
+field_tls_key: "TLS Anahtarı"
+field_rate_limit: "İstek sınırı"
+field_sample_rate: "Örnekleme hızı"
+field_channels: "Kanallar"
+field_opus_bitrate: "Opus bitrate"
+field_use_simd: "SIMD kullan"
+field_hwid_collection: "HWID toplama"
+
+# Field hints
+hint_server: "(sunucu)"
+hint_nickname: "(opsiyonel, en fazla 20 karakter)"
+hint_pulse_audio: "(PulseAudio)"
+hint_rate_limit: "istek/sn (0=kapalı)"
+hint_simd: "(2+ ses akışı için karıştırmayı hızlandırır)"
+hint_hwid: "(yasaklamalar için aygıt kimliği topla)"
+hint_tls_self_signed: "⚠ kendinden imzalı"
+hint_reconnect_after: "(sunucu kapandıktan sonra yeniden bağlan)"
+hint_reconnect_unlimited: "(0 = sınırsız)"
+
+# Action labels
+action_advanced: "Gelişmiş ▸"
+action_create_virtual: "Oluştur ▸"
+
+# Mode options
+mode_normal: "normal (sunucu → istemci)"
+mode_reverse: "ters (istemci → sunucu)"
+mode_duplex: "çift yönlü (duplex)"
+mode_conference: "konferans (çok kullanıcılı)"
+
+# Field values
+value_none: "(yok)"
+
+# Validation
+# Language overlay
+lang_overlay_title: "Dil"
+lang_overlay_hint: "[Enter] Seç  [Esc] İptal"
+
+# Quick-start menu
+qs_server_title: "🎙  Sunucu"
+qs_server_desc: "Ses sunucusu oluştur (istemciler akışa bağlanır)"
+qs_client_title: "🎧  İstemci"
+qs_client_desc: "Çalışan bir sunucuya bağlan"
+qs_config_title: "📋  Yapılandırma"
+qs_config_desc: "Geçerli yapılandırmayı göster"
+qs_doctor_title: "🩺  Tanılama"
+qs_doctor_desc: "Ses ve ağ durumunu kontrol et"
+qs_devices_title: "🔊  Aygıtlar"
+qs_devices_desc: "Giriş/çıkış aygıtlarını listele"
+qs_help_title: "❓  Yardım"
+qs_help_desc: "Komutlar, seçenekler ve örnekler"
+qs_footer: "↑↓: gezin  enter: seç  tab/→: dil  ^Q: çıkış"
+
+validation_required: "gerekli"
+validation_must_be_number: "sayı olmalı"
+validation_range: "aralık: %d–%d"
+validation_too_long: "çok uzun"
+validation_invalid_char: "geçersiz karakter"

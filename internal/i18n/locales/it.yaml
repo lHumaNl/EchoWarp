@@ -1,0 +1,137 @@
+app_name: "EchoWarp"
+mode_server: "Server"
+mode_client: "Client"
+mode_diagnostic: "Diagnostica"
+btn_start: "Avvia"
+btn_cancel: "Annulla"
+
+# Setup view — column headers
+setup_select_input_device: "Seleziona dispositivo di ingresso"
+setup_select_output_device: "Seleziona dispositivo di uscita"
+setup_settings: "Impostazioni"
+setup_devices: "Dispositivi"
+setup_audio_devices: "Dispositivi audio"
+setup_input_device_mic: "Ingresso (microfono)"
+setup_output_device_speaker: "Uscita (altoparlante)"
+
+# Device section headers
+setup_section_input: "Ingresso"
+setup_section_output: "Uscita"
+setup_col_select: "✓ Selezione"
+setup_no_devices: "(nessun dispositivo)"
+setup_virtual_legend: "⟡ virtuale"
+setup_loopback_legend: "🔄 loopback"
+
+# Device status hints
+setup_capture_playback_count: "✓ %d acquisiz., %d riprod."
+setup_hub_mode_no_devices: "✓ Modalità hub — nessun dispositivo richiesto"
+setup_conference_select_mic_speaker: "✗ Conferenza — seleziona microfono e altoparlante"
+setup_select_capture_playback: "✗ Seleziona almeno 1 acquisizione e 1 riproduzione"
+setup_n_selected: "✓ %d selezionato/i"
+setup_select_at_least_one: "✗ Seleziona almeno un dispositivo"
+
+# Client placeholder
+setup_select_server_to_configure: "Seleziona un server da configurare"
+setup_audio_devices_placeholder: "dispositivi audio"
+
+# Ready hints
+setup_probing_server: "⠋ Verifica server..."
+setup_select_server_to_start: "Seleziona un server da avviare"
+setup_server_not_reachable: "✗ Server non raggiungibile"
+setup_field_required: "✗ %s richiesto"
+setup_field_invalid: "✗ %s: %s"
+setup_settings_ok: "✓ Impostazioni OK"
+
+# Discovery
+setup_discovering_servers: "Ricerca server..."
+
+# Help keys — setup overlays
+help_summary_overlay: "enter: avvia  esc: indietro  ^Y: copia cmd"
+help_virtual_device_overlay: "↑↓: naviga  enter: modifica/crea  space: attiva  esc: annulla"
+help_restore_overlay: "←→: scegli  enter: conferma  esc: salta"
+help_config_save_overlay: "enter: salva  esc: annulla"
+help_config_load_overlay: "↑↓: sfoglia  enter: carica  ^D: elimina  esc: annulla"
+help_virtual_sink_lifecycle: "↑↓: naviga  ←→/space: attiva  enter: salva  esc: predef."
+help_editing: "enter: conferma  esc: annulla"
+help_devices_unified_duplex: "↑↓: disp.  tab: sezione  space: attiva  +/-: volume  →: AGC  ^E: virtuale  ↵: avvia  ^Q: esci"
+help_devices_duplex: "/: filtro  ↑↓: disp.  ^↑^↓: sezione  tab: impost.  ↵: avvia  ^Q: esci"
+help_devices_normal: "/: filtro  ↑↓: disp.  ^E: virtuale  tab: impost.  ↵: avvia  ^Q: esci"
+help_settings_column: "↑↓: naviga  enter/space: modifica  tab: disp.  ^W: lingua  ^S: salva  ^L: carica  ^H: riepilogo  ^Q: esci"
+help_language_overlay: "↑↓: scegli  enter: conferma  esc: annulla"
+
+# Scroll indicator
+setup_scroll_indicator: "(%d–%d di %d)"
+
+# Field labels
+field_server_address: "Indirizzo server"
+field_port: "Porta"
+field_password: "Password"
+field_nickname: "Nickname"
+field_max_clients: "Client max"
+field_mode: "Modalità"
+field_max_auth_fail: "Errori auth max"
+field_max_reconnect: "Riconn. max"
+field_auto_reconnect: "Riconn. automatica"
+field_reconnect_limit: "Limite riconnessioni"
+field_echo_cancellation: "Cancellazione eco"
+field_virtual_mic: "Microfono virtuale"
+field_log_level: "Livello di log"
+field_tls: "TLS"
+field_tls_cert: "Certificato TLS"
+field_tls_key: "Chiave TLS"
+field_rate_limit: "Limite richieste"
+field_sample_rate: "Frequenza di campion."
+field_channels: "Canali"
+field_opus_bitrate: "Bitrate Opus"
+field_use_simd: "Usa SIMD"
+field_hwid_collection: "Raccolta HWID"
+
+# Field hints
+hint_server: "(server)"
+hint_nickname: "(opzionale, max 20 caratteri)"
+hint_pulse_audio: "(PulseAudio)"
+hint_rate_limit: "req/s (0=off)"
+hint_simd: "(accelera il mixing audio per 2+ stream)"
+hint_hwid: "(raccogli ID dispositivo per i ban)"
+hint_tls_self_signed: "⚠ autofirmato"
+hint_reconnect_after: "(riconnetti dopo arresto server)"
+hint_reconnect_unlimited: "(0 = illimitato)"
+
+# Action labels
+action_advanced: "Avanzate ▸"
+action_create_virtual: "Crea ▸"
+
+# Mode options
+mode_normal: "normale (server → client)"
+mode_reverse: "inverso (client → server)"
+mode_duplex: "duplex (bidirezionale)"
+mode_conference: "conferenza (multi-utente)"
+
+# Field values
+value_none: "(nessuno)"
+
+# Validation
+# Language overlay
+lang_overlay_title: "Lingua"
+lang_overlay_hint: "[Enter] Scegli  [Esc] Annulla"
+
+# Quick-start menu
+qs_server_title: "🎙  Server"
+qs_server_desc: "Crea server audio (i client si connettono allo stream)"
+qs_client_title: "🎧  Client"
+qs_client_desc: "Connetti a un server in esecuzione"
+qs_config_title: "📋  Config"
+qs_config_desc: "Mostra configurazione attuale"
+qs_doctor_title: "🩺  Diagnostica"
+qs_doctor_desc: "Controlla stato audio e rete"
+qs_devices_title: "🔊  Dispositivi"
+qs_devices_desc: "Elenca dispositivi audio I/O"
+qs_help_title: "❓  Aiuto"
+qs_help_desc: "Comandi, opzioni ed esempi"
+qs_footer: "↑↓: naviga  enter: scegli  tab/→: lingua  ^Q: esci"
+
+validation_required: "richiesto"
+validation_must_be_number: "deve essere un numero"
+validation_range: "intervallo: %d–%d"
+validation_too_long: "troppo lungo"
+validation_invalid_char: "carattere non valido"

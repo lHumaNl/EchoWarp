@@ -1,0 +1,137 @@
+app_name: "EchoWarp"
+mode_server: "Server"
+mode_client: "Client"
+mode_diagnostic: "Diagnose"
+btn_start: "Starten"
+btn_cancel: "Abbrechen"
+
+# Setup view — column headers
+setup_select_input_device: "Eingabegerät wählen"
+setup_select_output_device: "Ausgabegerät wählen"
+setup_settings: "Einstellungen"
+setup_devices: "Geräte"
+setup_audio_devices: "Audiogeräte"
+setup_input_device_mic: "Eingabegerät (Mikrofon)"
+setup_output_device_speaker: "Ausgabegerät (Lautsprecher)"
+
+# Device section headers
+setup_section_input: "Eingabe"
+setup_section_output: "Ausgabe"
+setup_col_select: "✓ Auswahl"
+setup_no_devices: "(keine Geräte)"
+setup_virtual_legend: "⟡ virtuell"
+setup_loopback_legend: "🔄 Loopback"
+
+# Device status hints
+setup_capture_playback_count: "✓ %d Aufnahme, %d Wiedergabe"
+setup_hub_mode_no_devices: "✓ Hub-Modus — keine Geräte nötig"
+setup_conference_select_mic_speaker: "✗ Konferenz — Mikrofon und Lautsprecher wählen"
+setup_select_capture_playback: "✗ Mindestens 1 Aufnahme- und 1 Wiedergabegerät wählen"
+setup_n_selected: "✓ %d ausgewählt"
+setup_select_at_least_one: "✗ Mindestens ein Gerät wählen"
+
+# Client placeholder
+setup_select_server_to_configure: "Server zum Konfigurieren wählen"
+setup_audio_devices_placeholder: "Audiogeräte"
+
+# Ready hints
+setup_probing_server: "⠋ Server wird geprüft..."
+setup_select_server_to_start: "Server zum Starten wählen"
+setup_server_not_reachable: "✗ Server nicht erreichbar"
+setup_field_required: "✗ %s erforderlich"
+setup_field_invalid: "✗ %s: %s"
+setup_settings_ok: "✓ Einstellungen OK"
+
+# Discovery
+setup_discovering_servers: "Suche nach Servern..."
+
+# Help keys — setup overlays
+help_summary_overlay: "enter: start  esc: zurück  ^Y: cmd kopieren"
+help_virtual_device_overlay: "↑↓: navigieren  enter: bearb./neu  space: umschalten  esc: abbrechen"
+help_restore_overlay: "←→: wählen  enter: bestätigen  esc: überspringen"
+help_config_save_overlay: "enter: speichern  esc: abbrechen"
+help_config_load_overlay: "↑↓: blättern  enter: laden  ^D: löschen  esc: abbrechen"
+help_virtual_sink_lifecycle: "↑↓: navigieren  ←→/space: umschalten  enter: speichern  esc: Standard"
+help_editing: "enter: bestätigen  esc: abbrechen"
+help_devices_unified_duplex: "↑↓: Gerät  tab: Sektion  space: umschalten  +/-: Lautst.  →: AGC  ^E: virtuell  ↵: start  ^Q: beenden"
+help_devices_duplex: "/: Filter  ↑↓: Gerät  ^↑^↓: Sektion  tab: Einst.  ↵: start  ^Q: beenden"
+help_devices_normal: "/: Filter  ↑↓: Gerät  ^E: virtuell  tab: Einst.  ↵: start  ^Q: beenden"
+help_settings_column: "↑↓: navigieren  enter/space: bearb.  tab: Geräte  ^W: Sprache  ^S: speichern  ^L: laden  ^H: Übersicht  ^Q: beenden"
+help_language_overlay: "↑↓: wählen  enter: bestätigen  esc: abbrechen"
+
+# Scroll indicator
+setup_scroll_indicator: "(%d–%d von %d)"
+
+# Field labels
+field_server_address: "Serveradresse"
+field_port: "Port"
+field_password: "Passwort"
+field_nickname: "Nickname"
+field_max_clients: "Max. Clients"
+field_mode: "Modus"
+field_max_auth_fail: "Max. Auth-Fehler"
+field_max_reconnect: "Max. Reconnects"
+field_auto_reconnect: "Auto-Reconnect"
+field_reconnect_limit: "Reconnect-Limit"
+field_echo_cancellation: "Echounterdrückung"
+field_virtual_mic: "Virtuelles Mikrofon"
+field_log_level: "Log-Level"
+field_tls: "TLS"
+field_tls_cert: "TLS-Zertifikat"
+field_tls_key: "TLS-Schlüssel"
+field_rate_limit: "Rate-Limit"
+field_sample_rate: "Abtastrate"
+field_channels: "Kanäle"
+field_opus_bitrate: "Opus-Bitrate"
+field_use_simd: "SIMD verwenden"
+field_hwid_collection: "HWID-Erfassung"
+
+# Field hints
+hint_server: "(Server)"
+hint_nickname: "(optional, max. 20 Zeichen)"
+hint_pulse_audio: "(PulseAudio)"
+hint_rate_limit: "Anf./s (0=aus)"
+hint_simd: "(beschleunigt Audio-Mixing bei 2+ Streams)"
+hint_hwid: "(Geräte-ID für Banns erfassen)"
+hint_tls_self_signed: "⚠ selbstsigniert"
+hint_reconnect_after: "(Reconnect nach Server-Shutdown)"
+hint_reconnect_unlimited: "(0 = unbegrenzt)"
+
+# Action labels
+action_advanced: "Erweitert ▸"
+action_create_virtual: "Erstellen ▸"
+
+# Mode options
+mode_normal: "normal (Server → Client)"
+mode_reverse: "umgekehrt (Client → Server)"
+mode_duplex: "Duplex (bidirektional)"
+mode_conference: "Konferenz (Mehrbenutzer)"
+
+# Field values
+value_none: "(keine)"
+
+# Validation
+# Language overlay
+lang_overlay_title: "Sprache"
+lang_overlay_hint: "[Enter] Auswählen  [Esc] Abbrechen"
+
+# Quick-start menu
+qs_server_title: "🎙  Server"
+qs_server_desc: "Audioserver erstellen (Clients verbinden sich zum Streamen)"
+qs_client_title: "🎧  Client"
+qs_client_desc: "Mit laufendem Server verbinden"
+qs_config_title: "📋  Konfig"
+qs_config_desc: "Aktuelle Konfiguration anzeigen"
+qs_doctor_title: "🩺  Diagnose"
+qs_doctor_desc: "Audio- und Netzwerkstatus prüfen"
+qs_devices_title: "🔊  Geräte"
+qs_devices_desc: "Audio-Ein-/Ausgabegeräte auflisten"
+qs_help_title: "❓  Hilfe"
+qs_help_desc: "Befehle, Flags & Beispiele"
+qs_footer: "↑↓: navigieren  enter: wählen  tab/→: Sprache  ^Q: beenden"
+
+validation_required: "erforderlich"
+validation_must_be_number: "muss eine Zahl sein"
+validation_range: "Bereich: %d–%d"
+validation_too_long: "zu lang"
+validation_invalid_char: "ungültiges Zeichen"

@@ -25,12 +25,6 @@ type languageOption struct {
 	Display string
 }
 
-// knownLanguages maps language codes to native display names.
-var knownLanguages = map[i18n.Language]string{
-	i18n.English: "English",
-	i18n.Russian: "Русский",
-}
-
 // LanguageOverlay lets the user pick a UI language.
 type LanguageOverlay struct {
 	options  []languageOption
@@ -46,11 +40,7 @@ func NewLanguageOverlay() *LanguageOverlay {
 	opts := make([]languageOption, 0, len(langs))
 	curIdx := 0
 	for idx, l := range langs {
-		display, ok := knownLanguages[l]
-		if !ok {
-			display = string(l)
-		}
-		opts = append(opts, languageOption{Code: l, Display: display})
+		opts = append(opts, languageOption{Code: l, Display: i18n.DisplayName(l)})
 		if l == cur {
 			curIdx = idx
 		}

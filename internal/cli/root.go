@@ -284,12 +284,6 @@ func (m quickStartModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// knownLangNames maps language codes to native display names.
-var knownLangNames = map[i18n.Language]string{
-	i18n.English: "English",
-	i18n.Russian: "Русский",
-}
-
 func (m quickStartModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+q", "ctrl+c":
@@ -427,10 +421,7 @@ func (m quickStartModel) viewMenu() string {
 	langLines := make([]string, 0, 2+len(langs))
 	langLines = append(langLines, langPanelTitle.Render(i18n.T("lang_overlay_title")), "")
 	for idx, lang := range langs {
-		name, ok := knownLangNames[lang]
-		if !ok {
-			name = string(lang)
-		}
+		name := i18n.DisplayName(lang)
 		bullet := "○ "
 		if lang == curLang {
 			bullet = "● "

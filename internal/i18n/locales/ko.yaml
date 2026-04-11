@@ -1,0 +1,137 @@
+app_name: "EchoWarp"
+mode_server: "서버"
+mode_client: "클라이언트"
+mode_diagnostic: "진단"
+btn_start: "시작"
+btn_cancel: "취소"
+
+# Setup view — column headers
+setup_select_input_device: "입력 장치 선택"
+setup_select_output_device: "출력 장치 선택"
+setup_settings: "설정"
+setup_devices: "장치"
+setup_audio_devices: "오디오 장치"
+setup_input_device_mic: "입력 장치 (마이크)"
+setup_output_device_speaker: "출력 장치 (스피커)"
+
+# Device section headers
+setup_section_input: "입력"
+setup_section_output: "출력"
+setup_col_select: "✓ 선택"
+setup_no_devices: "(장치 없음)"
+setup_virtual_legend: "⟡ 가상"
+setup_loopback_legend: "🔄 루프백"
+
+# Device status hints
+setup_capture_playback_count: "✓ 입력 %d, 출력 %d"
+setup_hub_mode_no_devices: "✓ 허브 모드 — 장치 불필요"
+setup_conference_select_mic_speaker: "✗ 컨퍼런스 — 마이크와 스피커 선택"
+setup_select_capture_playback: "✗ 입력과 출력을 각각 1개 이상 선택"
+setup_n_selected: "✓ %d개 선택됨"
+setup_select_at_least_one: "✗ 최소 한 개의 장치 선택"
+
+# Client placeholder
+setup_select_server_to_configure: "설정할 서버 선택"
+setup_audio_devices_placeholder: "오디오 장치"
+
+# Ready hints
+setup_probing_server: "⠋ 서버 확인 중..."
+setup_select_server_to_start: "시작할 서버 선택"
+setup_server_not_reachable: "✗ 서버에 연결할 수 없음"
+setup_field_required: "✗ %s 필수"
+setup_field_invalid: "✗ %s: %s"
+setup_settings_ok: "✓ 설정 확인됨"
+
+# Discovery
+setup_discovering_servers: "서버 검색 중..."
+
+# Help keys — setup overlays
+help_summary_overlay: "enter: 시작  esc: 뒤로  ^Y: 명령 복사"
+help_virtual_device_overlay: "↑↓: 이동  enter: 편집/생성  space: 전환  esc: 취소"
+help_restore_overlay: "←→: 선택  enter: 확인  esc: 건너뛰기"
+help_config_save_overlay: "enter: 저장  esc: 취소"
+help_config_load_overlay: "↑↓: 탐색  enter: 불러오기  ^D: 삭제  esc: 취소"
+help_virtual_sink_lifecycle: "↑↓: 이동  ←→/space: 전환  enter: 저장  esc: 기본값"
+help_editing: "enter: 확인  esc: 취소"
+help_devices_unified_duplex: "↑↓: 장치  tab: 섹션  space: 전환  +/-: 볼륨  →: AGC  ^E: 가상  ↵: 시작  ^Q: 종료"
+help_devices_duplex: "/: 필터  ↑↓: 장치  ^↑^↓: 섹션  tab: 설정  ↵: 시작  ^Q: 종료"
+help_devices_normal: "/: 필터  ↑↓: 장치  ^E: 가상  tab: 설정  ↵: 시작  ^Q: 종료"
+help_settings_column: "↑↓: 이동  enter/space: 편집  tab: 장치  ^W: 언어  ^S: 저장  ^L: 불러오기  ^H: 요약  ^Q: 종료"
+help_language_overlay: "↑↓: 선택  enter: 확인  esc: 취소"
+
+# Scroll indicator
+setup_scroll_indicator: "(%d–%d / %d)"
+
+# Field labels
+field_server_address: "서버 주소"
+field_port: "포트"
+field_password: "비밀번호"
+field_nickname: "닉네임"
+field_max_clients: "최대 클라이언트"
+field_mode: "모드"
+field_max_auth_fail: "최대 인증 실패"
+field_max_reconnect: "최대 재연결"
+field_auto_reconnect: "자동 재연결"
+field_reconnect_limit: "재연결 제한"
+field_echo_cancellation: "에코 제거"
+field_virtual_mic: "가상 마이크"
+field_log_level: "로그 레벨"
+field_tls: "TLS"
+field_tls_cert: "TLS 인증서"
+field_tls_key: "TLS 키"
+field_rate_limit: "요청 제한"
+field_sample_rate: "샘플 레이트"
+field_channels: "채널"
+field_opus_bitrate: "Opus 비트레이트"
+field_use_simd: "SIMD 사용"
+field_hwid_collection: "HWID 수집"
+
+# Field hints
+hint_server: "(서버)"
+hint_nickname: "(선택, 최대 20자)"
+hint_pulse_audio: "(PulseAudio)"
+hint_rate_limit: "req/s (0=끔)"
+hint_simd: "(2개 이상 스트림 믹싱 가속)"
+hint_hwid: "(차단용 장치 ID 수집)"
+hint_tls_self_signed: "⚠ 자체 서명"
+hint_reconnect_after: "(서버 종료 후 재연결)"
+hint_reconnect_unlimited: "(0 = 무제한)"
+
+# Action labels
+action_advanced: "고급 ▸"
+action_create_virtual: "생성 ▸"
+
+# Mode options
+mode_normal: "일반 (서버 → 클라이언트)"
+mode_reverse: "역방향 (클라이언트 → 서버)"
+mode_duplex: "양방향 (duplex)"
+mode_conference: "컨퍼런스 (다중 사용자)"
+
+# Field values
+value_none: "(없음)"
+
+# Validation
+# Language overlay
+lang_overlay_title: "언어"
+lang_overlay_hint: "[Enter] 선택  [Esc] 취소"
+
+# Quick-start menu
+qs_server_title: "🎙  서버"
+qs_server_desc: "오디오 서버 생성 (클라이언트가 스트림에 연결)"
+qs_client_title: "🎧  클라이언트"
+qs_client_desc: "실행 중인 서버에 연결"
+qs_config_title: "📋  설정"
+qs_config_desc: "현재 설정 표시"
+qs_doctor_title: "🩺  진단"
+qs_doctor_desc: "오디오 및 네트워크 상태 확인"
+qs_devices_title: "🔊  장치"
+qs_devices_desc: "오디오 입출력 장치 나열"
+qs_help_title: "❓  도움말"
+qs_help_desc: "명령어, 옵션, 예제"
+qs_footer: "↑↓: 이동  enter: 선택  tab/→: 언어  ^Q: 종료"
+
+validation_required: "필수"
+validation_must_be_number: "숫자여야 합니다"
+validation_range: "범위: %d–%d"
+validation_too_long: "너무 깁니다"
+validation_invalid_char: "잘못된 문자"
