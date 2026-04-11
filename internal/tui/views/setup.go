@@ -77,11 +77,10 @@ type SetupModel struct {
 
 	// Unified multi-select mode: Space toggles device selection/roles.
 	// Key = device name (stable across re-enumerations), Value = assigned role(s)
-	multiSelect             map[string]DeviceRoleSet
-	unifiedDuplex           bool // true when using unified list (all modes)
-	isDuplexMode            bool // true when duplex/conference — two checkbox columns; false — one column
-	isConferenceMode        bool // true when conference — enables hub mode on server
-	preConferenceMaxClients int  // saved Max clients value before conference auto-bump
+	multiSelect      map[string]DeviceRoleSet
+	unifiedDuplex    bool // true when using unified list (all modes)
+	isDuplexMode     bool // true when duplex/conference — two checkbox columns; false — one column
+	isConferenceMode bool // true when conference — enables hub mode on server
 
 	// Sectioned device list (Input/Output sections with checkbox columns)
 	inputDevices  []deviceRow
@@ -246,7 +245,23 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 	if cfg.Mode == config.ModeServer {
 		sp := preset.Load()
 		m.serverPresets = &sp
-		m.restoreServerSettings(sp.Settings)
+		// Apply top-level last_mode first (so the current mode is known before restoring
+		// per-mode server fields).
+		m.restoreLastMode(sp.LastMode)
+		// Determine current mode from the (possibly just-updated) Mode field.
+		currentMode := ""
+		for _, f := range m.Fields {
+			if f.Key == "mode" {
+				currentMode = modeKeyFromValue(f.Value)
+				break
+			}
+		}
+		if currentMode == "" {
+			currentMode = "normal"
+		}
+		if mp := sp.Get(currentMode); mp != nil {
+			m.restoreModePreset(*mp)
+		}
 	}
 
 	// Apply field dependencies on init
@@ -754,20 +769,6 @@ func (m *SetupModel) applyFieldDependencies() {
 		} else if m.DeviceSection == SectionOutput && !showOutput && showInput {
 			m.DeviceSection = SectionInput
 			m.deviceCursor = 0
-		}
-	}
-
-	// Conference requires at least 2 clients; restore default when leaving conference.
-	for i := range m.Fields {
-		if m.Fields[i].Key == "max_clients" {
-			if m.isConferenceMode && m.Fields[i].IntValue() < 2 {
-				m.preConferenceMaxClients = m.Fields[i].IntValue()
-				m.Fields[i].SetValue("2", SourceDefault)
-			} else if !m.isConferenceMode && m.preConferenceMaxClients > 0 {
-				m.Fields[i].SetValue(fmt.Sprintf("%d", m.preConferenceMaxClients), SourceDefault)
-				m.preConferenceMaxClients = 0
-			}
-			break
 		}
 	}
 

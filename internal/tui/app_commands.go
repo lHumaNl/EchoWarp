@@ -255,12 +255,14 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 	}
 }
 
-// saveServerPresetCmd returns a tea.Cmd that persists the server-side device preset and settings to disk.
-func saveServerPresetCmd(devicePreset recent.DevicePreset, mode string, settings preset.ServerSettings) tea.Cmd {
+// saveServerPresetCmd returns a tea.Cmd that persists the per-mode server preset
+// snapshot (devices + port/password/max_clients/tls*) to disk. The top-level
+// last_mode is also updated to `mode` so the next startup resumes in this mode.
+func saveServerPresetCmd(mp preset.ModePreset, mode string) tea.Cmd {
 	return func() tea.Msg {
 		sp := preset.Load()
-		sp.Set(mode, devicePreset)
-		sp.Settings = settings
+		sp.Set(mode, mp)
+		sp.LastMode = mode
 		_ = preset.Save(sp) //nolint:errcheck
 		return nil
 	}

@@ -276,26 +276,49 @@ func getFieldHidden(fields []SetupField, key string) bool {
 	return false
 }
 
-func TestModeSwitchConferenceMaxClients(t *testing.T) {
+// setModeFieldFull simulates a full mode switch (toggle handler): updates the Mode
+// field value, then invokes the post-toggle hook used by the TUI — clearing the
+// multiSelect map and loading the new mode's preset (or DefaultsFor). This
+// mirrors the new per-mode-snapshot semantics in setup_update.go.
+func setModeFieldFull(m *SetupModel, value string) {
+	for i := range m.Fields {
+		if m.Fields[i].Key == "mode" {
+			m.Fields[i].SetValue(value, SourceUser)
+			break
+		}
+	}
+	m.applyFieldDependencies()
+	m.multiSelect = make(map[string]DeviceRoleSet)
+	newMode := modeKeyFromValue(value)
+	m.loadPresetForMode(newMode)
+}
+
+// TestModeSwitch_ConferenceDefaultMaxClients — switching to conference with no
+// preset loads DefaultsFor("conference") which sets max_clients=2.
+func TestModeSwitch_ConferenceDefaultMaxClients(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 
 	// Default: normal mode, Max clients = 1
 	assert.Equal(t, "1", getFieldValue(m.Fields, "max_clients"))
 
-	// Switch to conference → Max clients should auto-bump to 2
-	setModeField(&m, "conference (multi-user)")
+	// Switch to conference → DefaultsFor("conference") → max_clients=2
+	setModeFieldFull(&m, "conference (multi-user)")
 	assert.True(t, m.isConferenceMode)
-	val := getFieldValue(m.Fields, "max_clients")
-	assert.Equal(t, "2", val, "Conference should auto-bump Max clients to 2")
+	assert.Equal(t, "2", getFieldValue(m.Fields, "max_clients"),
+		"Conference with no preset should load DefaultsFor(conference).MaxClients=2")
 
-	// Switch back to normal → Max clients should restore to 1
-	setModeField(&m, "normal (server → client)")
+	// Switch back to normal → DefaultsFor("normal") → max_clients=1
+	setModeFieldFull(&m, "normal (server → client)")
 	assert.False(t, m.isConferenceMode)
-	val = getFieldValue(m.Fields, "max_clients")
-	assert.Equal(t, "1", val, "Leaving conference should restore Max clients to previous value")
+	assert.Equal(t, "1", getFieldValue(m.Fields, "max_clients"),
+		"Switching back to normal should load DefaultsFor(normal).MaxClients=1")
 }
 
-func TestModeSwitchConferenceMaxClientsPreservesUserValue(t *testing.T) {
+// TestModeSwitch_DefaultsWhenNoPreset — per-mode snapshot behavior: the user's
+// current in-flight field values are replaced by defaults (or preset values) for
+// the new mode. This is intentional per the new design — each mode is a
+// self-contained snapshot.
+func TestModeSwitch_DefaultsWhenNoPreset(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 
 	// User sets Max clients to 5
@@ -306,15 +329,39 @@ func TestModeSwitchConferenceMaxClientsPreservesUserValue(t *testing.T) {
 		}
 	}
 
-	// Switch to conference (5 >= 2, so no bump needed)
-	setModeField(&m, "conference (multi-user)")
-	val := getFieldValue(m.Fields, "max_clients")
-	assert.Equal(t, "5", val, "Conference should not change Max clients when already >= 2")
+	// Switch to conference — no preset exists, DefaultsFor("conference") applies:
+	// the user's in-flight 5 is replaced by 2 (conference default).
+	setModeFieldFull(&m, "conference (multi-user)")
+	assert.Equal(t, "2", getFieldValue(m.Fields, "max_clients"),
+		"Mode switch without a preset should apply DefaultsFor(newMode), replacing in-flight values")
 
-	// Switch back to normal → should stay 5 (no restore needed since it wasn't bumped)
-	setModeField(&m, "normal (server → client)")
-	val = getFieldValue(m.Fields, "max_clients")
-	assert.Equal(t, "5", val, "Max clients should stay at user's value after leaving conference")
+	// Switch back to normal — DefaultsFor("normal") → 1.
+	setModeFieldFull(&m, "normal (server → client)")
+	assert.Equal(t, "1", getFieldValue(m.Fields, "max_clients"))
+}
+
+// TestModeSwitch_LoadsPresetForNewMode — when a saved preset exists for the new
+// mode, switching modes loads that preset (overriding defaults).
+func TestModeSwitch_LoadsPresetForNewMode(t *testing.T) {
+	m := newTestSetupModel(config.ModeServer)
+
+	// Seed an in-memory serverPresets with a conference preset: port=5000, max_clients=8.
+	sp := preset.ServerPresets{
+		Presets: map[string]preset.ModePreset{
+			"conference": {
+				Port:       5000,
+				MaxClients: 8,
+				Password:   "conf-pw",
+			},
+		},
+	}
+	m.serverPresets = &sp
+
+	// Switch to conference — should load preset values, not defaults.
+	setModeFieldFull(&m, "conference (multi-user)")
+	assert.Equal(t, "5000", getFieldValue(m.Fields, "port"))
+	assert.Equal(t, "8", getFieldValue(m.Fields, "max_clients"))
+	assert.Equal(t, "conf-pw", getFieldValue(m.Fields, "password"))
 }
 
 func TestModeSwitchEchoCancellationVisibility(t *testing.T) {
@@ -392,7 +439,7 @@ func TestModeSwitchFieldIndicesStable(t *testing.T) {
 func TestModeSwitchBuildConfigConference(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 
-	setModeField(&m, "conference (multi-user)")
+	setModeFieldFull(&m, "conference (multi-user)")
 	cfg := m.BuildConfig()
 
 	assert.True(t, cfg.Conference)
@@ -402,15 +449,16 @@ func TestModeSwitchBuildConfigConference(t *testing.T) {
 func TestModeSwitchBuildConfigNormalAfterConference(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 
-	// Switch to conference then back
-	setModeField(&m, "conference (multi-user)")
-	setModeField(&m, "normal (server → client)")
+	// Switch to conference then back (full mode switch behavior)
+	setModeFieldFull(&m, "conference (multi-user)")
+	setModeFieldFull(&m, "normal (server → client)")
 	cfg := m.BuildConfig()
 
 	assert.False(t, cfg.Conference)
 	assert.False(t, cfg.Duplex)
 	assert.False(t, cfg.Reverse)
-	assert.Equal(t, 1, cfg.MaxClients, "Max clients should restore after leaving conference")
+	assert.Equal(t, 1, cfg.MaxClients,
+		"Max clients should match DefaultsFor(normal) after switching back from conference")
 }
 
 // --- Phase 3: server preset overlay tests ---
@@ -431,7 +479,11 @@ func (d mockDeviceItem) IsInputDevice() bool { return d.isInput }
 // writeServerPresetsFile writes a server_presets.json to dir with the given presets map.
 func writeServerPresetsFile(t *testing.T, dir string, presets map[string]recent.DevicePreset) {
 	t.Helper()
-	sp := preset.ServerPresets{Presets: presets}
+	modePresets := make(map[string]preset.ModePreset, len(presets))
+	for mode, dp := range presets {
+		modePresets[mode] = preset.ModePreset{Devices: dp.Devices}
+	}
+	sp := preset.ServerPresets{Presets: modePresets}
 	data, err := json.MarshalIndent(sp, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(dir, 0700))

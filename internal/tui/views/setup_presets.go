@@ -71,30 +71,34 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 	return recent.DevicePreset{Devices: devices}
 }
 
-// CollectServerSettings returns the current server configuration from the TUI fields.
-func (m *SetupModel) CollectServerSettings() preset.ServerSettings {
-	var s preset.ServerSettings
+// CollectModePreset returns a full ModePreset snapshot for the given mode,
+// including both device selection and server-side settings (port, password,
+// max_clients, tls*). The mode parameter documents the target mode; default-
+// omission happens later at Save time via preset.DefaultsFor(mode).
+func (m *SetupModel) CollectModePreset(mode string) preset.ModePreset {
+	_ = mode // mode is part of the API surface; default-omission happens in preset.Save.
+	devices := m.CollectPresetDevices().Devices
+	mp := preset.ModePreset{Devices: devices}
+
 	for _, f := range m.Fields {
 		switch f.Key {
-		case "mode":
-			s.LastMode = modeKeyFromValue(f.Value)
 		case "port":
-			s.Port = f.IntValue()
+			mp.Port = f.IntValue()
 		case "password":
-			s.Password = f.Value
+			mp.Password = f.Value
 		case "max_clients":
-			s.MaxClients = f.IntValue()
+			mp.MaxClients = f.IntValue()
 		}
 	}
 	for _, f := range m.AdvancedFields {
 		switch f.Key {
 		case "tls":
-			s.TLS = f.Value == "on"
+			mp.TLS = f.Value == "on"
 		case "tls_cert":
-			s.TLSCert = f.Value
+			mp.TLSCert = f.Value
 		case "tls_key":
-			s.TLSKey = f.Value
+			mp.TLSKey = f.Value
 		}
 	}
-	return s
+	return mp
 }

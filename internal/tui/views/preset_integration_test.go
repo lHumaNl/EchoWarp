@@ -37,7 +37,11 @@ func newServerModel(t *testing.T, tempDir string, devices []mockDeviceItem, isDu
 // writePresets writes server_presets.json to tempDir.
 func writePresets(t *testing.T, tempDir string, presets map[string]recent.DevicePreset) {
 	t.Helper()
-	sp := preset.ServerPresets{Presets: presets}
+	modePresets := make(map[string]preset.ModePreset, len(presets))
+	for mode, dp := range presets {
+		modePresets[mode] = preset.ModePreset{Devices: dp.Devices}
+	}
+	sp := preset.ServerPresets{Presets: modePresets}
 	data, err := json.MarshalIndent(sp, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(tempDir, 0700))
@@ -251,15 +255,15 @@ func TestIntegration_MultiplePresetSaves_LastWins(t *testing.T) {
 	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
 
 	// First save: normal with 1 device
-	sp := preset.ServerPresets{Presets: make(map[string]recent.DevicePreset)}
-	sp.Set("normal", recent.DevicePreset{
+	sp := preset.ServerPresets{Presets: make(map[string]preset.ModePreset)}
+	sp.Set("normal", preset.ModePreset{
 		Devices: []recent.PresetDevice{{ID: 1, Name: "Mic"}},
 	})
 	require.NoError(t, preset.Save(sp))
 
 	// Second save: normal with 2 devices (overwrite)
 	sp2 := preset.Load()
-	sp2.Set("normal", recent.DevicePreset{
+	sp2.Set("normal", preset.ModePreset{
 		Devices: []recent.PresetDevice{
 			{ID: 1, Name: "Mic"},
 			{ID: 2, Name: "Speaker"},

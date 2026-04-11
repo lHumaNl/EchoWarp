@@ -915,13 +915,16 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 		f.Toggle()
 		m.writeBackFields(fields)
 		m.applyFieldDependencies()
-		// Server mode: clear device selection and restore preset after mode change
+		// Server mode: clear device selection, load per-mode preset / defaults, then
+		// try to auto-restore devices from the preset.
 		if f.Key == "mode" && m.cfg.Mode == config.ModeServer {
 			// Always clear device selections when switching modes —
 			// carrying over devices from another mode is incorrect.
 			m.multiSelect = make(map[string]DeviceRoleSet)
 			// Clear stale flash from previous mode's preset restore
 			m.flashMsg = ""
+			newMode := modeKeyFromValue(f.Value)
+			m.loadPresetForMode(newMode)
 			if restoreCmd := m.tryShowServerRestoreOverlay(); restoreCmd != nil {
 				return m, restoreCmd
 			}

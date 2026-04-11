@@ -552,11 +552,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Save server-side preset and generate server UUID (server mode, non-blocking)
 		if m.config.Mode == config.ModeServer {
-			devicePreset := m.setupModel.CollectPresetDevices()
-			serverSettings := m.setupModel.CollectServerSettings()
 			mode := m.config.AudioMode()
+			modePreset := m.setupModel.CollectModePreset(mode)
 			port := m.config.Port
-			batchCmds = append(batchCmds, saveServerPresetCmd(devicePreset, mode, serverSettings), func() tea.Msg {
+			batchCmds = append(batchCmds, saveServerPresetCmd(modePreset, mode), func() tea.Msg {
 				_ = config.ServerID(port) // generate & persist UUID for this port
 				return nil
 			})

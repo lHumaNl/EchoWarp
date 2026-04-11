@@ -648,14 +648,14 @@ func TestSaveServerPresetCmd_PersistsPreset(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	devicePreset := recent.DevicePreset{
+	mp := preset.ModePreset{
 		Devices: []recent.PresetDevice{
 			{ID: 5, Name: "Speaker", Virtual: false},
 		},
+		Port: 9090,
 	}
 
-	settings := preset.ServerSettings{Port: 9090, LastMode: "normal"}
-	cmd := saveServerPresetCmd(devicePreset, "normal", settings)
+	cmd := saveServerPresetCmd(mp, "normal")
 	require.NotNil(t, cmd)
 	msg := cmd()
 	assert.Nil(t, msg)
@@ -665,8 +665,8 @@ func TestSaveServerPresetCmd_PersistsPreset(t *testing.T) {
 	require.NotNil(t, p)
 	require.Len(t, p.Devices, 1)
 	assert.Equal(t, "Speaker", p.Devices[0].Name)
-	assert.Equal(t, 9090, sp.Settings.Port)
-	assert.Equal(t, "normal", sp.Settings.LastMode)
+	assert.Equal(t, 9090, p.Port)
+	assert.Equal(t, "normal", sp.LastMode)
 }
 
 func TestSaveServerPresetCmd_PreservesOtherModes(t *testing.T) {
@@ -675,15 +675,15 @@ func TestSaveServerPresetCmd_PreservesOtherModes(t *testing.T) {
 
 	// Write an existing preset for "duplex".
 	sp := preset.Load()
-	sp.Set("duplex", recent.DevicePreset{
+	sp.Set("duplex", preset.ModePreset{
 		Devices: []recent.PresetDevice{{ID: 9, Name: "OldSpeaker"}},
 	})
 	require.NoError(t, preset.Save(sp))
 
 	// Now save a "normal" preset.
-	cmd := saveServerPresetCmd(recent.DevicePreset{
+	cmd := saveServerPresetCmd(preset.ModePreset{
 		Devices: []recent.PresetDevice{{ID: 1, Name: "NewMic"}},
-	}, "normal", preset.ServerSettings{})
+	}, "normal")
 	_ = cmd()
 
 	sp2 := preset.Load()
