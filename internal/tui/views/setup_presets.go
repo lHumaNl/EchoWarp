@@ -1,8 +1,6 @@
 package views
 
 import (
-	"strings"
-
 	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
 )
@@ -79,7 +77,7 @@ func (m *SetupModel) CollectServerSettings() preset.ServerSettings {
 	for _, f := range m.Fields {
 		switch f.Key {
 		case "mode":
-			s.LastMode = strings.SplitN(f.Value, " ", 2)[0]
+			s.LastMode = modeKeyFromValue(f.Value)
 		case "port":
 			s.Port = f.IntValue()
 		case "password":

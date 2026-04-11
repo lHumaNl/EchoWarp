@@ -77,7 +77,7 @@ func (m *SetupModel) tryShowServerRestoreOverlay() tea.Cmd {
 	mode := ""
 	for _, f := range m.Fields {
 		if f.Key == "mode" {
-			mode = strings.SplitN(f.Value, " ", 2)[0]
+			mode = modeKeyFromValue(f.Value)
 			break
 		}
 	}

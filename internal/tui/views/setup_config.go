@@ -141,7 +141,7 @@ func (m SetupModel) BuildConfig() config.Config {
 		case "max_clients":
 			cfg.MaxClients = f.IntValue()
 		case "mode":
-			modeKey := strings.SplitN(f.Value, " ", 2)[0]
+			modeKey := modeKeyFromValue(f.Value)
 			cfg.StreamMode = config.AudioMode(modeKey)
 			cfg.SyncFromStreamMode()
 		case "max_reconnect":

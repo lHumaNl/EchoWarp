@@ -663,6 +663,26 @@ func modeKeyToDescriptiveMap() map[string]string {
 	}
 }
 
+// modeKeyFromValue returns the canonical mode key ("normal", "reverse", "duplex",
+// "conference") given a Mode field value. The field value is normally a localized
+// descriptive string (e.g. "normale (server → client)" in Italian), so this
+// reverse-looks-up the canonical key via modeKeyToDescriptiveMap. Falls back to
+// the first whitespace-delimited word when no descriptive match is found — this
+// keeps backward compatibility with legacy call sites that pass bare keys.
+//
+// This helper exists because taking `strings.SplitN(value, " ", 2)[0]` directly
+// on a localized descriptive string yields the translated first word
+// (e.g. "normale" / "thường"), which then fails preset lookup keyed by the
+// canonical English key.
+func modeKeyFromValue(v string) string {
+	for key, desc := range modeKeyToDescriptiveMap() {
+		if desc == v {
+			return key
+		}
+	}
+	return strings.SplitN(v, " ", 2)[0]
+}
+
 // applyFieldDependencies updates field requirements based on current values.
 func (m *SetupModel) applyFieldDependencies() {
 	// Find TLS field value (now in AdvancedFields)
@@ -712,7 +732,7 @@ func (m *SetupModel) applyFieldDependencies() {
 	var modeKey string
 	for _, f := range m.Fields {
 		if f.Key == "mode" {
-			modeKey = strings.SplitN(f.Value, " ", 2)[0]
+			modeKey = modeKeyFromValue(f.Value)
 			break
 		}
 	}
