@@ -85,6 +85,14 @@ type ConferenceStatsPayload struct {
 	States             []audio.ParticipantState
 	Recording          bool
 	PausedParticipants map[string]bool
+
+	// RecordingStopped is set on the first stats tick after a recording stop.
+	RecordingStopped    bool
+	RecordingStopDur    time.Duration
+	RecordingStopSize   uint64
+	RecordingStopFiles  int
+	RecordingStopDir    string
+	RecordingStopReason string
 }
 
 // ConferenceStatsMsg carries conference participant state updates from the server.

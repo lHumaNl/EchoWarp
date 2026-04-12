@@ -113,7 +113,7 @@ func decodeAudioStreamToJitter(logger *slog.Logger, inCh <-chan []byte, dec *aud
 // the pump substitutes a silence frame of identical length so the downstream
 // player keeps its timing (bypassing it entirely would cause underruns and
 // audible pops on unmute).
-func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool) {
+func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32)) {
 	defer close(playbackCh)
 
 	// Create a dedicated PLC decoder to generate concealment frames on underrun.
@@ -136,6 +136,11 @@ func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh 
 		default:
 			firstFrame = jb.Read()
 			if firstFrame != nil {
+				if recordingTap != nil {
+					tapCopy := make([]float32, len(firstFrame))
+					copy(tapCopy, firstFrame)
+					recordingTap(tapCopy)
+				}
 				if muteFlag != nil && muteFlag.Load() {
 					for i := range firstFrame {
 						firstFrame[i] = 0
@@ -170,6 +175,11 @@ pumpLoop:
 				frame := jb.Read()
 				if frame == nil {
 					return
+				}
+				if recordingTap != nil {
+					tapCopy := make([]float32, len(frame))
+					copy(tapCopy, frame)
+					recordingTap(tapCopy)
 				}
 				if muteFlag != nil && muteFlag.Load() {
 					for i := range frame {
@@ -211,6 +221,12 @@ pumpLoop:
 					// Re-encode is expensive; instead we just accept that PLC state
 					// won't be perfect. The PLC decoder generates smooth fade-out
 					// which is still much better than hard silence cuts.
+				}
+				// Recording tap: copy the un-muted frame to the recorder.
+				if recordingTap != nil {
+					tapCopy := make([]float32, len(frame))
+					copy(tapCopy, frame)
+					recordingTap(tapCopy)
 				}
 				// Local mute: zero the frame samples in place so the
 				// player keeps its timing but nothing audible reaches
@@ -388,7 +404,7 @@ func mixLocalInput(ctx context.Context, logger *slog.Logger, sampleRate, channel
 // is set — this is how Node.SetMuted (MuteController) drops incoming audio
 // without tearing down the playback device. Pass nil for server-mode callers
 // where there is no single "incoming stream" to mute.
-func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool) {
+func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool, recordingTap func([]float32)) {
 	targetFrames := cfg.EffectiveAudioBufferFrames()
 	maxFrames := targetFrames * 3
 	if maxFrames < 10 {
@@ -406,7 +422,7 @@ func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.
 	doneCh := make(chan struct{})
 
 	setupAudioDecoderWithJitter(logger, peer, cfg.SampleRate, cfg.Channels, jb, spectrum, level, doneCh)
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap)
 	startAudioPlayer(ctx, logger, cfg, playbackCh, audioDone)
 
 	logger.Info("Jitter buffer enabled",

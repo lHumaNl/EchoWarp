@@ -41,6 +41,10 @@ type CapturePipelineConfig struct {
 	Spectrum *audio.SpectrumAnalyzer
 	// Level meter fed from capture PCM (optional).
 	LevelMeter *audio.LevelMeter
+
+	// RecordingTap is called with each captured PCM frame (after AEC/AGC)
+	// for non-conference recording. May be nil.
+	RecordingTap func([]float32)
 }
 
 // CapturePipeline captures PCM audio from a device, accumulates frames to the
@@ -131,6 +135,12 @@ func (p *CapturePipeline) Run(ctx context.Context, sendCh chan<- []byte) error {
 				if agcErr == nil {
 					samples = processed
 				}
+			}
+			// Recording tap: feed post-AEC/AGC PCM to the recorder.
+			if p.cfg.RecordingTap != nil {
+				tapCopy := make([]float32, len(samples))
+				copy(tapCopy, samples)
+				p.cfg.RecordingTap(tapCopy)
 			}
 			if p.cfg.Spectrum != nil {
 				p.cfg.Spectrum.Feed(samples)

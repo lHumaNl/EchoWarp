@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -111,12 +109,11 @@ func (ch *ConferenceHandler) ParticipantIDs() []string {
 }
 
 // StartRecording begins conference recording in the given mode.
-func (ch *ConferenceHandler) StartRecording(mode audio.RecordingMode, sampleRate uint32) error {
+// baseDir is the root directory for recordings (e.g. from Config.EffectiveRecordDir).
+func (ch *ConferenceHandler) StartRecording(mode audio.RecordingMode, sampleRate uint32, baseDir string) error {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 	ch.recorder = audio.NewConferenceRecorder(mode, sampleRate, 1) // mono
-	homeDir, _ := os.UserHomeDir()                                 //nolint:errcheck
-	baseDir := filepath.Join(homeDir, "Documents", "EchoWarp_records")
 	return ch.recorder.Start(baseDir)
 }
 

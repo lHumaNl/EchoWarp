@@ -82,6 +82,10 @@ type ServerApp struct {
 	// Recording command channel for receiving start/stop commands from TUI.
 	recordingCmdCh <-chan RecordingCommand
 
+	// Non-conference recording support (mirrors ClientApp).
+	recorder   *audio.ConferenceRecorder
+	recorderMu sync.Mutex
+
 	// recState tracks recording metadata (mode, start time, output
 	// directory) that the underlying audio.ConferenceRecorder does not
 	// expose directly. Populated by the daemon-API RecordingController
@@ -473,4 +477,24 @@ func (s *ServerApp) Run(ctx context.Context) error {
 		}
 	}
 	return err
+}
+
+// startRecordingInternal starts non-conference server-side recording.
+func (s *ServerApp) startRecordingInternal(mode audio.RecordingMode) error {
+	s.recorderMu.Lock()
+	defer s.recorderMu.Unlock()
+	s.recorder = audio.NewConferenceRecorder(mode, s.cfg.SampleRate, 1)
+	return s.recorder.Start(s.cfg.EffectiveRecordDir())
+}
+
+// stopRecordingInternal stops non-conference server-side recording.
+func (s *ServerApp) stopRecordingInternal() (time.Duration, uint64, int, error) {
+	s.recorderMu.Lock()
+	defer s.recorderMu.Unlock()
+	if s.recorder == nil {
+		return 0, 0, 0, nil
+	}
+	dur, size, files, err := s.recorder.Stop()
+	s.recorder = nil
+	return dur, size, files, err
 }

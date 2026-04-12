@@ -379,13 +379,29 @@ func (s *ServerApp) processRecordingCommands(ctx context.Context) {
 				return
 			}
 			if cmd.Start {
-				if err := s.conference.StartRecording(cmd.Mode, s.cfg.SampleRate); err != nil {
-					s.logger.Error("Failed to start recording", "error", err)
+				if s.conference != nil {
+					if err := s.conference.StartRecording(cmd.Mode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
+						s.logger.Error("Failed to start recording", "error", err)
+					} else {
+						s.logger.Info("Recording started", "mode", cmd.Mode)
+					}
 				} else {
-					s.logger.Info("Recording started", "mode", cmd.Mode)
+					if err := s.startRecordingInternal(cmd.Mode); err != nil {
+						s.logger.Error("Failed to start recording", "error", err)
+					} else {
+						s.logger.Info("Recording started", "mode", cmd.Mode)
+					}
 				}
 			} else {
-				dur, size, files, err := s.conference.StopRecording()
+				var dur time.Duration
+				var size uint64
+				var files int
+				var err error
+				if s.conference != nil {
+					dur, size, files, err = s.conference.StopRecording()
+				} else {
+					dur, size, files, err = s.stopRecordingInternal()
+				}
 				if err != nil {
 					s.logger.Error("Failed to stop recording", "error", err)
 				} else {
@@ -393,6 +409,18 @@ func (s *ServerApp) processRecordingCommands(ctx context.Context) {
 						"duration", dur.Round(time.Second),
 						"files", files,
 						"size", formatBytes(size))
+					// Send stop notification to TUI via conference stats channel.
+					if s.conferenceStatsCh != nil {
+						select {
+						case s.conferenceStatsCh <- ConferenceStatsPayload{
+							RecordingStopped:   true,
+							RecordingStopDur:   dur,
+							RecordingStopSize:  size,
+							RecordingStopFiles: files,
+						}:
+						default:
+						}
+					}
 				}
 			}
 		}
@@ -410,6 +438,12 @@ func (s *ServerApp) flushRecordingHeaders(ctx context.Context) {
 		case <-ticker.C:
 			if s.conference != nil && s.conference.IsRecording() {
 				s.conference.FlushHeaders()
+			}
+			s.recorderMu.Lock()
+			rec := s.recorder
+			s.recorderMu.Unlock()
+			if rec != nil && rec.IsActive() {
+				rec.FlushHeaders()
 			}
 		}
 	}

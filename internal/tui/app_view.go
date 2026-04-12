@@ -103,6 +103,7 @@ func (m Model) View() string {
 	if m.isRecording {
 		recInfo.Active = true
 		recInfo.Duration = time.Since(m.recordingStart)
+		recInfo.Size = m.recordingSize
 		modeNames := []string{"mix", "tracks", "both"}
 		modeName := modeNames[m.recordingMode]
 		if m.conference {

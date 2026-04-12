@@ -427,6 +427,7 @@ cli_flag_aec: "Bật triệt tiếng vọng âm (song công)"
 cli_flag_conference: "Alias cho --mode=conference"
 cli_flag_server_muted: "Máy chủ không gửi âm thanh trong chế độ hội nghị"
 cli_flag_record: "Bắt đầu ghi ngay: mix, tracks hoặc both (chế độ hội nghị)"
+cli_flag_record_dir: "Override recording output directory (default: ~/Documents/EchoWarp_records)"
 cli_flag_hwid_required: "Yêu cầu máy khách gửi ID phần cứng (để cấm)"
 
 # CLI — flag descriptions (client)

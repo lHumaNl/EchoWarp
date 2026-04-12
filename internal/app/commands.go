@@ -1,6 +1,10 @@
 package app
 
-import "github.com/lHumaNl/echowarp/pkg/echowarp/audio"
+import (
+	"time"
+
+	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
+)
 
 // ClientAction represents an action to perform on a client.
 type ClientAction int
@@ -102,6 +106,14 @@ type ConferenceStatsPayload struct {
 	States             []audio.ParticipantState
 	Recording          bool
 	PausedParticipants map[string]bool // per-participant pause state
+
+	// RecordingStopped is set on the first stats tick after a recording stop.
+	RecordingStopped    bool
+	RecordingStopDur    time.Duration
+	RecordingStopSize   uint64
+	RecordingStopFiles  int
+	RecordingStopDir    string
+	RecordingStopReason string // non-empty if auto-stopped due to error
 }
 
 // ParticipantPauseMsg notifies the TUI that a remote participant changed pause state.

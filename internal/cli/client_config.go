@@ -47,6 +47,9 @@ func loadClientConfig(cmd *cobra.Command) (*config.Config, error) {
 	if cmd.Flags().Changed("auto-reconnect-attempts") {
 		cfg.AutoReconnectAttempts, _ = cmd.Flags().GetInt("auto-reconnect-attempts")
 	}
+	if cmd.Flags().Changed("record-dir") {
+		cfg.RecordDir, _ = cmd.Flags().GetString("record-dir")
+	}
 
 	return &cfg, nil
 }

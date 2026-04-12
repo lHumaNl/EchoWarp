@@ -38,6 +38,7 @@ type RecordingInfo struct {
 	Active   bool
 	Duration time.Duration
 	Label    string // e.g. "(3/4)" for server, "(mic+in)" for client
+	Size     uint64 // current recording size in bytes
 }
 
 // renderHeader renders the fixed top line:
@@ -66,6 +67,9 @@ func renderHeader(cfg config.Config, state string, duration time.Duration, recon
 	if len(rec) > 0 && rec[0].Active {
 		recDur := formatDuration(rec[0].Duration)
 		recText := "● REC " + recDur
+		if rec[0].Size > 0 {
+			recText += " " + formatRecSize(rec[0].Size)
+		}
 		if rec[0].Label != "" {
 			recText += " " + rec[0].Label
 		}
@@ -178,6 +182,24 @@ func capitalizeFirst(s string) string {
 }
 
 // formatDuration formats a duration as HH:MM:SS or MM:SS.
+func formatRecSize(bytes uint64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+	switch {
+	case bytes >= gb:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
+	case bytes >= mb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%.0f KB", float64(bytes)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
 func formatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	h := d / time.Hour

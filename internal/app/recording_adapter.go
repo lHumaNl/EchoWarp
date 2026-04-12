@@ -19,18 +19,6 @@ import (
 // bloat the audio package for a single caller — the adapter pattern
 // (mirroring ban_adapter.go from phase 5b) keeps the knowledge local
 // to the daemon/API boundary.
-//
-// TODO(task-014): ClientApp and non-conference ServerApp paths
-// construct a ConferenceRecorder but never call
-// SubmitAudio/WriteMix/WriteTrack, so the produced WAV files are
-// empty 44-byte headers. See .tasks/014-wav-recorder-tui.md bug #2.
-// The adapter here exposes the same broken behavior verbatim — we
-// deliberately do not add a parallel recorder instance; task 014 owns
-// the fix for wiring the audio pipeline into the non-conference
-// recorder. API callers that hit Start/Stop on a non-conference
-// server or on a client will see success responses with empty-file
-// results. Document this limitation in the REST API user docs when
-// task 014 lands.
 type recordingAdapterState struct {
 	mu        sync.Mutex
 	mode      echowarp.RecordingMode
@@ -74,32 +62,53 @@ func enumerateRecordingFiles(dir string) []string {
 }
 
 // ---------------------------------------------------------------------------
-// ServerApp implements echowarp.RecordingController for the conference
-// path. Non-conference server mode currently has no recording wiring
-// (task 014); in that case StartRecording returns ErrConfigValidation
-// rather than pretending to record nothing. This matches the existing
-// CLI --record behavior: server_multi.go only calls
-// conference.StartRecording when s.cfg.Conference is true.
+// ServerApp implements echowarp.RecordingController. In conference mode,
+// recording is delegated to ConferenceHandler. In non-conference mode,
+// the server uses a local recorder fed by the capture pipeline tap.
 // ---------------------------------------------------------------------------
 
 // StartRecording implements echowarp.RecordingController.
 func (s *ServerApp) StartRecording(mode echowarp.RecordingMode) error {
-	if s.conference == nil {
-		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Recording requires conference mode").
-			WithSuggestion("Start the server with --conference to enable audio recording via the API")
+	audioMode := recordingModeToAudio(mode)
+
+	if s.conference != nil {
+		// Conference mode: delegate to ConferenceHandler.
+		if s.conference.IsRecording() {
+			return ewerrors.NewError(ewerrors.ErrInternalState, "Recording already active").
+				WithSuggestion("Stop the current recording via POST /api/v1/recording/stop before starting a new one")
+		}
+		if err := s.conference.StartRecording(audioMode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
+			return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to start recording")
+		}
+		s.recState.mu.Lock()
+		s.recState.mode = mode
+		s.recState.startedAt = time.Now()
+		s.recState.dir = s.conference.RecordingDir()
+		s.recState.mu.Unlock()
+		s.logger.Info("Recording started via API", "mode", mode)
+		return nil
 	}
-	if s.conference.IsRecording() {
+
+	// Non-conference mode: use server-local recorder.
+	s.recorderMu.Lock()
+	if s.recorder != nil && s.recorder.IsActive() {
+		s.recorderMu.Unlock()
 		return ewerrors.NewError(ewerrors.ErrInternalState, "Recording already active").
 			WithSuggestion("Stop the current recording via POST /api/v1/recording/stop before starting a new one")
 	}
-	audioMode := recordingModeToAudio(mode)
-	if err := s.conference.StartRecording(audioMode, s.cfg.SampleRate); err != nil {
+	s.recorderMu.Unlock()
+
+	if err := s.startRecordingInternal(audioMode); err != nil {
 		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to start recording")
 	}
 	s.recState.mu.Lock()
 	s.recState.mode = mode
 	s.recState.startedAt = time.Now()
-	s.recState.dir = s.conference.RecordingDir()
+	s.recorderMu.Lock()
+	if s.recorder != nil {
+		s.recState.dir = s.recorder.Dir()
+	}
+	s.recorderMu.Unlock()
 	s.recState.mu.Unlock()
 	s.logger.Info("Recording started via API", "mode", mode)
 	return nil
@@ -107,14 +116,19 @@ func (s *ServerApp) StartRecording(mode echowarp.RecordingMode) error {
 
 // StopRecording implements echowarp.RecordingController.
 func (s *ServerApp) StopRecording() (echowarp.RecordingResult, error) {
-	if s.conference == nil {
-		return echowarp.RecordingResult{Files: []string{}}, nil
-	}
 	s.recState.mu.Lock()
 	dir := s.recState.dir
 	s.recState.mu.Unlock()
 
-	dur, size, _, err := s.conference.StopRecording()
+	var dur time.Duration
+	var size uint64
+	var err error
+
+	if s.conference != nil {
+		dur, size, _, err = s.conference.StopRecording()
+	} else {
+		dur, size, _, err = s.stopRecordingInternal()
+	}
 	if err != nil {
 		return echowarp.RecordingResult{Files: []string{}}, ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to stop recording")
 	}
@@ -128,8 +142,6 @@ func (s *ServerApp) StopRecording() (echowarp.RecordingResult, error) {
 	s.recState.mu.Unlock()
 
 	if dur == 0 && size == 0 && len(files) == 0 {
-		// Idempotent "stop when not recording" — return zero-valued
-		// result so the API returns 200 with an empty body.
 		return echowarp.RecordingResult{Files: []string{}}, nil
 	}
 	s.logger.Info("Recording stopped via API",
@@ -146,7 +158,15 @@ func (s *ServerApp) StopRecording() (echowarp.RecordingResult, error) {
 
 // RecordingStatus implements echowarp.RecordingController.
 func (s *ServerApp) RecordingStatus() echowarp.RecordingStatus {
-	if s.conference == nil || !s.conference.IsRecording() {
+	active := false
+	if s.conference != nil {
+		active = s.conference.IsRecording()
+	} else {
+		s.recorderMu.Lock()
+		active = s.recorder != nil && s.recorder.IsActive()
+		s.recorderMu.Unlock()
+	}
+	if !active {
 		return echowarp.RecordingStatus{}
 	}
 	s.recState.mu.Lock()
@@ -165,12 +185,8 @@ func (s *ServerApp) RecordingStatus() echowarp.RecordingStatus {
 
 // ---------------------------------------------------------------------------
 // ClientApp implements echowarp.RecordingController over the
-// client-side recorder field. As noted in the package-level TODO, the
-// client path produces empty 44B WAV files because the audio pipeline
-// does not actually feed the recorder — this is a task 014 issue that
-// the adapter deliberately exposes verbatim so API callers see the
-// same behavior as the CLI --record flag on a client. Once task 014
-// lands the same adapter code will produce real audio without change.
+// client-side recorder field. The jitter playback pump feeds decoded
+// audio to the recorder via a recording tap closure.
 // ---------------------------------------------------------------------------
 
 // StartRecording implements echowarp.RecordingController.

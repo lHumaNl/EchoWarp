@@ -427,6 +427,7 @@ cli_flag_aec: "启用声学回声消除（双工模式）"
 cli_flag_conference: "--mode=conference 的别名"
 cli_flag_server_muted: "服务器在会议模式下不发送音频"
 cli_flag_record: "立即开始录制：mix、tracks 或 both（会议模式）"
+cli_flag_record_dir: "Override recording output directory (default: ~/Documents/EchoWarp_records)"
 cli_flag_hwid_required: "要求客户端发送硬件 ID（用于封禁）"
 
 # CLI — flag descriptions (client)

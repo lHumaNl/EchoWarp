@@ -539,12 +539,12 @@ func (o *RecordingOverlay) wrapBox(content, title string, width int) string {
 	// Build top border with embedded title manually to avoid ANSI escape issues.
 	innerW := overlayWidth
 	titleLen := lipgloss.Width(title)
-	dashesAfter := innerW - titleLen - 1
+	dashesAfter := innerW - titleLen - 2 // 2 spaces around title
 	if dashesAfter < 1 {
 		dashesAfter = 1
 	}
 	topLine := lipgloss.NewStyle().Foreground(borderColor).Render(
-		border.TopLeft + border.Top + title + strings.Repeat(border.Top, dashesAfter) + border.TopRight)
+		border.TopLeft + " " + title + " " + strings.Repeat(border.Top, dashesAfter) + border.TopRight)
 
 	// Render content with side borders and padding.
 	padded := lipgloss.NewStyle().Padding(1, 2).Width(innerW).Render(content)

@@ -63,7 +63,7 @@ func (s *ServerApp) runMulti(ctx context.Context) error {
 			default:
 				recMode = audio.RecordMix
 			}
-			if err := s.conference.StartRecording(recMode, s.cfg.SampleRate); err != nil {
+			if err := s.conference.StartRecording(recMode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
 				s.logger.Error("Failed to start recording", "error", err)
 			} else {
 				s.logger.Info("Recording started", "mode", s.cfg.RecordMode)

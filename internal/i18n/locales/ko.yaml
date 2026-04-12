@@ -427,6 +427,7 @@ cli_flag_aec: "음향 에코 제거 활성화 (듀플렉스 모드)"
 cli_flag_conference: "--mode=conference의 별칭"
 cli_flag_server_muted: "서버는 회의 모드에서 오디오를 전송하지 않음"
 cli_flag_record: "즉시 녹음 시작: mix, tracks 또는 both (회의 모드)"
+cli_flag_record_dir: "Override recording output directory (default: ~/Documents/EchoWarp_records)"
 cli_flag_hwid_required: "클라이언트가 하드웨어 ID를 보내도록 요구 (차단용)"
 
 # CLI — flag descriptions (client)

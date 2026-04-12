@@ -427,6 +427,7 @@ cli_flag_aec: "音響エコーキャンセラを有効化（双方向モード�
 cli_flag_conference: "--mode=conference のエイリアス"
 cli_flag_server_muted: "サーバーはカンファレンスモードでオーディオを送信しない"
 cli_flag_record: "すぐに録音を開始：mix、tracks、または both（カンファレンスモード）"
+cli_flag_record_dir: "Override recording output directory (default: ~/Documents/EchoWarp_records)"
 cli_flag_hwid_required: "クライアントにハードウェア ID の送信を要求（BAN 用）"
 
 # CLI — flag descriptions (client)

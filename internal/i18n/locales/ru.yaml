@@ -427,6 +427,7 @@ cli_flag_aec: "Включить акустическое эхоподавлен�
 cli_flag_conference: "Псевдоним для --mode=conference"
 cli_flag_server_muted: "Сервер не передаёт аудио в режиме конференции"
 cli_flag_record: "Начать запись сразу: mix, tracks или both (режим конференции)"
+cli_flag_record_dir: "Override recording output directory (default: ~/Documents/EchoWarp_records)"
 cli_flag_hwid_required: "Требовать от клиентов hardware ID (для банов)"
 
 # CLI — flag descriptions (client)

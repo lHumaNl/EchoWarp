@@ -2,6 +2,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
@@ -138,6 +141,10 @@ type Config struct {
 
 	// RecordMode starts recording immediately: "mix", "tracks", or "both". Empty = no recording.
 	RecordMode string `yaml:"record_mode,omitempty"`
+
+	// RecordDir overrides the default recording output directory.
+	// When empty, recordings are stored in ~/Documents/EchoWarp_records.
+	RecordDir string `yaml:"record_dir,omitempty"`
 
 	// Nickname is the chat display name (client only). Empty = server assigns "Client-N".
 	Nickname string `yaml:"nickname,omitempty" json:"nickname,omitempty"`
@@ -465,6 +472,17 @@ func DefaultConfig() Config {
 }
 
 // ── IsTLSEnabled ─────────────────────────────────────────────────────────────
+
+// EffectiveRecordDir returns the recording output directory.
+// If RecordDir is set, it is returned as-is. Otherwise falls back to
+// ~/Documents/EchoWarp_records.
+func (c Config) EffectiveRecordDir() string {
+	if c.RecordDir != "" {
+		return c.RecordDir
+	}
+	homeDir, _ := os.UserHomeDir() //nolint:errcheck
+	return filepath.Join(homeDir, "Documents", "EchoWarp_records")
+}
 
 // EffectiveAudioBufferFrames returns the mode-based jitter buffer target depth.
 // If AudioBufferFrames was explicitly set (non-zero), it is used as an override.
