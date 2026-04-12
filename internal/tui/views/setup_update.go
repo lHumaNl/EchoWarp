@@ -883,9 +883,9 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 	if m.cfg.Mode == config.ModeClient && m.probeResult == nil {
 		clientLocalFields := map[string]bool{
 			"server_address": true, "port": true,
-			"max_reconnect": true,
-			"log_level":     true, "echo_cancellation": true,
-			"use_simd": true,
+			"max_reconnect": true, "auto_reconnect": true, "reconnect_limit": true,
+			"log_level": true, "echo_cancellation": true,
+			"use_simd": true, "nickname": true,
 		}
 		if !clientLocalFields[f.Key] && f.Type != FieldAction {
 			return m, nil
