@@ -1482,8 +1482,8 @@ func TestDaemonAutoReconnectRespectsFile(t *testing.T) {
 }
 
 // TestLoadWithViperClientModeDefaults verifies that LoadWithViper seeds
-// client-mode defaults (auto-reconnect=true, attempts=5) before any file or
-// env parsing, ensuring defaults fire when nothing is explicitly configured.
+// client-mode defaults (attempts=5) before any file or env parsing.
+// AutoReconnect defaults to false (opt-in via --auto-reconnect or config).
 func TestLoadWithViperClientModeDefaults(t *testing.T) {
 	// Isolate from any ambient env vars.
 	t.Setenv("ECHOWARP_AUTO_RECONNECT", "")
@@ -1493,8 +1493,8 @@ func TestLoadWithViperClientModeDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWithViper error: %v", err)
 	}
-	if !cfg.AutoReconnect {
-		t.Error("expected client-mode default auto-reconnect=true")
+	if cfg.AutoReconnect {
+		t.Error("expected client-mode default auto-reconnect=false (opt-in)")
 	}
 	if cfg.AutoReconnectAttempts != 5 {
 		t.Errorf("expected client-mode default attempts=5, got %d", cfg.AutoReconnectAttempts)
