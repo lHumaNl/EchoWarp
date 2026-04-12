@@ -187,20 +187,22 @@ func bridgeClientCommands(ctx context.Context, src <-chan tui.ClientCommand, dst
 	}
 }
 
-// drainDeviceCommands reads and discards device commands until ctx is canceled or
-// the channel is closed. This prevents the TUI from blocking on sends while backend
-// wiring to the audio mixer is not yet implemented.
-// TODO: replace with bridgeDeviceCommands once ServerApp/ClientApp expose the mixer.
-func drainDeviceCommands(ctx context.Context, ch <-chan tui.DeviceCommand, logger *slog.Logger) {
+// bridgeDeviceCommands forwards TUI device commands to the app's internal device
+// command channel. Exits when ctx is canceled or src is closed.
+func bridgeDeviceCommands(ctx context.Context, src <-chan tui.DeviceCommand, dst chan<- app.DeviceCommand) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case cmd, ok := <-ch:
+		case cmd, ok := <-src:
 			if !ok {
 				return
 			}
-			logger.Debug("Device command received (not yet wired to mixer)", "action", cmd.Action, "device", cmd.DeviceID)
+			select {
+			case dst <- app.DeviceCommand{Action: app.DeviceAction(cmd.Action), DeviceID: cmd.DeviceID}:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }

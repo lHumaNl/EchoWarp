@@ -373,9 +373,7 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 				}
 			}()
 
-			// TODO: wire deviceCmdCh to HandleDeviceCommands with the mixer and AGC processors
-			// once ClientApp exposes them. For now, drain the channel so the TUI doesn't block.
-			go drainDeviceCommands(ctx, deviceCmdCh, logger)
+			go bridgeDeviceCommands(ctx, deviceCmdCh, clientApp.DeviceCommandSendChannel())
 
 			runErr := app.RunWithReconnect(
 				ctx, logger,

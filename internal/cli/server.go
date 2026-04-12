@@ -399,9 +399,7 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 				serverApp.WithServerPauseChannel(serverPauseCh)
 			}
 
-			// TODO: wire deviceCmdCh to HandleDeviceCommands with the mixer and AGC processors
-			// once ServerApp exposes them. For now, drain the channel so the TUI doesn't block.
-			go drainDeviceCommands(ctx, deviceCmdCh, logger)
+			go bridgeDeviceCommands(ctx, deviceCmdCh, serverApp.DeviceCommandSendChannel())
 
 			if runErr := serverApp.Run(ctx); runErr != nil && ctx.Err() == nil {
 				sendError(errCh, runErr, logger)

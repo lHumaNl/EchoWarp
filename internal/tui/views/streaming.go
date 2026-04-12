@@ -63,6 +63,8 @@ type StreamingParams struct {
 	PlaybackSpectrumBands []float64
 	PlaybackVULevels      []float64
 
+	IsServer bool // true when local side is the server (controls device panel visibility)
+
 	Quality       QualityLevel
 	PacketLossPct float64 // packet loss percentage (0–100)
 	ChatView      string  // pre-rendered chat panel (empty if not visible)
@@ -136,7 +138,7 @@ func StreamingView(p StreamingParams) string {
 	}
 
 	// Device panel
-	if len(p.Devices) > 0 {
+	if p.IsServer && len(p.Devices) > 0 {
 		sections = append(sections, renderSep(p.Width), renderDevicePanel(p.Devices, p.GlobalMuted))
 	}
 
