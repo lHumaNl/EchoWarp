@@ -45,6 +45,9 @@ type CapturePipelineConfig struct {
 	// RecordingTap is called with each captured PCM frame (after AEC/AGC)
 	// for non-conference recording. May be nil.
 	RecordingTap func([]float32)
+
+	// GainControl provides atomic volume/mute for single-device mode (no mixer).
+	GainControl *DeviceGainControl
 }
 
 // CapturePipeline captures PCM audio from a device, accumulates frames to the
@@ -134,6 +137,16 @@ func (p *CapturePipeline) Run(ctx context.Context, sendCh chan<- []byte) error {
 				processed, agcErr := p.cfg.AGC.Process(ctx, samples)
 				if agcErr == nil {
 					samples = processed
+				}
+			}
+			// Apply device gain/mute (single-device mode without mixer).
+			if p.cfg.GainControl != nil {
+				if p.cfg.GainControl.IsMuted() {
+					for i := range samples {
+						samples[i] = 0
+					}
+				} else if gain := p.cfg.GainControl.Gain(); gain != 1.0 {
+					audio.MixGain(samples, gain)
 				}
 			}
 			// Recording tap: feed post-AEC/AGC PCM to the recorder.

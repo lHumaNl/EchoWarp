@@ -185,7 +185,6 @@ func LoadWithViper(configPath string, mode Mode) (Config, error) {
 	// them, while CLI flags (applied later via applyFlagOverrides) still win.
 	// This keeps the precedence chain: CLI > env > file > client-mode default.
 	if mode == ModeClient {
-		cfg.AutoReconnect = true
 		cfg.AutoReconnectAttempts = 5
 	}
 

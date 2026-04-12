@@ -1223,7 +1223,7 @@ func (c *ClientApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			LevelMeter:    captureLevel,
 			AGCProcessors: buildAGCProcessors(captureDevices, c.cfg.SampleRate),
 		}, c.logger)
-		go HandleDeviceCommands(ctx, c.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), c.logger)
+		go HandleDeviceCommands(ctx, c.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), nil, c.logger)
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1247,6 +1247,12 @@ func (c *ClientApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		agcProc = agcMap[deviceID]
 	}
 
+	var initialVol float32 = 1.0
+	if len(captureDevices) == 1 {
+		initialVol = float32(captureDevices[0].Volume)
+	}
+	gainCtl := NewDeviceGainControl(initialVol)
+
 	pipeline := NewClientCapturePipeline(CapturePipelineConfig{
 		SampleRate:           c.cfg.SampleRate,
 		Channels:             c.cfg.Channels,
@@ -1259,8 +1265,9 @@ func (c *ClientApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		AGC:                  agcProc,
 		Spectrum:             captureSpectrum,
 		LevelMeter:           captureLevel,
+		GainControl:          gainCtl,
 	}, c.logger)
 
-	go HandleDeviceCommands(ctx, c.deviceCmdCh, nil, agcMap, c.logger)
+	go HandleDeviceCommands(ctx, c.deviceCmdCh, nil, agcMap, gainCtl, c.logger)
 	return pipeline.Run(ctx, sendCh)
 }

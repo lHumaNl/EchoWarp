@@ -1017,7 +1017,7 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
 			RecordingTap:  recTap,
 		}, s.logger)
-		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), nil, s.logger)
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1041,6 +1041,13 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		agcProc = agcMap[deviceID]
 	}
 
+	// Build gain control for single-device volume/mute.
+	var initialVol float32 = 1.0
+	if len(captureDevices) == 1 {
+		initialVol = float32(captureDevices[0].Volume)
+	}
+	gainCtl := NewDeviceGainControl(initialVol)
+
 	pipeline := NewServerCapturePipeline(CapturePipelineConfig{
 		SampleRate:           s.cfg.SampleRate,
 		Channels:             s.cfg.Channels,
@@ -1055,8 +1062,9 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		Spectrum:             captureSpectrum,
 		LevelMeter:           captureLevel,
 		RecordingTap:         recTap,
+		GainControl:          gainCtl,
 	}, s.logger)
 
-	go HandleDeviceCommands(ctx, s.deviceCmdCh, nil, agcMap, s.logger)
+	go HandleDeviceCommands(ctx, s.deviceCmdCh, nil, agcMap, gainCtl, s.logger)
 	return pipeline.Run(ctx, sendCh)
 }

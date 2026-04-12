@@ -358,13 +358,13 @@ func TestStreamingView_EdgeCases(t *testing.T) {
 	})
 }
 
-func TestClientStreamingNoDevicePanel(t *testing.T) {
+func TestStreamingNoDevicePanel(t *testing.T) {
 	devices := []DeviceDisplayState{
 		{ID: 1, Name: "Mic", Role: "capture", Volume: 1.0},
 	}
 
-	// Server mode — device panel should appear.
-	serverResult := StreamingView(StreamingParams{
+	// Device panel should never appear on streaming screen (Ctrl+D overlay only).
+	result := StreamingView(StreamingParams{
 		Stats:     transport.ConnectionStats{State: "connected"},
 		StartTime: time.Now(),
 		Audio:     AudioInfo{Codec: "Opus", SampleRate: 48000, Channels: 1},
@@ -373,19 +373,7 @@ func TestClientStreamingNoDevicePanel(t *testing.T) {
 		Devices:   devices,
 		IsServer:  true,
 	})
-	assert.Contains(t, serverResult, "Devices", "server mode should show device panel")
-
-	// Client mode — device panel should be hidden.
-	clientResult := StreamingView(StreamingParams{
-		Stats:     transport.ConnectionStats{State: "connected"},
-		StartTime: time.Now(),
-		Audio:     AudioInfo{Codec: "Opus", SampleRate: 48000, Channels: 1},
-		Width:     80,
-		Height:    24,
-		Devices:   devices,
-		IsServer:  false,
-	})
-	assert.NotContains(t, clientResult, "Devices", "client mode should hide device panel")
+	assert.NotContains(t, result, "Mic", "device panel should not appear on streaming screen")
 }
 
 func TestCalculateBitrate_EdgeCases(t *testing.T) {

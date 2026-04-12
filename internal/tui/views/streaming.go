@@ -137,10 +137,7 @@ func StreamingView(p StreamingParams) string {
 		sections = append(sections, statsContent)
 	}
 
-	// Device panel
-	if p.IsServer && len(p.Devices) > 0 {
-		sections = append(sections, renderSep(p.Width), renderDevicePanel(p.Devices, p.GlobalMuted))
-	}
+	// Device panel removed from streaming view — access via Ctrl+D overlay only.
 
 	// Chat panel
 	if p.ChatView != "" {
@@ -487,48 +484,6 @@ func formatKbps(kbps float64) string {
 		return fmt.Sprintf("%.1f Mbps", kbps/1000)
 	}
 	return fmt.Sprintf("%.1f kbps", kbps)
-}
-
-func renderDevicePanel(devices []DeviceDisplayState, globalMuted bool) string {
-	lines := make([]string, 0, 1+len(devices))
-	header := i18n.T("streaming_label_devices")
-	if globalMuted {
-		header += "  " + styles.StatValueError.Render(i18n.T("streaming_label_global_mute"))
-	}
-	lines = append(lines, styles.StatLabel.Render(header))
-
-	for _, dev := range devices {
-		role := "[C]"
-		if dev.Role == "playback" {
-			role = "[P]"
-		}
-
-		volPct := int(dev.Volume * 100)
-		volBar := renderVolumeBar(dev.Volume)
-
-		muteIcon := ""
-		if dev.Disconnected {
-			muteIcon = " " + styles.StatValueError.Render(i18n.T("streaming_label_disconnected"))
-		} else if dev.Muted || globalMuted {
-			muteIcon = " " + styles.StatValueError.Render(i18n.T("streaming_label_muted_cap"))
-		}
-
-		prefix := "  "
-		if dev.Selected {
-			prefix = styles.DirectionReverse.Render("▸ ")
-		}
-
-		line := fmt.Sprintf("%s%s %s  %s %3d%%%s",
-			prefix,
-			styles.StatLabel.Render(role),
-			dev.Name,
-			volBar,
-			volPct,
-			muteIcon,
-		)
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
 }
 
 // renderCompactVolumeBar renders a short volume bar (6 chars) + percentage for inline use.

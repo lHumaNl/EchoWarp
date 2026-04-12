@@ -970,11 +970,21 @@ func (m Model) proceedWithStart(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		if !selectedItem.device.IsInput {
 			role = "playback"
 		}
+		vol := 1.0
+		for _, d := range m.config.Devices {
+			if d.ID == selectedItem.device.ID {
+				vol = d.Volume
+				break
+			}
+		}
+		if vol == 0 {
+			vol = 1.0
+		}
 		m = m.WithDeviceStates([]DeviceState{{
 			ID:     selectedItem.device.ID,
 			Name:   selectedItem.device.Name,
 			Role:   role,
-			Volume: 1.0,
+			Volume: vol,
 		}})
 	} else {
 		return m, tea.Batch(cmds...)
