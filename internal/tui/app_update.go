@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -472,6 +473,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.isRecording && !msg.Recording {
 			m.isRecording = false
 			m.recordingStart = time.Time{}
+		}
+		// Toast notification when recording stops with stats.
+		if msg.RecordingStopped {
+			dur := msg.RecordingStopDur.Round(time.Second)
+			size := formatRecSize(msg.RecordingStopSize)
+			logMsg := fmt.Sprintf("Recording saved: %s, %s, %d file(s)", dur, size, msg.RecordingStopFiles)
+			if msg.RecordingStopDir != "" {
+				logMsg += " → " + msg.RecordingStopDir
+			}
+			if msg.RecordingStopReason != "" {
+				logMsg += " (stopped: " + msg.RecordingStopReason + ")"
+			}
+			m.logs = append(m.logs, logMsg)
 		}
 		// Sync paused participants from conference handler (server-side).
 		if msg.PausedParticipants != nil {

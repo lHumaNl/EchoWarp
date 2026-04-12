@@ -99,6 +99,7 @@ func newDaemonStartCmd() *cobra.Command {
 	cmd.Flags().Bool("aec", false, "Enable acoustic echo cancellation (duplex mode)")
 	cmd.Flags().Bool("server-muted", false, "Server does not contribute audio in conference mode")
 	cmd.Flags().String("record", "", "Start recording immediately: mix, tracks, or both (conference mode)")
+	cmd.Flags().String("record-dir", "", "Override recording output directory (default: ~/Documents/EchoWarp_records)")
 	cmd.Flags().Bool("hwid-required", false, "Require clients to send hardware ID (for bans)")
 	return cmd
 }

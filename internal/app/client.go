@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -371,9 +369,7 @@ func (c *ClientApp) startRecordingInternal(mode audio.RecordingMode) error {
 	c.recorderMu.Lock()
 	defer c.recorderMu.Unlock()
 	c.recorder = audio.NewConferenceRecorder(mode, c.cfg.SampleRate, 1)
-	homeDir, _ := os.UserHomeDir() //nolint:errcheck
-	baseDir := filepath.Join(homeDir, "Documents", "EchoWarp_records")
-	return c.recorder.Start(baseDir)
+	return c.recorder.Start(c.cfg.EffectiveRecordDir())
 }
 
 // stopRecordingInternal stops client-side recording. See
@@ -874,7 +870,15 @@ func (c *ClientApp) newServerMuteIncomingFilterCh(ctx context.Context, dst chan<
 // the daemon API) is passed to the pump so mute takes effect without
 // tearing down the playback device.
 func (c *ClientApp) setupReceiveAudioPipeline(ctx context.Context, peer transport.PeerManager, audioDone chan error) error {
-	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted)
+	tap := func(samples []float32) {
+		c.recorderMu.Lock()
+		rec := c.recorder
+		c.recorderMu.Unlock()
+		if rec != nil && rec.IsActive() {
+			_ = rec.WriteMix(samples) //nolint:errcheck
+		}
+	}
+	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap)
 	return nil
 }
 

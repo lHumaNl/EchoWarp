@@ -71,6 +71,7 @@ func newClientCmd() *cobra.Command {
 	cmd.Flags().Bool("no-interactive", false, i18n.T("cli_flag_no_interactive"))
 	cmd.Flags().Bool("aec", false, i18n.T("cli_flag_aec"))
 	cmd.Flags().StringP("nickname", "n", "", i18n.T("cli_flag_nickname"))
+	cmd.Flags().String("record-dir", "", i18n.T("cli_flag_record_dir"))
 	_ = cmd.Flags().MarkHidden("no-simd-optimization")
 	_ = cmd.Flags().MarkHidden("no-pool-warmup")
 
@@ -79,6 +80,7 @@ func newClientCmd() *cobra.Command {
 		{"Network", []string{"address", "port", "stun-server", "tls-insecure", "discover", "discover-timeout"}},
 		{"Security", []string{"password"}},
 		{"Chat", []string{"nickname"}},
+		{"Recording", []string{"record-dir"}},
 		{"Config", []string{"config", "save-config"}},
 		{"Reconnect", []string{"max-reconnect", "auto-reconnect", "auto-reconnect-attempts"}},
 		{"Logging & debug", []string{"log-level", "log-file", "dry-run", "no-interactive"}},

@@ -26,6 +26,7 @@ type MultiCapturePipeline struct {
 	spectrum         *audio.SpectrumAnalyzer
 	levelMeter       *audio.LevelMeter
 	agcProcessors    map[uint32]*audio.AGCProcessor
+	recordingTap     func([]float32)
 }
 
 // MultiCapturePipelineConfig holds configuration for a multi-device capture pipeline.
@@ -42,6 +43,9 @@ type MultiCapturePipelineConfig struct {
 	// AGCProcessors maps deviceID → AGCProcessor for per-device AGC.
 	// Entries may be nil; only devices with AGC enabled have processors.
 	AGCProcessors map[uint32]*audio.AGCProcessor
+
+	// RecordingTap is called with each mixed PCM frame for non-conference recording. May be nil.
+	RecordingTap func([]float32)
 }
 
 // NewMultiCapturePipeline creates a pipeline that captures from multiple devices.
@@ -66,6 +70,7 @@ func NewMultiCapturePipeline(cfg MultiCapturePipelineConfig, logger *slog.Logger
 		spectrum:      cfg.Spectrum,
 		levelMeter:    cfg.LevelMeter,
 		agcProcessors: cfg.AGCProcessors,
+		recordingTap:  cfg.RecordingTap,
 	}
 	p.configureEncoder = p.defaultConfigureEncoder
 	return p
@@ -110,6 +115,7 @@ func (p *MultiCapturePipeline) runSingle(ctx context.Context, sendCh chan<- []by
 		Spectrum:          p.spectrum,
 		LevelMeter:        p.levelMeter,
 		AGC:               agc,
+		RecordingTap:      p.recordingTap,
 	}, p.logger)
 	pipeline.configureEncoder = p.configureEncoder
 	return pipeline.Run(ctx, sendCh)
@@ -175,6 +181,11 @@ func (p *MultiCapturePipeline) runMulti(ctx context.Context, sendCh chan<- []byt
 			}
 			if p.levelMeter != nil {
 				p.levelMeter.Feed(mixed)
+			}
+			if p.recordingTap != nil {
+				tapCopy := make([]float32, len(mixed))
+				copy(tapCopy, mixed)
+				p.recordingTap(tapCopy)
 			}
 			frames := acc.Write(mixed)
 			p.mixer.PutMixedFrame(mixed)

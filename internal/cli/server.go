@@ -88,13 +88,14 @@ func newServerCmd() *cobra.Command {
 	_ = cmd.Flags().MarkHidden("no-pool-warmup")
 	cmd.Flags().Bool("server-muted", false, i18n.T("cli_flag_server_muted"))
 	cmd.Flags().String("record", "", i18n.T("cli_flag_record"))
+	cmd.Flags().String("record-dir", "", i18n.T("cli_flag_record_dir"))
 	cmd.Flags().Bool("hwid-required", false, i18n.T("cli_flag_hwid_required"))
 
 	applyGroupedUsage(cmd, []flagGroup{
 		{"Audio", []string{"device", "device-name", "capture-device", "playback-device", "sample-rate", "channels", "virtual-mic", "loopback", "aec", "audio-buffer-frames"}},
 		{"Network", []string{"port", "stun-server", "tls-cert", "tls-key", "no-discovery", "server-name", "rate-limit"}},
 		{"Security", []string{"password", "max-auth-failures", "ban-file", "hwid-required"}},
-		{"Conference", []string{"conference", "max-clients", "server-muted", "record"}},
+		{"Conference", []string{"conference", "max-clients", "server-muted", "record", "record-dir"}},
 		{"Mode", []string{"reverse", "duplex"}},
 		{"Config", []string{"config", "save-config"}},
 		{"Logging & debug", []string{"log-level", "log-file", "dry-run", "no-interactive", "max-reconnect"}},

@@ -553,7 +553,7 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 		// Simple path: decoder → JitterBuffer → player. Server-mode
 		// has no single "incoming stream" to mute via MuteController,
 		// so pass nil.
-		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone, nil)
+		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone, nil, nil)
 		return
 	}
 
@@ -621,7 +621,7 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 		}
 	}()
 
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil)
 	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone)
 
 	s.logger.Info("Jitter buffer enabled (intercept path)",
@@ -990,6 +990,19 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		captureLevel = s.levelMeter
 	}
 
+	// Recording tap for non-conference mode: feed captured PCM to the recorder.
+	var recTap func([]float32)
+	if s.conference == nil {
+		recTap = func(samples []float32) {
+			s.recorderMu.Lock()
+			rec := s.recorder
+			s.recorderMu.Unlock()
+			if rec != nil && rec.IsActive() {
+				_ = rec.WriteMix(samples) //nolint:errcheck
+			}
+		}
+	}
+
 	// Multi-device capture: use MultiCapturePipeline
 	captureDevices := s.cfg.CaptureDevices()
 	if len(captureDevices) > 1 {
@@ -1002,6 +1015,7 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			Spectrum:      captureSpectrum,
 			LevelMeter:    captureLevel,
 			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
+			RecordingTap:  recTap,
 		}, s.logger)
 		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
 		return pipeline.Run(ctx, sendCh)
@@ -1040,6 +1054,7 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		AGC:                  agcProc,
 		Spectrum:             captureSpectrum,
 		LevelMeter:           captureLevel,
+		RecordingTap:         recTap,
 	}, s.logger)
 
 	go HandleDeviceCommands(ctx, s.deviceCmdCh, nil, agcMap, s.logger)

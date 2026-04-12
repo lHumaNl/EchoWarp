@@ -149,9 +149,15 @@ func bridgeConferenceStats(ctx context.Context, src <-chan app.ConferenceStatsPa
 			}
 			select {
 			case dst <- tui.ConferenceStatsPayload{
-				States:             p.States,
-				Recording:          p.Recording,
-				PausedParticipants: p.PausedParticipants,
+				States:              p.States,
+				Recording:           p.Recording,
+				PausedParticipants:  p.PausedParticipants,
+				RecordingStopped:    p.RecordingStopped,
+				RecordingStopDur:    p.RecordingStopDur,
+				RecordingStopSize:   p.RecordingStopSize,
+				RecordingStopFiles:  p.RecordingStopFiles,
+				RecordingStopDir:    p.RecordingStopDir,
+				RecordingStopReason: p.RecordingStopReason,
 			}:
 			case <-ctx.Done():
 				return

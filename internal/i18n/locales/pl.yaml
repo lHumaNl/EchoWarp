@@ -427,6 +427,7 @@ cli_flag_aec: "Włącz akustyczne usuwanie echa (dupleks)"
 cli_flag_conference: "Alias dla --mode=conference"
 cli_flag_server_muted: "Serwer nie przesyła audio w trybie konferencji"
 cli_flag_record: "Rozpocznij nagrywanie od razu: mix, tracks lub both (tryb konferencji)"
+cli_flag_record_dir: "Override recording output directory (default: ~/Documents/EchoWarp_records)"
 cli_flag_hwid_required: "Wymagaj od klientów hardware ID (dla banów)"
 
 # CLI — flag descriptions (client)

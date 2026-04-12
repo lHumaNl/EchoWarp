@@ -427,6 +427,7 @@ cli_flag_aec: "Akustische Echounterdrückung aktivieren (Duplex)"
 cli_flag_conference: "Alias für --mode=conference"
 cli_flag_server_muted: "Server sendet kein Audio im Konferenzmodus"
 cli_flag_record: "Aufnahme sofort starten: mix, tracks oder both (Konferenzmodus)"
+cli_flag_record_dir: "Override recording output directory (default: ~/Documents/EchoWarp_records)"
 cli_flag_hwid_required: "Clients müssen Hardware-ID senden (für Banns)"
 
 # CLI — flag descriptions (client)
