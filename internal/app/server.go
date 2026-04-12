@@ -240,6 +240,13 @@ func (s *ServerApp) DeviceCommandChannel() <-chan DeviceCommand {
 	return s.deviceCmdCh
 }
 
+// DeviceCommandSendChannel returns the send-end of the internal device command
+// channel. The CLI bridge goroutine writes converted TUI commands here so they
+// reach the same HandleDeviceCommands consumer as API-originated commands.
+func (s *ServerApp) DeviceCommandSendChannel() chan<- DeviceCommand {
+	return s.deviceCmdCh
+}
+
 // WithStatsChannels configures optional channels for reporting statistics to TUI.
 func (s *ServerApp) WithStatsChannels(statsCh chan<- transport.ConnectionStats, errCh chan<- error) *ServerApp {
 	s.statsCh = statsCh

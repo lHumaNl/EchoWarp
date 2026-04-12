@@ -30,9 +30,8 @@ const deviceCommandEnqueueTimeout = 100 * time.Millisecond
 //     absolute Volume field carried on the command)
 //
 // TODO(task-013): extend internal DeviceCommand with absolute mute/volume
-// fields and update HandleDeviceCommands to honor them; until then, API
-// calls reach the channel but the current drainDeviceCommands consumer only
-// logs them. See .tasks/013-volume-mute-controls.md.
+// fields and update HandleDeviceCommands to honor them. See
+// .tasks/013-volume-mute-controls.md.
 func translateDeviceCommand(cmd echowarp.DeviceCommand) DeviceCommand {
 	internal := DeviceCommand{
 		DeviceID: uint32(cmd.DeviceID),
@@ -43,8 +42,7 @@ func translateDeviceCommand(cmd echowarp.DeviceCommand) DeviceCommand {
 	case echowarp.DeviceActionSetVolume:
 		// Volume up/down are both toggles; the absolute value is not yet
 		// consumed by the internal pipeline. We deliberately pick VolumeUp
-		// as a placeholder so the command is still uniquely identifiable
-		// in log output (see drainDeviceCommands).
+		// as a placeholder so the command is still uniquely identifiable.
 		internal.Action = DeviceVolumeUp
 	}
 	return internal

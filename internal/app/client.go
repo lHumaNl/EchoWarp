@@ -199,6 +199,13 @@ func (c *ClientApp) DeviceCommandChannel() <-chan DeviceCommand {
 	return c.deviceCmdCh
 }
 
+// DeviceCommandSendChannel returns the send-end of the internal device command
+// channel. The CLI bridge goroutine writes converted TUI commands here so they
+// reach the same HandleDeviceCommands consumer as API-originated commands.
+func (c *ClientApp) DeviceCommandSendChannel() chan<- DeviceCommand {
+	return c.deviceCmdCh
+}
+
 // WithStatsChannels configures optional channels for reporting statistics to TUI.
 func (c *ClientApp) WithStatsChannels(statsCh chan<- transport.ConnectionStats, errCh chan<- error) *ClientApp {
 	c.statsCh = statsCh
@@ -1212,6 +1219,7 @@ func (c *ClientApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			LevelMeter:    captureLevel,
 			AGCProcessors: buildAGCProcessors(captureDevices, c.cfg.SampleRate),
 		}, c.logger)
+		go HandleDeviceCommands(ctx, c.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), c.logger)
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1249,5 +1257,6 @@ func (c *ClientApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		LevelMeter:           captureLevel,
 	}, c.logger)
 
+	go HandleDeviceCommands(ctx, c.deviceCmdCh, nil, agcMap, c.logger)
 	return pipeline.Run(ctx, sendCh)
 }

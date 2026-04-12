@@ -562,6 +562,7 @@ func (m Model) viewStreaming() string {
 		Paused:          m.paused,
 		Reverse:         m.config.Reverse,
 		Duplex:          m.config.Duplex,
+		IsServer:        m.config.Mode == config.ModeServer,
 		Audio:           views.AudioInfo{Codec: "Opus", SampleRate: m.config.SampleRate, Channels: m.config.Channels},
 		Logs:            m.logs,
 		LogsVisible:     m.logsVisible,

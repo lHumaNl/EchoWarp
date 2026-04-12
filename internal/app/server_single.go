@@ -1003,6 +1003,7 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			LevelMeter:    captureLevel,
 			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
 		}, s.logger)
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1041,5 +1042,6 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		LevelMeter:           captureLevel,
 	}, s.logger)
 
+	go HandleDeviceCommands(ctx, s.deviceCmdCh, nil, agcMap, s.logger)
 	return pipeline.Run(ctx, sendCh)
 }
