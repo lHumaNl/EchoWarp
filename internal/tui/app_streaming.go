@@ -15,6 +15,19 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
+// sendDeviceCmd sends a device command without blocking. If the channel is
+// full or nil the command is silently dropped — this prevents deadlocking the
+// Bubble Tea event loop which runs on the main goroutine.
+func (m Model) sendDeviceCmd(cmd DeviceCommand) {
+	if m.deviceCmdCh == nil {
+		return
+	}
+	select {
+	case m.deviceCmdCh <- cmd:
+	default:
+	}
+}
+
 func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -142,32 +155,12 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 			}
 		}
 
-		// Device control keys (only when devices panel is available)
-		if m.deviceCmdCh != nil && len(m.deviceStates) > 0 {
-			switch {
-			case msg.Type == tea.KeyCtrlG:
-				m.globalMuted = !m.globalMuted
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceGlobalMute}
-				return m, nil
-			case msg.String() == "+" || msg.String() == "=":
-				dev := m.deviceStates[m.selectedDevice2]
-				dev.Volume = math.Round((dev.Volume+0.1)*10) / 10
-				if dev.Volume > 1.5 {
-					dev.Volume = 1.5
-				}
-				m.deviceStates[m.selectedDevice2] = dev
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeUp, DeviceID: dev.ID}
-				return m, nil
-			case msg.String() == "-":
-				dev := m.deviceStates[m.selectedDevice2]
-				dev.Volume = math.Round((dev.Volume-0.1)*10) / 10
-				if dev.Volume < 0 {
-					dev.Volume = 0
-				}
-				m.deviceStates[m.selectedDevice2] = dev
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeDown, DeviceID: dev.ID}
-				return m, nil
-			}
+		// Device volume/mute controls are only available via Ctrl+D overlay.
+		// Global mute (Ctrl+G) is allowed from the main streaming screen.
+		if msg.Type == tea.KeyCtrlG && m.deviceCmdCh != nil {
+			m.globalMuted = !m.globalMuted
+			m.sendDeviceCmd(DeviceCommand{Action: DeviceGlobalMute})
+			return m, nil
 		}
 
 	case StatsUpdateMsg:
@@ -1237,7 +1230,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceToggleMute, DeviceID: ds.ID}
+				m.sendDeviceCmd(DeviceCommand{Action: DeviceToggleMute, DeviceID: ds.ID})
 			}
 		}
 		return m, nil
@@ -1252,7 +1245,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceToggleAGC, DeviceID: ds.ID}
+				m.sendDeviceCmd(DeviceCommand{Action: DeviceToggleAGC, DeviceID: ds.ID})
 			}
 		}
 		return m, nil
@@ -1278,9 +1271,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeUp, DeviceID: ds.ID}
-			}
+			m.sendDeviceCmd(DeviceCommand{Action: DeviceVolumeUp, DeviceID: ds.ID})
 			return m, nil
 		}
 		if key == "-" && m.deviceOverlayIndex < len(currentList) {
@@ -1294,9 +1285,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeDown, DeviceID: ds.ID}
-			}
+			m.sendDeviceCmd(DeviceCommand{Action: DeviceVolumeDown, DeviceID: ds.ID})
 			return m, nil
 		}
 	}
