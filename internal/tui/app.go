@@ -150,35 +150,11 @@ type Model struct {
 	popupClientID      string
 	popupClientNick    string
 
-	// Kick overlay
-	kickClientID      string
-	kickClientNick    string
-	kickReasons       []string
-	kickRecentStart   int
-	kickCustomStart   int
-	kickSelectedIndex int
-	kickCustomText    string
-	kickCustomEditing bool
-	kickFocusButton   int // 0=list, 1=[Kick], 2=[Cancel]
+	// Kick overlay state (grouped in sub-struct).
+	kickOverlay KickOverlayState
 
-	// Ban overlay
-	banClientID        string
-	banClientNick      string
-	banClientIP        string
-	banClientHWID      string
-	banCriteriaIP      bool
-	banCriteriaNick    bool
-	banCriteriaHWID    bool
-	banFocusSection    int // 0=criteria, 1=reasons, 2=buttons
-	banCriteriaIndex   int // highlighted criterion (0=IP, 1=Nick, 2=HWID)
-	banReasons         []string
-	banRecentStart     int
-	banCustomStart     int
-	banSelectedReason  int
-	banCustomText      string
-	banCustomEditing   bool
-	banButtonFocus     int // 0=[Confirm], 1=[Cancel]
-	banValidationError string
+	// Ban overlay state (grouped in sub-struct).
+	banOverlay BanOverlayState
 
 	// Device controls (per-device mute/volume in streaming screen)
 	deviceCmdCh     chan<- DeviceCommand

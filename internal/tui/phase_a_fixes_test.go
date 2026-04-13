@@ -184,8 +184,8 @@ func TestBug7_Kick_SetsFlash(t *testing.T) {
 	defer func() { reasonsFilePathFunc = origFunc }()
 
 	m := makeStreamingModel()
-	m.kickClientID = "client-1"
-	m.kickClientNick = "Alice"
+	m.kickOverlay.ClientID = "client-1"
+	m.kickOverlay.ClientNick = "Alice"
 
 	result, _ := m.executeKick("spam")
 	got := result.(Model)
@@ -200,9 +200,9 @@ func TestBug7_Ban_SetsFlash(t *testing.T) {
 	defer func() { reasonsFilePathFunc = origFunc }()
 
 	m := makeStreamingModel()
-	m.banClientID = "client-1"
-	m.banClientNick = "Alice"
-	m.banCriteriaIP = true // at least one criterion required
+	m.banOverlay.ClientID = "client-1"
+	m.banOverlay.ClientNick = "Alice"
+	m.banOverlay.CriteriaIP = true // at least one criterion required
 
 	result, _ := m.executeBan("spam")
 	got := result.(Model)

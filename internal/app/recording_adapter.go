@@ -98,7 +98,7 @@ func (s *ServerApp) StartRecording(mode echowarp.RecordingMode) error {
 	}
 	s.recorderMu.Unlock()
 
-	if err := s.startRecordingInternal(audioMode); err != nil {
+	if err := s.startRecordingInternal(audioMode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
 		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to start recording")
 	}
 	s.recState.mu.Lock()
@@ -202,7 +202,7 @@ func (c *ClientApp) StartRecording(mode echowarp.RecordingMode) error {
 	audioMode := recordingModeToAudio(mode)
 	// Delegate to the existing internal helper so the directory
 	// resolution (Documents/EchoWarp_records/<ts>) stays in one place.
-	if err := c.startRecordingInternal(audioMode); err != nil {
+	if err := c.startRecordingInternal(audioMode, c.cfg.SampleRate, c.cfg.EffectiveRecordDir()); err != nil {
 		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to start recording")
 	}
 
