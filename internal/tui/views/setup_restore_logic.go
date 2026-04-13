@@ -366,26 +366,30 @@ func (m *SetupModel) loadPresetForMode(mode string) {
 	if mp.MaxClients == 0 {
 		mp.MaxClients = d.MaxClients
 	}
-	// Reset password/tls/cert/key to blank so the preset values fully drive the UI
-	// when switching modes. If the preset has nothing, they come out blank (defaults).
-	setField := func(fields []SetupField, key, value string) {
+	// Reset fields to preset values. Use SourceDefault when the value matches
+	// the mode default so the UI doesn't show a ✓ or * marker on unchanged fields.
+	setField := func(fields []SetupField, key, value, defaultValue string) {
 		for i := range fields {
 			if fields[i].Key == key {
-				fields[i].SetValue(value, SourceConfig)
+				src := SourceConfig
+				if value == defaultValue {
+					src = SourceDefault
+				}
+				fields[i].SetValue(value, src)
 				return
 			}
 		}
 	}
-	setField(m.Fields, "port", fmt.Sprintf("%d", mp.Port))
-	setField(m.Fields, "password", mp.Password)
-	setField(m.Fields, "max_clients", fmt.Sprintf("%d", mp.MaxClients))
+	setField(m.Fields, "port", fmt.Sprintf("%d", mp.Port), fmt.Sprintf("%d", d.Port))
+	setField(m.Fields, "password", mp.Password, "")
+	setField(m.Fields, "max_clients", fmt.Sprintf("%d", mp.MaxClients), fmt.Sprintf("%d", d.MaxClients))
 	tlsVal := "off"
 	if mp.TLS {
 		tlsVal = "on"
 	}
-	setField(m.AdvancedFields, "tls", tlsVal)
-	setField(m.AdvancedFields, "tls_cert", mp.TLSCert)
-	setField(m.AdvancedFields, "tls_key", mp.TLSKey)
+	setField(m.AdvancedFields, "tls", tlsVal, "off")
+	setField(m.AdvancedFields, "tls_cert", mp.TLSCert, "")
+	setField(m.AdvancedFields, "tls_key", mp.TLSKey, "")
 
 	m.applyFieldDependencies()
 }
