@@ -128,6 +128,14 @@ func applyPlaybackGainMute(frame []float32, gainCtl *DeviceGainControl, muteFlag
 		gain := gainCtl.Gain()
 		if gain != 1.0 {
 			audio.MixGain(frame, gain)
+			// Soft-clip only when amplifying (gain > 1.0). Without this,
+			// samples that exceed ±1.0 are hard-clipped by the player,
+			// giving harsh digital distortion. tanh gives smooth analog-
+			// style saturation instead, so 150% actually sounds louder
+			// rather than just noisier. Uses SIMD (AVX/SSE/NEON/Pure Go).
+			if gain > 1.0 {
+				audio.MixTanh(frame)
+			}
 		}
 	}
 }

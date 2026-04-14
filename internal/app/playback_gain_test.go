@@ -29,12 +29,20 @@ func TestApplyPlaybackGainMute(t *testing.T) {
 	assert.InDelta(t, 0.25, frame[2], 0.001)
 	assert.InDelta(t, -0.25, frame[3], 0.001)
 
-	// Gain 1.5 — amplified
+	// Gain 1.5 — amplified + soft-clipped with tanh.
+	// Small signal (0.4 × 1.5 = 0.6) -> tanh(0.6) ≈ 0.537 (gentle curve).
+	// Loud signal (1.0 × 1.5 = 1.5) -> tanh(1.5) ≈ 0.905 (saturated, never >1).
 	gain2 := NewDeviceGainControl(1.5)
-	frame = []float32{0.4, -0.4}
+	frame = []float32{0.4, -0.4, 1.0, -1.0}
 	applyPlaybackGainMute(frame, gain2, nil)
-	assert.InDelta(t, 0.6, frame[0], 0.001)
-	assert.InDelta(t, -0.6, frame[1], 0.001)
+	// Verify soft-clip: all samples must be within [-1, +1] (no hard clip).
+	for i, s := range frame {
+		assert.Less(t, float64(s), 1.0, "sample %d should be < 1.0", i)
+		assert.Greater(t, float64(s), -1.0, "sample %d should be > -1.0", i)
+	}
+	// Verify amplification: 0.4 × 1.5 = 0.6, tanh(0.6) ≈ 0.537 — still louder than 0.4.
+	assert.Greater(t, float64(frame[0]), 0.4, "amplified sample should be louder than input")
+	assert.Less(t, float64(frame[1]), -0.4, "amplified negative sample should be louder")
 
 	// Gain mute takes precedence over gain value
 	gain3 := NewDeviceGainControl(0.8)

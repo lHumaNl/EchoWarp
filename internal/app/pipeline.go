@@ -147,6 +147,10 @@ func (p *CapturePipeline) Run(ctx context.Context, sendCh chan<- []byte) error {
 					}
 				} else if gain := p.cfg.GainControl.Gain(); gain != 1.0 {
 					audio.MixGain(samples, gain)
+					// Soft-clip when amplifying to avoid hard-clip distortion.
+					if gain > 1.0 {
+						audio.MixTanh(samples)
+					}
 				}
 			}
 			// Recording tap: feed post-AEC/AGC PCM to the recorder.
