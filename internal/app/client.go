@@ -813,7 +813,25 @@ func (c *ClientApp) setupReceiveAudioPipeline(ctx context.Context, peer transpor
 			_ = rec.WriteMix(samples) //nolint:errcheck
 		}
 	}
-	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap)
+	// Build gain control for the playback device so Ctrl+D volume/mute
+	// affects actual audio output. Initial volume comes from the first
+	// playback device entry (TUI single-device path).
+	var initialVol float32 = 1.0
+	playbackDevs := c.cfg.PlaybackDevices()
+	if len(playbackDevs) == 1 {
+		initialVol = float32(playbackDevs[0].Volume)
+	}
+	if initialVol <= 0 {
+		initialVol = 1.0
+	}
+	gainCtl := NewDeviceGainControl(initialVol)
+	// Start device command handler only if not already running (duplex mode
+	// starts it in runCapturePipeline). In normal (receive-only) mode, this
+	// is the only place it gets wired.
+	if !c.cfg.Duplex && !c.cfg.Reverse {
+		go HandleDeviceCommands(ctx, c.deviceCmdCh, gainCtl, nil, c.logger)
+	}
+	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap, gainCtl)
 	return nil
 }
 

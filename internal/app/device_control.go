@@ -118,7 +118,7 @@ func HandleDeviceCommands(ctx context.Context, cmdCh <-chan DeviceCommand, ctrl 
 					vol = 1.5
 				}
 				ctrl.SetSourceVolume(sourceID, vol)
-				logger.Info("Device volume up", "device", cmd.DeviceID, "volume", vol)
+				logger.Info("Device volume up", "device", cmd.DeviceID, "volume", fmt.Sprintf("%.1f", vol))
 			case DeviceVolumeDown:
 				if ctrl == nil {
 					continue
@@ -129,7 +129,7 @@ func HandleDeviceCommands(ctx context.Context, cmdCh <-chan DeviceCommand, ctrl 
 					vol = 0
 				}
 				ctrl.SetSourceVolume(sourceID, vol)
-				logger.Info("Device volume down", "device", cmd.DeviceID, "volume", vol)
+				logger.Info("Device volume down", "device", cmd.DeviceID, "volume", fmt.Sprintf("%.1f", vol))
 			case DeviceToggleAGC:
 				if agcProcessors != nil {
 					if agcProc, ok := agcProcessors[cmd.DeviceID]; ok {

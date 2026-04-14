@@ -113,7 +113,26 @@ func decodeAudioStreamToJitter(logger *slog.Logger, inCh <-chan []byte, dec *aud
 // the pump substitutes a silence frame of identical length so the downstream
 // player keeps its timing (bypassing it entirely would cause underruns and
 // audible pops on unmute).
-func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32)) {
+// applyPlaybackGainMute applies the gain control and mute flag in-place to the
+// given PCM frame. Mute takes precedence over gain. If both are nil/unset, the
+// frame is untouched.
+func applyPlaybackGainMute(frame []float32, gainCtl *DeviceGainControl, muteFlag *atomic.Bool) {
+	muted := (muteFlag != nil && muteFlag.Load()) || (gainCtl != nil && gainCtl.IsMuted())
+	if muted {
+		for i := range frame {
+			frame[i] = 0
+		}
+		return
+	}
+	if gainCtl != nil {
+		gain := gainCtl.Gain()
+		if gain != 1.0 {
+			audio.MixGain(frame, gain)
+		}
+	}
+}
+
+func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl) {
 	defer close(playbackCh)
 
 	// Create a dedicated PLC decoder to generate concealment frames on underrun.
@@ -141,11 +160,7 @@ func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh 
 					copy(tapCopy, firstFrame)
 					recordingTap(tapCopy)
 				}
-				if muteFlag != nil && muteFlag.Load() {
-					for i := range firstFrame {
-						firstFrame[i] = 0
-					}
-				}
+				applyPlaybackGainMute(firstFrame, gainCtl, muteFlag)
 				select {
 				case playbackCh <- firstFrame:
 				case <-ctx.Done():
@@ -181,11 +196,7 @@ pumpLoop:
 					copy(tapCopy, frame)
 					recordingTap(tapCopy)
 				}
-				if muteFlag != nil && muteFlag.Load() {
-					for i := range frame {
-						frame[i] = 0
-					}
-				}
+				applyPlaybackGainMute(frame, gainCtl, muteFlag)
 				select {
 				case playbackCh <- frame:
 				case <-ctx.Done():
@@ -222,23 +233,15 @@ pumpLoop:
 					// won't be perfect. The PLC decoder generates smooth fade-out
 					// which is still much better than hard silence cuts.
 				}
-				// Recording tap: copy the un-muted frame to the recorder.
+				// Recording tap: copy the un-muted, pre-gain frame to the recorder.
 				if recordingTap != nil {
 					tapCopy := make([]float32, len(frame))
 					copy(tapCopy, frame)
 					recordingTap(tapCopy)
 				}
-				// Local mute: zero the frame samples in place so the
-				// player keeps its timing but nothing audible reaches
-				// the speaker. Done here rather than via a separate
-				// filter stage because the decoded frame is already a
-				// freshly-allocated slice owned by this goroutine, so
-				// in-place mutation is safe.
-				if muteFlag != nil && muteFlag.Load() {
-					for i := range frame {
-						frame[i] = 0
-					}
-				}
+				// Apply gain/mute in-place. Frame is a freshly-allocated
+				// slice owned by this goroutine, so in-place mutation is safe.
+				applyPlaybackGainMute(frame, gainCtl, muteFlag)
 				select {
 				case playbackCh <- frame:
 				default:
@@ -404,7 +407,7 @@ func mixLocalInput(ctx context.Context, logger *slog.Logger, sampleRate, channel
 // is set — this is how Node.SetMuted (MuteController) drops incoming audio
 // without tearing down the playback device. Pass nil for server-mode callers
 // where there is no single "incoming stream" to mute.
-func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool, recordingTap func([]float32)) {
+func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl) {
 	targetFrames := cfg.EffectiveAudioBufferFrames()
 	maxFrames := targetFrames * 3
 	if maxFrames < 10 {
@@ -422,7 +425,7 @@ func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.
 	doneCh := make(chan struct{})
 
 	setupAudioDecoderWithJitter(logger, peer, cfg.SampleRate, cfg.Channels, jb, spectrum, level, doneCh)
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap, gainCtl)
 	startAudioPlayer(ctx, logger, cfg, playbackCh, audioDone)
 
 	logger.Info("Jitter buffer enabled",
