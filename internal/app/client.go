@@ -825,13 +825,20 @@ func (c *ClientApp) setupReceiveAudioPipeline(ctx context.Context, peer transpor
 		initialVol = 1.0
 	}
 	gainCtl := NewDeviceGainControl(initialVol)
+	// Build AGC processors for playback devices so runtime Ctrl+D AGC toggle
+	// works. Processors default to DeviceEntry.AGC state from setup.
+	agcMap := buildAGCProcessors(playbackDevs, c.cfg.SampleRate)
+	var playbackAGC *audio.AGCProcessor
+	if len(playbackDevs) == 1 {
+		playbackAGC = agcMap[playbackDevs[0].ID]
+	}
 	// Start device command handler only if not already running (duplex mode
 	// starts it in runCapturePipeline). In normal (receive-only) mode, this
 	// is the only place it gets wired.
 	if !c.cfg.Duplex && !c.cfg.Reverse {
-		go HandleDeviceCommands(ctx, c.deviceCmdCh, gainCtl, nil, c.logger)
+		go HandleDeviceCommands(ctx, c.deviceCmdCh, gainCtl, agcMap, c.logger)
 	}
-	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap, gainCtl)
+	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap, gainCtl, playbackAGC)
 	return nil
 }
 

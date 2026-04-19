@@ -113,16 +113,23 @@ func decodeAudioStreamToJitter(logger *slog.Logger, inCh <-chan []byte, dec *aud
 // the pump substitutes a silence frame of identical length so the downstream
 // player keeps its timing (bypassing it entirely would cause underruns and
 // audible pops on unmute).
-// applyPlaybackGainMute applies the gain control and mute flag in-place to the
-// given PCM frame. Mute takes precedence over gain. If both are nil/unset, the
-// frame is untouched.
-func applyPlaybackGainMute(frame []float32, gainCtl *DeviceGainControl, muteFlag *atomic.Bool) {
+// applyPlaybackGainMute applies AGC, gain, and mute in-place to the PCM frame.
+// Order: AGC (normalize) -> gain -> soft-clip. Mute takes precedence over all.
+// Any of the parameters may be nil — skipped individually.
+func applyPlaybackGainMute(ctx context.Context, frame []float32, gainCtl *DeviceGainControl, muteFlag *atomic.Bool, agcProc *audio.AGCProcessor) {
 	muted := (muteFlag != nil && muteFlag.Load()) || (gainCtl != nil && gainCtl.IsMuted())
 	if muted {
 		for i := range frame {
 			frame[i] = 0
 		}
 		return
+	}
+	// AGC: normalize loudness before user gain. Process() is a no-op when
+	// the processor is disabled, so always calling it is safe.
+	if agcProc != nil {
+		if processed, err := agcProc.Process(ctx, frame); err == nil && len(processed) == len(frame) {
+			copy(frame, processed)
+		}
 	}
 	if gainCtl != nil {
 		gain := gainCtl.Gain()
@@ -140,7 +147,7 @@ func applyPlaybackGainMute(frame []float32, gainCtl *DeviceGainControl, muteFlag
 	}
 }
 
-func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl) {
+func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl, agcProc *audio.AGCProcessor) {
 	defer close(playbackCh)
 
 	// Create a dedicated PLC decoder to generate concealment frames on underrun.
@@ -168,7 +175,7 @@ func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh 
 					copy(tapCopy, firstFrame)
 					recordingTap(tapCopy)
 				}
-				applyPlaybackGainMute(firstFrame, gainCtl, muteFlag)
+				applyPlaybackGainMute(ctx, firstFrame, gainCtl, muteFlag, agcProc)
 				select {
 				case playbackCh <- firstFrame:
 				case <-ctx.Done():
@@ -204,7 +211,7 @@ pumpLoop:
 					copy(tapCopy, frame)
 					recordingTap(tapCopy)
 				}
-				applyPlaybackGainMute(frame, gainCtl, muteFlag)
+				applyPlaybackGainMute(ctx, frame, gainCtl, muteFlag, agcProc)
 				select {
 				case playbackCh <- frame:
 				case <-ctx.Done():
@@ -249,7 +256,7 @@ pumpLoop:
 				}
 				// Apply gain/mute in-place. Frame is a freshly-allocated
 				// slice owned by this goroutine, so in-place mutation is safe.
-				applyPlaybackGainMute(frame, gainCtl, muteFlag)
+				applyPlaybackGainMute(ctx, frame, gainCtl, muteFlag, agcProc)
 				select {
 				case playbackCh <- frame:
 				default:
@@ -415,7 +422,7 @@ func mixLocalInput(ctx context.Context, logger *slog.Logger, sampleRate, channel
 // is set — this is how Node.SetMuted (MuteController) drops incoming audio
 // without tearing down the playback device. Pass nil for server-mode callers
 // where there is no single "incoming stream" to mute.
-func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl) {
+func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl, agcProc *audio.AGCProcessor) {
 	targetFrames := cfg.EffectiveAudioBufferFrames()
 	maxFrames := targetFrames * 3
 	if maxFrames < 10 {
@@ -433,7 +440,7 @@ func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.
 	doneCh := make(chan struct{})
 
 	setupAudioDecoderWithJitter(logger, peer, cfg.SampleRate, cfg.Channels, jb, spectrum, level, doneCh)
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap, gainCtl)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap, gainCtl, agcProc)
 	startAudioPlayer(ctx, logger, cfg, playbackCh, audioDone)
 
 	logger.Info("Jitter buffer enabled",
@@ -475,19 +482,21 @@ func handleControlMsg(logger *slog.Logger, payload json.RawMessage, logFields ..
 	return ctrl.Action == "stop"
 }
 
-// buildAGCProcessors creates AGC processors for devices that have AGC enabled.
-// Returns nil if no devices have AGC enabled.
+// buildAGCProcessors creates AGC processors for all capture devices so runtime
+// Ctrl+D toggling can enable/disable AGC without restart. Initial enabled state
+// matches DeviceEntry.AGC from setup. Returns nil only if the devices slice is
+// empty (so callers can still check for absence of any processors).
 func buildAGCProcessors(devices []config.DeviceEntry, sampleRate uint32) map[uint32]*audio.AGCProcessor {
-	var result map[uint32]*audio.AGCProcessor
+	if len(devices) == 0 {
+		return nil
+	}
+	result := make(map[uint32]*audio.AGCProcessor, len(devices))
 	for _, dev := range devices {
-		if dev.AGC {
-			if result == nil {
-				result = make(map[uint32]*audio.AGCProcessor)
-			}
-			agcCfg := audio.DefaultAGCConfig()
-			agcCfg.SampleRate = sampleRate
-			result[dev.ID] = audio.NewAGCProcessor(agcCfg)
-		}
+		agcCfg := audio.DefaultAGCConfig()
+		agcCfg.SampleRate = sampleRate
+		proc := audio.NewAGCProcessor(agcCfg)
+		proc.SetEnabled(dev.AGC) // honor setup choice; can be toggled at runtime
+		result[dev.ID] = proc
 	}
 	return result
 }
