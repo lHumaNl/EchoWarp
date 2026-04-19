@@ -223,6 +223,27 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 			}
 			m.serverList.SetEntries(entries)
 			m.serverList.SetHasRecent(true)
+
+			// Apply LogLevel from the most recent server entry (recentServers
+			// is sorted by LastConnected desc) so user's last choice persists
+			// across restarts. Only when cfg.LogLevel is still at default.
+			if cfg.LogLevel == "" || cfg.LogLevel == "info" {
+				for _, rs := range recentServers {
+					if rs.LogLevel != "" {
+						m.cfg.LogLevel = rs.LogLevel
+						setField := func(fields []SetupField, key, value string) {
+							for i := range fields {
+								if fields[i].Key == key {
+									fields[i].SetValue(value, SourceConfig)
+									return
+								}
+							}
+						}
+						setField(m.AdvancedFields, "log_level", rs.LogLevel)
+						break
+					}
+				}
+			}
 		}
 	}
 

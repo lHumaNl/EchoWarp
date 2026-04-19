@@ -1198,7 +1198,10 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlD:
 		m.overlay = OverlayNone
-		return m, nil
+		// Persist any runtime volume/AGC adjustments back to the preset
+		// so the next launch restores what the user set here, not the
+		// stale setup-screen snapshot.
+		return m, persistRuntimeDeviceStateCmd(m.config, m.deviceStates)
 	case tea.KeyTab:
 		// Toggle between input and output sections.
 		if m.deviceOverlaySection == 0 && len(outputs) > 0 {

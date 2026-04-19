@@ -23,6 +23,7 @@ type ModePreset struct {
 	TLS        bool                  `json:"tls,omitempty"         yaml:"tls,omitempty"`
 	TLSCert    string                `json:"tls_cert,omitempty"    yaml:"tls_cert,omitempty"`
 	TLSKey     string                `json:"tls_key,omitempty"     yaml:"tls_key,omitempty"`
+	LogLevel   string                `json:"log_level,omitempty"   yaml:"log_level,omitempty"`
 }
 
 // ServerPresets is the top-level preset container. Each mode is a self-contained snapshot.
@@ -190,6 +191,9 @@ func Load() ServerPresets {
 		}
 		if newMp.TLSKey != "" {
 			existing.TLSKey = newMp.TLSKey
+		}
+		if newMp.LogLevel != "" {
+			existing.LogLevel = newMp.LogLevel
 		}
 		sp.Presets[mode] = existing
 	}

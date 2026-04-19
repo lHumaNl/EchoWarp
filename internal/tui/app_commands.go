@@ -249,6 +249,7 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 			ServerID:      serverID,
 			LastConnected: time.Now(),
 			Presets:       existingPresets,
+			LogLevel:      cfg.LogLevel,
 		})
 		_ = recent.Save(servers) //nolint:errcheck
 		return recentServerSavedMsg{}

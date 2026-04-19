@@ -63,6 +63,7 @@ type Server struct {
 	ServerID      string                  `json:"server_id,omitempty" yaml:"server_id,omitempty"` // Stable per-port UUID; empty for old entries.
 	LastConnected time.Time               `json:"last_connected" yaml:"last_connected"`
 	Presets       map[string]DevicePreset `json:"presets,omitempty" yaml:"presets,omitempty"`
+	LogLevel      string                  `json:"log_level,omitempty" yaml:"log_level,omitempty"`
 }
 
 // serverJSON is used for backward-compatible deserialization from legacy JSON.
@@ -74,6 +75,7 @@ type serverJSON struct {
 	ServerID      string                  `json:"server_id,omitempty"`
 	LastConnected time.Time               `json:"last_connected"`
 	Presets       map[string]DevicePreset `json:"presets,omitempty"`
+	LogLevel      string                  `json:"log_level,omitempty"`
 }
 
 // UnmarshalJSON provides backward compatibility: reads both "hostname" and legacy "nickname" fields.
@@ -91,6 +93,7 @@ func (s *Server) UnmarshalJSON(data []byte) error {
 	s.ServerID = raw.ServerID
 	s.LastConnected = raw.LastConnected
 	s.Presets = raw.Presets
+	s.LogLevel = raw.LogLevel
 	return nil
 }
 

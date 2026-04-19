@@ -746,57 +746,13 @@ func (c *ClientApp) setupSendAudioPipeline(ctx context.Context, peer transport.P
 
 // newPauseFilterCh creates a forwarding channel that drops audio frames when capturePaused is set.
 func (c *ClientApp) newPauseFilterCh(ctx context.Context, dst chan<- []byte) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if c.capturePaused.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, &c.capturePaused)
 }
 
 // newServerMuteIncomingFilterCh creates a forwarding channel that drops audio frames
 // when the server has muted incoming audio from this client.
 func (c *ClientApp) newServerMuteIncomingFilterCh(ctx context.Context, dst chan<- []byte) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if c.serverMutedIncoming.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, &c.serverMutedIncoming)
 }
 
 // setupReceiveAudioPipeline creates audio playback pipeline for normal mode (client receives).

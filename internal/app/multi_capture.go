@@ -183,9 +183,7 @@ func (p *MultiCapturePipeline) runMulti(ctx context.Context, sendCh chan<- []byt
 				p.levelMeter.Feed(mixed)
 			}
 			if p.recordingTap != nil {
-				tapCopy := make([]float32, len(mixed))
-				copy(tapCopy, mixed)
-				p.recordingTap(tapCopy)
+				p.recordingTap(mixed)
 			}
 			frames := acc.Write(mixed)
 			p.mixer.PutMixedFrame(mixed)

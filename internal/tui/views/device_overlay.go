@@ -125,8 +125,12 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 }
 
 func renderDeviceOverlayRow(d DeviceOverlayItem, selected bool) string {
+	// Treat 0% volume the same as explicit mute — both produce silence,
+	// so they should look identical to the user.
+	effectivelyMuted := d.Muted || d.Volume == 0
+
 	icon := "🔊"
-	if d.Muted {
+	if effectivelyMuted {
 		icon = "🔇"
 	}
 
@@ -141,7 +145,7 @@ func renderDeviceOverlayRow(d DeviceOverlayItem, selected bool) string {
 	// Volume bar + percentage
 	volBar := renderVolumeBar(d.Volume)
 	volPct := fmt.Sprintf("%3d%%", int(d.Volume*100))
-	if d.Muted {
+	if effectivelyMuted {
 		volBar = styles.Help.Render("░░░░░░░░░░")
 		volPct = styles.Help.Render(i18n.T("overlay_device_mute_label"))
 	}
