@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gen2brain/malgo"
 
@@ -25,6 +26,19 @@ type MalgoPlayer struct {
 	ctx     *malgo.AllocatedContext
 	ownsCtx bool
 	device  *malgo.Device
+
+	// silenceFills counts how many times the malgo callback could not read
+	// a full buffer's worth of samples from inCh and filled the remainder
+	// with silence. Each such event is typically heard as a pop/click.
+	// Diagnostic only; read via SilenceFills().
+	silenceFills atomic.Uint64
+}
+
+// SilenceFills returns the cumulative number of times the playback callback
+// zero-filled the hardware buffer due to empty input channel. Divide by
+// callback rate to estimate the rate of audible dropouts.
+func (p *MalgoPlayer) SilenceFills() uint64 {
+	return p.silenceFills.Load()
 }
 
 // PlayerOption configures a MalgoPlayer during creation.
@@ -120,6 +134,12 @@ func (p *MalgoPlayer) createDeviceConfig(deviceInfo *malgo.DeviceInfo) malgo.Dev
 	deviceConfig.Playback.DeviceID = deviceInfo.ID.Pointer()
 	deviceConfig.SampleRate = p.sampleRate
 	deviceConfig.Alsa.NoMMap = 1
+	// Align callback period with pump cadence (20 ms Opus frames). Without
+	// this, miniaudio picks a small default period (5–10 ms on CoreAudio)
+	// and each callback may split a pump frame boundary, causing the player
+	// to emit silence when inCh is briefly empty between pump ticks.
+	// 20 ms matches our frame size and significantly reduces silence-fills.
+	deviceConfig.PeriodSizeInMilliseconds = 20
 	return deviceConfig
 }
 
@@ -144,6 +164,7 @@ func (p *MalgoPlayer) createOnSendCallback(inCh <-chan []float32) func([]byte, [
 					for i := written * 4; i < len(pSample); i++ {
 						pSample[i] = 0
 					}
+					p.silenceFills.Add(1)
 					return
 				}
 			}

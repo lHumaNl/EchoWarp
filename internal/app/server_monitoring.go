@@ -10,22 +10,6 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
-// publishStats forwards a ConnectionStats snapshot to both the TUI statsCh
-// (if configured) and the API statsHook (if configured). Non-blocking for
-// the channel sink — the fallback drops the value when the TUI is not
-// draining, matching the original reportStats behavior.
-func (s *ServerApp) publishStats(stats transport.ConnectionStats) {
-	if s.statsCh != nil {
-		select {
-		case s.statsCh <- stats:
-		default:
-		}
-	}
-	if s.statsHook != nil {
-		s.statsHook(stats)
-	}
-}
-
 // reportStats periodically sends connection statistics to the TUI stats channel
 // and/or the API stats hook (whichever sinks are configured). Started
 // immediately when the signaling loop begins (before DC ready), so the TUI
@@ -47,14 +31,6 @@ func (s *ServerApp) reportStats(ctx context.Context, peer transport.PeerManager)
 			s.publishStats(peer.GetStats())
 		}
 	}
-}
-
-// sendDisconnected sends a final "disconnected" stats update to all sinks.
-func (s *ServerApp) sendDisconnected() {
-	if s.statsCh == nil && s.statsHook == nil {
-		return
-	}
-	s.publishStats(transport.ConnectionStats{State: "disconnected"})
 }
 
 // aggregateMultiStats folds per-client stats into a single ConnectionStats
@@ -386,7 +362,7 @@ func (s *ServerApp) processRecordingCommands(ctx context.Context) {
 						s.logger.Info("Recording started", "mode", cmd.Mode)
 					}
 				} else {
-					if err := s.startRecordingInternal(cmd.Mode); err != nil {
+					if err := s.startRecordingInternal(cmd.Mode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
 						s.logger.Error("Failed to start recording", "error", err)
 					} else {
 						s.logger.Info("Recording started", "mode", cmd.Mode)

@@ -448,85 +448,19 @@ func (s *ServerApp) processServerPauseSingle(ctx context.Context, peer transport
 // newServerPauseFilterCh creates a forwarding channel that drops audio frames when serverPaused is set.
 // Used to implement server-side pause of its own capture stream.
 func (s *ServerApp) newServerPauseFilterCh(ctx context.Context, dst chan<- []byte) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if s.serverPaused.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, &s.serverPaused)
 }
 
 // newMuteFilterCh creates a forwarding channel that drops audio frames when the given flag is set.
 // Used to implement server-side mute requested by the client (per-client in multi-client mode).
 func newMuteFilterCh(ctx context.Context, dst chan<- []byte, flag *atomic.Bool) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if flag.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, flag)
 }
 
 // newCombinedMuteFilterCh creates a forwarding channel that drops audio frames when
 // either flag1 or flag2 is true. Used for combining client-initiated and server-initiated mute.
 func newCombinedMuteFilterCh(ctx context.Context, dst chan<- []byte, flag1, flag2 *atomic.Bool) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if flag1.Load() || flag2.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newTwoFlagFilterCh(ctx, dst, flag1, flag2)
 }
 
 func (s *ServerApp) setupReverseAudio(ctx context.Context, peer transport.PeerManager, audioDone chan<- error) {
@@ -545,15 +479,41 @@ func (s *ServerApp) setupReverseAudioWithID(ctx context.Context, peer transport.
 // AEC reference feeding is also done here.
 // If muteIncomingFlag is non-nil and true, incoming frames are dropped before processing.
 func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.PeerManager, audioDone chan<- error, clientID string, muteIncomingFlag *atomic.Bool) {
+	// Build gain control for the server's playback device so Ctrl+D
+	// volume/mute in the TUI affects what the server plays. Initial
+	// volume comes from the single-device entry in PlaybackDevices().
+	var initialVol float32 = 1.0
+	playbackDevs := s.cfg.PlaybackDevices()
+	if len(playbackDevs) == 1 {
+		initialVol = float32(playbackDevs[0].Volume)
+	}
+	if initialVol <= 0 {
+		initialVol = 1.0
+	}
+	playbackGainCtl := NewDeviceGainControl(initialVol)
+	// AGC processors for playback (runtime toggle via Ctrl+D).
+	playbackAGCMap := buildAGCProcessors(playbackDevs, s.cfg.SampleRate)
+	var playbackAGC *audio.AGCProcessor
+	if len(playbackDevs) == 1 {
+		playbackAGC = playbackAGCMap[playbackDevs[0].ID]
+	}
+	// Start HandleDeviceCommands only in reverse-only mode. In duplex mode
+	// runCapturePipeline already spawned one for the capture device — starting
+	// another would race on the shared s.deviceCmdCh channel. This is a known
+	// limitation for duplex server: playback volume via Ctrl+D only works in
+	// reverse-only mode for now (tracked separately as a multi-device router
+	// refactor).
+	if !s.cfg.Duplex {
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, playbackGainCtl, playbackAGCMap, s.logger)
+	}
+
 	// If we need to intercept audio (AEC or conference or incoming mute), use channel-based decode
 	// with JitterBuffer between intercept and player.
 	needsIntercept := s.aec != nil || (s.conference != nil && clientID != "") || muteIncomingFlag != nil
 
 	if !needsIntercept {
-		// Simple path: decoder → JitterBuffer → player. Server-mode
-		// has no single "incoming stream" to mute via MuteController,
-		// so pass nil.
-		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone, nil, nil)
+		// Simple path: decoder → JitterBuffer → player.
+		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone, nil, nil, playbackGainCtl, playbackAGC)
 		return
 	}
 
@@ -621,8 +581,9 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 		}
 	}()
 
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil)
-	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone)
+	readyCh := make(chan struct{})
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil, playbackGainCtl, playbackAGC, readyCh)
+	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone, readyCh)
 
 	s.logger.Info("Jitter buffer enabled (intercept path)",
 		"target", targetFrames,
@@ -1017,7 +978,7 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
 			RecordingTap:  recTap,
 		}, s.logger)
-		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), nil, s.logger)
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1065,6 +1026,6 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		GainControl:          gainCtl,
 	}, s.logger)
 
-	go HandleDeviceCommands(ctx, s.deviceCmdCh, nil, agcMap, gainCtl, s.logger)
+	go HandleDeviceCommands(ctx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
 	return pipeline.Run(ctx, sendCh)
 }

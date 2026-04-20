@@ -87,7 +87,7 @@ func (m SetupModel) tryStart() (SetupModel, tea.Cmd) {
 				role = config.RoleCapture
 			}
 			finalCfg.Devices = append(finalCfg.Devices, config.DeviceEntry{
-				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: 1.0,
+				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: dev.Volume, AGC: dev.AGC,
 			})
 		}
 

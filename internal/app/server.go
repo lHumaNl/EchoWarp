@@ -43,9 +43,9 @@ type ServerApp struct {
 	clients    map[string]*multiClient
 	nextClient int
 
-	// TUI stats reporting channels (optional, nil if not using TUI).
-	statsCh chan<- transport.ConnectionStats
-	errCh   chan<- error
+	// Stats publishing (shared with ClientApp via mixin).
+	StatsMixin
+	errCh chan<- error
 
 	// Multi-client stats channel (optional, nil if not using TUI in multi-client mode).
 	multiStatsCh chan<- transport.MultiClientStats
@@ -82,17 +82,8 @@ type ServerApp struct {
 	// Recording command channel for receiving start/stop commands from TUI.
 	recordingCmdCh <-chan RecordingCommand
 
-	// Non-conference recording support (mirrors ClientApp).
-	recorder   *audio.ConferenceRecorder
-	recorderMu sync.Mutex
-
-	// recState tracks recording metadata (mode, start time, output
-	// directory) that the underlying audio.ConferenceRecorder does not
-	// expose directly. Populated by the daemon-API RecordingController
-	// adapter in recording_adapter.go and consumed by RecordingStatus
-	// / StopRecording. The struct carries its own mutex so callers
-	// that hold s.mu do not need to coordinate here.
-	recState recordingAdapterState
+	// Non-conference recording support (shared with ClientApp via mixin).
+	RecordingMixin
 
 	// discoveryState owns the on/off lifecycle of the mDNS publisher
 	// goroutine spawned by SetDiscoveryPublish (phase 5d). The state
@@ -146,13 +137,6 @@ type ServerApp struct {
 	// sessions stores session entries for reconnect support.
 	// Protected by mu (same mutex as clients).
 	sessions map[string]*sessionEntry
-
-	// statsHook is an optional callback invoked on every stats tick with the
-	// same ConnectionStats value that would be sent to statsCh. The daemon
-	// wires it to Node.UpdateStats so GET /api/v1/stats returns live numbers
-	// without requiring a TUI statsCh. Safe to leave nil; additive to the
-	// TUI path — both sinks receive the same values.
-	statsHook func(transport.ConnectionStats)
 
 	// onClientJoin / onClientLeave are optional callbacks invoked on every
 	// client register/unregister event in both single- and multi-client
@@ -477,24 +461,4 @@ func (s *ServerApp) Run(ctx context.Context) error {
 		}
 	}
 	return err
-}
-
-// startRecordingInternal starts non-conference server-side recording.
-func (s *ServerApp) startRecordingInternal(mode audio.RecordingMode) error {
-	s.recorderMu.Lock()
-	defer s.recorderMu.Unlock()
-	s.recorder = audio.NewConferenceRecorder(mode, s.cfg.SampleRate, 1)
-	return s.recorder.Start(s.cfg.EffectiveRecordDir())
-}
-
-// stopRecordingInternal stops non-conference server-side recording.
-func (s *ServerApp) stopRecordingInternal() (time.Duration, uint64, int, error) {
-	s.recorderMu.Lock()
-	defer s.recorderMu.Unlock()
-	if s.recorder == nil {
-		return 0, 0, 0, nil
-	}
-	dur, size, files, err := s.recorder.Stop()
-	s.recorder = nil
-	return dur, size, files, err
 }

@@ -85,132 +85,87 @@ func sendError(errCh chan<- error, err error, logger *slog.Logger) {
 	}
 }
 
-// bridgeParticipantCommands forwards TUI participant commands to app commands.
-// Exits when ctx is canceled or src is closed.
-func bridgeParticipantCommands(ctx context.Context, src <-chan tui.ParticipantCommand, dst chan<- app.ParticipantCommand) {
+// bridgeChanTransform forwards items from src to dst, applying a transform
+// function to each item. It closes dst when ctx is canceled or src is closed.
+// This generic replaces the 5 type-specific bridge functions that all had
+// identical select/forward structure.
+func bridgeChanTransform[S, D any](ctx context.Context, src <-chan S, dst chan<- D, transform func(S) D) {
 	defer close(dst)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case cmd, ok := <-src:
+		case item, ok := <-src:
 			if !ok {
 				return
 			}
 			select {
-			case dst <- app.ParticipantCommand{
-				Action:        app.ParticipantAction(cmd.Action),
-				ParticipantID: cmd.ParticipantID,
-			}:
+			case dst <- transform(item):
 			case <-ctx.Done():
 				return
 			}
 		}
 	}
+}
+
+// bridgeParticipantCommands forwards TUI participant commands to app commands.
+func bridgeParticipantCommands(ctx context.Context, src <-chan tui.ParticipantCommand, dst chan<- app.ParticipantCommand) {
+	bridgeChanTransform(ctx, src, dst, func(cmd tui.ParticipantCommand) app.ParticipantCommand {
+		return app.ParticipantCommand{
+			Action:        app.ParticipantAction(cmd.Action),
+			ParticipantID: cmd.ParticipantID,
+		}
+	})
 }
 
 // bridgeRecordingCommands forwards TUI recording commands to app commands.
-// Exits when ctx is canceled or src is closed.
 func bridgeRecordingCommands(ctx context.Context, src <-chan tui.RecordingCommand, dst chan<- app.RecordingCommand) {
-	defer close(dst)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case cmd, ok := <-src:
-			if !ok {
-				return
-			}
-			select {
-			case dst <- app.RecordingCommand{
-				Start:          cmd.Start,
-				Mode:           audio.RecordingMode(cmd.Mode),
-				LocalDeviceIDs: cmd.LocalDeviceIDs,
-				RemoteIDs:      cmd.RemoteIDs,
-			}:
-			case <-ctx.Done():
-				return
-			}
+	bridgeChanTransform(ctx, src, dst, func(cmd tui.RecordingCommand) app.RecordingCommand {
+		return app.RecordingCommand{
+			Start:          cmd.Start,
+			Mode:           audio.RecordingMode(cmd.Mode),
+			LocalDeviceIDs: cmd.LocalDeviceIDs,
+			RemoteIDs:      cmd.RemoteIDs,
 		}
-	}
+	})
 }
 
 // bridgeConferenceStats forwards app conference stats to the TUI channel.
-// Exits when ctx is canceled or src is closed.
 func bridgeConferenceStats(ctx context.Context, src <-chan app.ConferenceStatsPayload, dst chan<- tui.ConferenceStatsPayload) {
-	defer close(dst)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case p, ok := <-src:
-			if !ok {
-				return
-			}
-			select {
-			case dst <- tui.ConferenceStatsPayload{
-				States:              p.States,
-				Recording:           p.Recording,
-				PausedParticipants:  p.PausedParticipants,
-				RecordingStopped:    p.RecordingStopped,
-				RecordingStopDur:    p.RecordingStopDur,
-				RecordingStopSize:   p.RecordingStopSize,
-				RecordingStopFiles:  p.RecordingStopFiles,
-				RecordingStopDir:    p.RecordingStopDir,
-				RecordingStopReason: p.RecordingStopReason,
-			}:
-			case <-ctx.Done():
-				return
-			}
+	bridgeChanTransform(ctx, src, dst, func(p app.ConferenceStatsPayload) tui.ConferenceStatsPayload {
+		return tui.ConferenceStatsPayload{
+			States:              p.States,
+			Recording:           p.Recording,
+			PausedParticipants:  p.PausedParticipants,
+			RecordingStopped:    p.RecordingStopped,
+			RecordingStopDur:    p.RecordingStopDur,
+			RecordingStopSize:   p.RecordingStopSize,
+			RecordingStopFiles:  p.RecordingStopFiles,
+			RecordingStopDir:    p.RecordingStopDir,
+			RecordingStopReason: p.RecordingStopReason,
 		}
-	}
+	})
 }
 
 // bridgeClientCommands forwards TUI client commands to app commands.
-// Exits when ctx is canceled or src is closed.
 func bridgeClientCommands(ctx context.Context, src <-chan tui.ClientCommand, dst chan<- app.ClientCommand) {
-	defer close(dst)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case cmd, ok := <-src:
-			if !ok {
-				return
-			}
-			select {
-			case dst <- app.ClientCommand{
-				Action:      app.ClientAction(cmd.Action),
-				ClientID:    cmd.ClientID,
-				IP:          cmd.IP,
-				Reason:      cmd.Reason,
-				BanCriteria: cmd.BanCriteria,
-			}:
-			case <-ctx.Done():
-				return
-			}
+	bridgeChanTransform(ctx, src, dst, func(cmd tui.ClientCommand) app.ClientCommand {
+		return app.ClientCommand{
+			Action:      app.ClientAction(cmd.Action),
+			ClientID:    cmd.ClientID,
+			IP:          cmd.IP,
+			Reason:      cmd.Reason,
+			BanCriteria: cmd.BanCriteria,
 		}
-	}
+	})
 }
 
 // bridgeDeviceCommands forwards TUI device commands to the app's internal device
-// command channel. Exits when ctx is canceled or src is closed.
+// command channel. Note: uses bridgeChanTransform which closes dst on exit.
 func bridgeDeviceCommands(ctx context.Context, src <-chan tui.DeviceCommand, dst chan<- app.DeviceCommand) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case cmd, ok := <-src:
-			if !ok {
-				return
-			}
-			select {
-			case dst <- app.DeviceCommand{Action: app.DeviceAction(cmd.Action), DeviceID: cmd.DeviceID}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}
+	bridgeChanTransform(ctx, src, dst, func(cmd tui.DeviceCommand) app.DeviceCommand {
+		return app.DeviceCommand{Action: app.DeviceAction(cmd.Action), DeviceID: cmd.DeviceID}
+	})
 }
 
 // injectVirtualMicDevice detects a virtual audio device and appends it to cfg.Devices

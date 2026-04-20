@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
 )
@@ -90,7 +91,7 @@ func (s *ServerApp) SetDiscoveryPublish(enabled bool) error {
 			s.discoveryState.mu.Unlock()
 			return nil
 		}
-		serverName, _ := os.Hostname()
+		serverName, _ := os.Hostname() //nolint:errcheck // hostname failures are non-fatal
 		txt := discovery.BuildTXTRecords(
 			"2.0.0",
 			serverName,
@@ -99,7 +100,7 @@ func (s *ServerApp) SetDiscoveryPublish(enabled bool) error {
 			0,
 			s.cfg.MaxClients,
 			s.cfg.AudioMode(),
-			"", // server_id left empty for daemon path — matches setupDiscovery
+			config.ServerID(s.cfg.Port),
 		)
 		pub, err := discovery.NewPublisher(serverName, s.cfg.Port, txt)
 		if err != nil {

@@ -81,6 +81,10 @@ func decodeAudioStream(logger *slog.Logger, inCh <-chan []byte, dec *audio.OpusD
 }
 
 // decodeAudioStreamToJitter decodes opus audio and writes frames into a JitterBuffer.
+// The decoder returns a reused internal buffer; spectrum/level Feed methods and
+// jb.Write are all synchronous and either don't retain the slice (Feed) or make
+// their own pooled copy (jb.Write), so passing `pcm` directly avoids an extra
+// 4KB allocation per frame (~200 KB/sec of GC pressure at 48kHz/20ms frames).
 func decodeAudioStreamToJitter(logger *slog.Logger, inCh <-chan []byte, dec *audio.OpusDecoder, jb *audio.JitterBuffer, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter) {
 	for data := range inCh {
 		metrics.AudioBytesRecv.Add(float64(len(data)))
@@ -89,15 +93,13 @@ func decodeAudioStreamToJitter(logger *slog.Logger, inCh <-chan []byte, dec *aud
 			logger.Warn("Opus decode error", "error", err)
 			continue
 		}
-		pcmCopy := make([]float32, len(pcm))
-		copy(pcmCopy, pcm)
 		if spectrum != nil {
-			spectrum.Feed(pcmCopy)
+			spectrum.Feed(pcm)
 		}
 		if level != nil {
-			level.Feed(pcmCopy)
+			level.Feed(pcm)
 		}
-		jb.Write(pcmCopy)
+		jb.Write(pcm)
 	}
 }
 
@@ -113,8 +115,54 @@ func decodeAudioStreamToJitter(logger *slog.Logger, inCh <-chan []byte, dec *aud
 // the pump substitutes a silence frame of identical length so the downstream
 // player keeps its timing (bypassing it entirely would cause underruns and
 // audible pops on unmute).
-func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32)) {
+// applyPlaybackGainMute applies AGC, gain, and mute in-place to the PCM frame.
+// Order: AGC (normalize) -> gain -> soft-clip. Mute takes precedence over all.
+// Any of the parameters may be nil — skipped individually.
+func applyPlaybackGainMute(ctx context.Context, frame []float32, gainCtl *DeviceGainControl, muteFlag *atomic.Bool, agcProc *audio.AGCProcessor) {
+	muted := (muteFlag != nil && muteFlag.Load()) || (gainCtl != nil && gainCtl.IsMuted())
+	if muted {
+		for i := range frame {
+			frame[i] = 0
+		}
+		return
+	}
+	// AGC: normalize loudness before user gain. Process() is a no-op when
+	// the processor is disabled, so always calling it is safe.
+	if agcProc != nil {
+		if processed, err := agcProc.Process(ctx, frame); err == nil && len(processed) == len(frame) {
+			copy(frame, processed)
+		}
+	}
+	if gainCtl != nil {
+		gain := gainCtl.Gain()
+		if gain != 1.0 {
+			audio.MixGain(frame, gain)
+			// Soft-clip only when amplifying (gain > 1.0). Without this,
+			// samples that exceed ±1.0 are hard-clipped by the player,
+			// giving harsh digital distortion. tanh gives smooth analog-
+			// style saturation instead, so 150% actually sounds louder
+			// rather than just noisier. Uses SIMD (AVX/SSE/NEON/Pure Go).
+			if gain > 1.0 {
+				audio.MixTanh(frame)
+			}
+		}
+	}
+}
+
+func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl, agcProc *audio.AGCProcessor, readyCh chan<- struct{}) {
 	defer close(playbackCh)
+	// Ensure readyCh is always closed on exit so the player goroutine can
+	// unblock even if the pump returns before reaching prefill (ctx cancel,
+	// decoder track closed before any frame arrived). Uses a captured local
+	// so we don't double-close after the successful prefill path.
+	readyClosed := false
+	closeReady := func() {
+		if readyCh != nil && !readyClosed {
+			close(readyCh)
+			readyClosed = true
+		}
+	}
+	defer closeReady()
 
 	// Create a dedicated PLC decoder to generate concealment frames on underrun.
 	plcDec, err := audio.NewOpusDecoder(sampleRate, channels)
@@ -136,21 +184,46 @@ func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh 
 		default:
 			firstFrame = jb.Read()
 			if firstFrame != nil {
-				if recordingTap != nil {
-					tapCopy := make([]float32, len(firstFrame))
-					copy(tapCopy, firstFrame)
-					recordingTap(tapCopy)
-				}
-				if muteFlag != nil && muteFlag.Load() {
-					for i := range firstFrame {
-						firstFrame[i] = 0
+				sendFrame := func(f []float32) bool {
+					if recordingTap != nil {
+						recordingTap(f)
+					}
+					applyPlaybackGainMute(ctx, f, gainCtl, muteFlag, agcProc)
+					select {
+					case playbackCh <- f:
+						return true
+					case <-ctx.Done():
+						return false
 					}
 				}
-				select {
-				case playbackCh <- firstFrame:
-				case <-ctx.Done():
+				if !sendFrame(firstFrame) {
 					return
 				}
+				// Prefill playbackCh with extra frames from the warmed-up JB.
+				// Without this, pump→player equilibrium settles at 0-1 frames
+				// (both run at 20ms cadence), so any pump scheduler/GC delay
+				// starves the player → audible crackle. Seeding a few frames
+				// moves equilibrium up, absorbing jitter.
+				//
+				// Prefill at most half of what's left in JB — this leaves the
+				// other half for network jitter absorption, regardless of
+				// mode (normal has minDepth=10, duplex/conference has 6).
+				prefillLimit := jb.Depth() / 2
+				if prefillLimit > 4 {
+					prefillLimit = 4 // cap at 4 frames (80ms) to limit latency
+				}
+				for i := 0; i < prefillLimit; i++ {
+					f := jb.Read()
+					if f == nil {
+						break
+					}
+					if !sendFrame(f) {
+						return
+					}
+				}
+				// Signal the player that playbackCh is pre-filled and it can
+				// now open the hardware device.
+				closeReady()
 				goto pumpLoop
 			}
 			time.Sleep(2 * time.Millisecond)
@@ -163,7 +236,7 @@ pumpLoop:
 
 	const adaptInterval = 50 // every 50 ticks (1 second)
 	const warmupTicks = 150  // first 3 seconds: aggressive adaptation
-	var tickCount, underruns, totalTicks int
+	var tickCount, underruns, totalTicks, playerBackpressure int
 
 	for {
 		select {
@@ -177,15 +250,9 @@ pumpLoop:
 					return
 				}
 				if recordingTap != nil {
-					tapCopy := make([]float32, len(frame))
-					copy(tapCopy, frame)
-					recordingTap(tapCopy)
+					recordingTap(frame)
 				}
-				if muteFlag != nil && muteFlag.Load() {
-					for i := range frame {
-						frame[i] = 0
-					}
-				}
+				applyPlaybackGainMute(ctx, frame, gainCtl, muteFlag, agcProc)
 				select {
 				case playbackCh <- frame:
 				case <-ctx.Done():
@@ -222,26 +289,21 @@ pumpLoop:
 					// won't be perfect. The PLC decoder generates smooth fade-out
 					// which is still much better than hard silence cuts.
 				}
-				// Recording tap: copy the un-muted frame to the recorder.
+				// Recording tap receives the un-muted, pre-gain frame. The tap
+				// must be synchronous (consume before return) and not retain
+				// the slice, so no defensive copy is needed here.
 				if recordingTap != nil {
-					tapCopy := make([]float32, len(frame))
-					copy(tapCopy, frame)
-					recordingTap(tapCopy)
+					recordingTap(frame)
 				}
-				// Local mute: zero the frame samples in place so the
-				// player keeps its timing but nothing audible reaches
-				// the speaker. Done here rather than via a separate
-				// filter stage because the decoded frame is already a
-				// freshly-allocated slice owned by this goroutine, so
-				// in-place mutation is safe.
-				if muteFlag != nil && muteFlag.Load() {
-					for i := range frame {
-						frame[i] = 0
-					}
-				}
+				// Apply gain/mute in-place. Frame is a freshly-allocated
+				// slice owned by this goroutine, so in-place mutation is safe.
+				applyPlaybackGainMute(ctx, frame, gainCtl, muteFlag, agcProc)
 				select {
 				case playbackCh <- frame:
 				default:
+					// Player is not consuming fast enough — channel full.
+					// This causes lost audio frames even though JB has data.
+					playerBackpressure++
 				}
 			}
 
@@ -253,15 +315,23 @@ pumpLoop:
 				isWarmup := totalTicks <= warmupTicks
 				hasLoss := underruns > 0 && isWarmup || underruns > adaptInterval/20
 				jb.AdaptiveAdjust(hasLoss)
-				if underruns > 0 {
-					logger.Debug("Jitter buffer adaptive adjust",
-						"underruns", underruns,
-						"depth", jb.Depth(),
+				if underruns > 0 || playerBackpressure > 0 {
+					// Surface as Info during warmup so users can correlate crackle
+					// at startup with the root cause. After warmup, stay at Debug.
+					lvl := logger.Debug
+					if isWarmup {
+						lvl = logger.Info
+					}
+					lvl("Audio pipeline stats",
+						"jb_underruns", underruns,
+						"player_drops", playerBackpressure,
+						"jb_depth", jb.Depth(),
 						"warmup", isWarmup,
 					)
 				}
 				tickCount = 0
 				underruns = 0
+				playerBackpressure = 0
 			}
 		}
 	}
@@ -271,7 +341,7 @@ pumpLoop:
 // If the playback device has a MixInputID configured, a local microphone capture
 // is started and mixed with the stream before writing to the output device.
 // Sends any error to audioDone. Does nothing if deviceID is nil.
-func startAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error) {
+func startAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}) {
 	if cfg.DeviceID == nil {
 		logger.Warn("No output device specified, audio will not be played")
 		return
@@ -297,14 +367,57 @@ func startAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Confi
 	go func() {
 		player, err := audio.NewPlayer(cfg.SampleRate, cfg.Channels)
 		if err != nil {
+			logger.Error("Player: NewPlayer failed", "error", err, "deviceID", *cfg.DeviceID)
 			audioDone <- err
 			return
 		}
 		defer func() { _ = player.Close() }() //nolint:errcheck
+		// Wait for the pump to pre-fill playbackCh before opening the
+		// hardware device. This avoids the first ~60 malgo callbacks
+		// seeing an empty channel and emitting silence at startup.
+		// Timeout (5s) is a fallback so the player is not blocked forever
+		// if the remote track never sends audio.
+		if readyCh != nil {
+			select {
+			case <-readyCh:
+			case <-ctx.Done():
+				audioDone <- ctx.Err()
+				return
+			case <-time.After(5 * time.Second):
+				logger.Warn("Player: pre-fill timeout, starting device anyway")
+			}
+		}
 		if err := player.Start(ctx, *cfg.DeviceID, actualPlaybackCh); err != nil {
+			logger.Error("Player: Start failed — no audio output", "error", err, "deviceID", *cfg.DeviceID)
 			audioDone <- err
 			return
 		}
+		logger.Info("Player started", "deviceID", *cfg.DeviceID, "sampleRate", cfg.SampleRate, "channels", cfg.Channels)
+		// Diagnostic: log player callback silence-fills every 2 seconds,
+		// but only when the counter actually grows (delta > 0). Each fill
+		// is a pop/click caused by the player emitting zeros when
+		// playbackCh was empty at callback time.
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			var prev uint64
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					cur := player.SilenceFills()
+					delta := cur - prev
+					prev = cur
+					if delta > 0 {
+						logger.Info("Player silence-fill events",
+							"in_last_2s", delta,
+							"total", cur,
+						)
+					}
+				}
+			}
+		}()
 		<-ctx.Done()
 		audioDone <- ctx.Err()
 	}()
@@ -404,7 +517,7 @@ func mixLocalInput(ctx context.Context, logger *slog.Logger, sampleRate, channel
 // is set — this is how Node.SetMuted (MuteController) drops incoming audio
 // without tearing down the playback device. Pass nil for server-mode callers
 // where there is no single "incoming stream" to mute.
-func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool, recordingTap func([]float32)) {
+func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.Config, peer transport.PeerManager, spectrum *audio.SpectrumAnalyzer, level *audio.LevelMeter, audioDone chan<- error, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl, agcProc *audio.AGCProcessor) {
 	targetFrames := cfg.EffectiveAudioBufferFrames()
 	maxFrames := targetFrames * 3
 	if maxFrames < 10 {
@@ -417,13 +530,22 @@ func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.
 	jb := audio.NewJitterBuffer(targetFrames, maxFrames)
 	frameSize := int(cfg.SampleRate) / 50 * int(cfg.Channels) // 20ms frame
 
-	// playbackCh bridges JitterBuffer → Player. Small buffer since JB handles timing.
-	playbackCh := make(chan []float32, 2)
+	// playbackCh bridges JitterBuffer → Player. Sized for 5 frames (100ms)
+	// — gives the pump some slack to absorb brief scheduler/GC delays without
+	// dropping frames on the non-blocking ticker send, while keeping latency
+	// low. JitterBuffer remains the primary jitter absorber.
+	playbackCh := make(chan []float32, 5)
 	doneCh := make(chan struct{})
+	// readyCh is closed by the pump after it has completed prefill (first
+	// frame + a few extras from the warmed JB). The audio player waits on
+	// this before opening the hardware device, so the very first malgo
+	// callback sees a non-empty playbackCh and never has to emit silence.
+	// This eliminates startup dropouts (~60 silence-fills in first 2s).
+	readyCh := make(chan struct{})
 
 	setupAudioDecoderWithJitter(logger, peer, cfg.SampleRate, cfg.Channels, jb, spectrum, level, doneCh)
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap)
-	startAudioPlayer(ctx, logger, cfg, playbackCh, audioDone)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap, gainCtl, agcProc, readyCh)
+	startAudioPlayer(ctx, logger, cfg, playbackCh, audioDone, readyCh)
 
 	logger.Info("Jitter buffer enabled",
 		"target", targetFrames,
@@ -464,19 +586,21 @@ func handleControlMsg(logger *slog.Logger, payload json.RawMessage, logFields ..
 	return ctrl.Action == "stop"
 }
 
-// buildAGCProcessors creates AGC processors for devices that have AGC enabled.
-// Returns nil if no devices have AGC enabled.
+// buildAGCProcessors creates AGC processors for all capture devices so runtime
+// Ctrl+D toggling can enable/disable AGC without restart. Initial enabled state
+// matches DeviceEntry.AGC from setup. Returns nil only if the devices slice is
+// empty (so callers can still check for absence of any processors).
 func buildAGCProcessors(devices []config.DeviceEntry, sampleRate uint32) map[uint32]*audio.AGCProcessor {
-	var result map[uint32]*audio.AGCProcessor
+	if len(devices) == 0 {
+		return nil
+	}
+	result := make(map[uint32]*audio.AGCProcessor, len(devices))
 	for _, dev := range devices {
-		if dev.AGC {
-			if result == nil {
-				result = make(map[uint32]*audio.AGCProcessor)
-			}
-			agcCfg := audio.DefaultAGCConfig()
-			agcCfg.SampleRate = sampleRate
-			result[dev.ID] = audio.NewAGCProcessor(agcCfg)
-		}
+		agcCfg := audio.DefaultAGCConfig()
+		agcCfg.SampleRate = sampleRate
+		proc := audio.NewAGCProcessor(agcCfg)
+		proc.SetEnabled(dev.AGC) // honor setup choice; can be toggled at runtime
+		result[dev.ID] = proc
 	}
 	return result
 }

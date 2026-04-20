@@ -147,13 +147,18 @@ func (p *CapturePipeline) Run(ctx context.Context, sendCh chan<- []byte) error {
 					}
 				} else if gain := p.cfg.GainControl.Gain(); gain != 1.0 {
 					audio.MixGain(samples, gain)
+					// Soft-clip when amplifying to avoid hard-clip distortion.
+					if gain > 1.0 {
+						audio.MixTanh(samples)
+					}
 				}
 			}
-			// Recording tap: feed post-AEC/AGC PCM to the recorder.
+			// Recording tap: feed post-AEC/AGC/gain PCM to the recorder.
+			// Tap must consume synchronously without retaining the slice,
+			// so no defensive copy is needed — the frame is then handed
+			// off to the accumulator below which copies into its own buffers.
 			if p.cfg.RecordingTap != nil {
-				tapCopy := make([]float32, len(samples))
-				copy(tapCopy, samples)
-				p.cfg.RecordingTap(tapCopy)
+				p.cfg.RecordingTap(samples)
 			}
 			if p.cfg.Spectrum != nil {
 				p.cfg.Spectrum.Feed(samples)

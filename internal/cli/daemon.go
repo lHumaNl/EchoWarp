@@ -137,8 +137,14 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	if cfg.Mode == config.ModeServer {
 		bm, bmErr := setupBanManager(&cfg, logger)
 		if bmErr != nil {
-			logger.Warn("ban manager setup failed — ban endpoints will be no-op", "error", bmErr)
-		} else if bm != nil {
+			// Failing loudly here prevents a silent "ban API works, but
+			// nothing is actually banned" footgun. If the ban store cannot
+			// be opened (e.g. permission denied on config dir), the daemon
+			// should not start — the operator needs to see this.
+			logger.Error("ban manager setup failed", "error", bmErr)
+			return fmt.Errorf("ban manager setup: %w", bmErr)
+		}
+		if bm != nil {
 			banMgr = bm
 			defer func() { _ = bm.Close() }()
 		}

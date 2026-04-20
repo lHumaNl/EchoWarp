@@ -44,7 +44,7 @@ func TestDeviceMuteAppliesToMixer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go HandleDeviceCommands(ctx, cmdCh, mixer, nil, nil, slog.Default())
+	go HandleDeviceCommands(ctx, cmdCh, mixer, nil, slog.Default())
 
 	// Initially not muted.
 	require.False(t, mixer.IsSourceMuted("device-1"))
@@ -69,7 +69,7 @@ func TestDeviceVolumeAppliesToMixer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go HandleDeviceCommands(ctx, cmdCh, mixer, nil, nil, slog.Default())
+	go HandleDeviceCommands(ctx, cmdCh, mixer, nil, slog.Default())
 
 	// Volume up.
 	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceVolumeUp, DeviceID: 5})
@@ -109,7 +109,7 @@ func TestAGCToggleAppliesToProcessor(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go HandleDeviceCommands(ctx, cmdCh, nil, agcMap, nil, slog.Default())
+	go HandleDeviceCommands(ctx, cmdCh, nil, agcMap, slog.Default())
 
 	// Toggle AGC off.
 	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceToggleAGC, DeviceID: 7})
@@ -128,7 +128,7 @@ func TestHandleDeviceCommands_NilMixer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go HandleDeviceCommands(ctx, cmdCh, nil, nil, nil, slog.Default())
+	go HandleDeviceCommands(ctx, cmdCh, nil, nil, slog.Default())
 
 	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceToggleMute, DeviceID: 1})
 	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceGlobalMute, DeviceID: 0})
@@ -149,7 +149,7 @@ func TestHandleDeviceCommands_GlobalMute(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go HandleDeviceCommands(ctx, cmdCh, mixer, nil, nil, slog.Default())
+	go HandleDeviceCommands(ctx, cmdCh, mixer, nil, slog.Default())
 
 	require.False(t, mixer.IsGlobalMuted())
 
@@ -168,7 +168,7 @@ func TestHandleDeviceCommands_ContextCancel(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleDeviceCommands(ctx, cmdCh, nil, nil, nil, slog.Default())
+		HandleDeviceCommands(ctx, cmdCh, nil, nil, slog.Default())
 		close(done)
 	}()
 
@@ -186,7 +186,7 @@ func TestHandleDeviceCommands_ChannelClose(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		HandleDeviceCommands(ctx, cmdCh, nil, nil, nil, slog.Default())
+		HandleDeviceCommands(ctx, cmdCh, nil, nil, slog.Default())
 		close(done)
 	}()
 
@@ -205,7 +205,7 @@ func TestDeviceGainControl_VolumeAndMute(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go HandleDeviceCommands(ctx, cmdCh, nil, nil, gainCtl, slog.Default())
+	go HandleDeviceCommands(ctx, cmdCh, gainCtl, nil, slog.Default())
 
 	// Volume up.
 	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceVolumeUp, DeviceID: 1})
@@ -225,8 +225,20 @@ func TestDeviceGainControl_VolumeAndMute(t *testing.T) {
 	waitDrain()
 	assert.True(t, gainCtl.IsMuted())
 
-	// Global mute also works on gain control.
+	// Global mute is now separate from per-source mute.
 	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceGlobalMute})
 	waitDrain()
-	assert.False(t, gainCtl.IsMuted(), "second toggle should unmute")
+	assert.True(t, gainCtl.IsGlobalMuted(), "global mute should be active")
+	assert.True(t, gainCtl.IsMuted(), "IsMuted should reflect both per-source and global mute")
+
+	// Unmute per-source → IsMuted still true (global still on).
+	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceToggleMute, DeviceID: 1})
+	waitDrain()
+	assert.True(t, gainCtl.IsMuted(), "IsMuted should still be true due to global mute")
+
+	// Toggle global mute off → IsMuted now false.
+	sendCmd(t, cmdCh, DeviceCommand{Action: DeviceGlobalMute})
+	waitDrain()
+	assert.False(t, gainCtl.IsGlobalMuted())
+	assert.False(t, gainCtl.IsMuted(), "both mutes off")
 }

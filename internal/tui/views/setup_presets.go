@@ -98,6 +98,8 @@ func (m *SetupModel) CollectModePreset(mode string) preset.ModePreset {
 			mp.TLSCert = f.Value
 		case "tls_key":
 			mp.TLSKey = f.Value
+		case "log_level":
+			mp.LogLevel = f.Value
 		}
 	}
 	return mp

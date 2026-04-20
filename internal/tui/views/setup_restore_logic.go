@@ -345,6 +345,7 @@ func (m *SetupModel) restoreModePreset(mp presetpkg.ModePreset) {
 	}
 	setIfNonEmpty(m.AdvancedFields, "tls_cert", mp.TLSCert)
 	setIfNonEmpty(m.AdvancedFields, "tls_key", mp.TLSKey)
+	setIfNonEmpty(m.AdvancedFields, "log_level", mp.LogLevel)
 
 	m.applyFieldDependencies()
 }
@@ -390,6 +391,9 @@ func (m *SetupModel) loadPresetForMode(mode string) {
 	setField(m.AdvancedFields, "tls", tlsVal, "off")
 	setField(m.AdvancedFields, "tls_cert", mp.TLSCert, "")
 	setField(m.AdvancedFields, "tls_key", mp.TLSKey, "")
+	if mp.LogLevel != "" {
+		setField(m.AdvancedFields, "log_level", mp.LogLevel, "info")
+	}
 
 	m.applyFieldDependencies()
 }

@@ -15,6 +15,19 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
+// sendDeviceCmd sends a device command without blocking. If the channel is
+// full or nil the command is silently dropped — this prevents deadlocking the
+// Bubble Tea event loop which runs on the main goroutine.
+func (m Model) sendDeviceCmd(cmd DeviceCommand) {
+	if m.deviceCmdCh == nil {
+		return
+	}
+	select {
+	case m.deviceCmdCh <- cmd:
+	default:
+	}
+}
+
 func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -142,32 +155,12 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 			}
 		}
 
-		// Device control keys (only when devices panel is available)
-		if m.deviceCmdCh != nil && len(m.deviceStates) > 0 {
-			switch {
-			case msg.Type == tea.KeyCtrlG:
-				m.globalMuted = !m.globalMuted
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceGlobalMute}
-				return m, nil
-			case msg.String() == "+" || msg.String() == "=":
-				dev := m.deviceStates[m.selectedDevice2]
-				dev.Volume = math.Round((dev.Volume+0.1)*10) / 10
-				if dev.Volume > 1.5 {
-					dev.Volume = 1.5
-				}
-				m.deviceStates[m.selectedDevice2] = dev
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeUp, DeviceID: dev.ID}
-				return m, nil
-			case msg.String() == "-":
-				dev := m.deviceStates[m.selectedDevice2]
-				dev.Volume = math.Round((dev.Volume-0.1)*10) / 10
-				if dev.Volume < 0 {
-					dev.Volume = 0
-				}
-				m.deviceStates[m.selectedDevice2] = dev
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeDown, DeviceID: dev.ID}
-				return m, nil
-			}
+		// Device volume/mute controls are only available via Ctrl+D overlay.
+		// Global mute (Ctrl+G) is allowed from the main streaming screen.
+		if msg.Type == tea.KeyCtrlG && m.deviceCmdCh != nil {
+			m.globalMuted = !m.globalMuted
+			m.sendDeviceCmd(DeviceCommand{Action: DeviceGlobalMute})
+			return m, nil
 		}
 
 	case StatsUpdateMsg:
@@ -435,50 +428,50 @@ func (m Model) openBanOverlay(clientID, nickname, ip, hwid string) Model {
 	reasons = append(reasons, i18n.T("reason_custom"))
 
 	m.overlay = OverlayBan
-	m.banClientID = clientID
-	m.banClientNick = nickname
-	m.banClientIP = ip
-	m.banClientHWID = hwid
-	m.banCriteriaIP = true // IP selected by default
-	m.banCriteriaNick = false
-	m.banCriteriaHWID = false
-	m.banFocusSection = 0
-	m.banCriteriaIndex = 0
-	m.banReasons = reasons
-	m.banRecentStart = recentStart
-	m.banCustomStart = customStart
-	m.banSelectedReason = 0
-	m.banCustomText = ""
-	m.banCustomEditing = false
-	m.banButtonFocus = 0
-	m.banValidationError = ""
+	m.banOverlay.ClientID = clientID
+	m.banOverlay.ClientNick = nickname
+	m.banOverlay.ClientIP = ip
+	m.banOverlay.ClientHWID = hwid
+	m.banOverlay.CriteriaIP = true // IP selected by default
+	m.banOverlay.CriteriaNick = false
+	m.banOverlay.CriteriaHWID = false
+	m.banOverlay.FocusSection = 0
+	m.banOverlay.CriteriaIndex = 0
+	m.banOverlay.Reasons = reasons
+	m.banOverlay.RecentStart = recentStart
+	m.banOverlay.CustomStart = customStart
+	m.banOverlay.SelectedReason = 0
+	m.banOverlay.CustomText = ""
+	m.banOverlay.CustomEditing = false
+	m.banOverlay.ButtonFocus = 0
+	m.banOverlay.ValidationError = ""
 	return m
 }
 
 // executeBan sends the ban command with selected criteria and reason, shows a flash message.
 func (m Model) executeBan(reason string) (tea.Model, tea.Cmd) {
 	// Validate: at least one criterion.
-	if !m.banCriteriaIP && !m.banCriteriaNick && !m.banCriteriaHWID {
-		m.banValidationError = "Select at least one ban criterion"
+	if !m.banOverlay.CriteriaIP && !m.banOverlay.CriteriaNick && !m.banOverlay.CriteriaHWID {
+		m.banOverlay.ValidationError = "Select at least one ban criterion"
 		return m, nil
 	}
-	m.banValidationError = ""
+	m.banOverlay.ValidationError = ""
 
 	var criteria []string
-	if m.banCriteriaIP {
+	if m.banOverlay.CriteriaIP {
 		criteria = append(criteria, "ip")
 	}
-	if m.banCriteriaNick {
+	if m.banOverlay.CriteriaNick {
 		criteria = append(criteria, "nickname")
 	}
-	if m.banCriteriaHWID {
+	if m.banOverlay.CriteriaHWID {
 		criteria = append(criteria, "hwid")
 	}
 
 	if m.cmdCh != nil {
 		m.cmdCh <- ClientCommand{
 			Action:      ActionBan,
-			ClientID:    m.banClientID,
+			ClientID:    m.banOverlay.ClientID,
 			Reason:      reason,
 			BanCriteria: criteria,
 		}
@@ -486,9 +479,9 @@ func (m Model) executeBan(reason string) (tea.Model, tea.Cmd) {
 	if reason != "" {
 		_ = SaveRecentReason(reason) //nolint:errcheck // best-effort
 	}
-	nick := m.banClientNick
+	nick := m.banOverlay.ClientNick
 	if nick == "" {
-		nick = m.banClientID
+		nick = m.banOverlay.ClientID
 	}
 	m.overlay = OverlayNone
 	m.flashMsg = nick + " banned"
@@ -507,28 +500,28 @@ func (m Model) banOverlayCriteriaCount() int {
 // handleBanOverlayKeys handles key events when the ban overlay is active.
 func (m Model) handleBanOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Custom editing mode: capture text input
-	if m.banCustomEditing {
+	if m.banOverlay.CustomEditing {
 		switch msg.Type {
 		case tea.KeyEsc:
-			m.banCustomEditing = false
+			m.banOverlay.CustomEditing = false
 			return m, nil
 		case tea.KeyEnter:
-			text := strings.TrimSpace(m.banCustomText)
+			text := strings.TrimSpace(m.banOverlay.CustomText)
 			if text == "" {
 				return m.executeBan("")
 			}
 			return m.executeBan(text)
 		case tea.KeyBackspace:
-			if m.banCustomText != "" {
-				m.banCustomText = m.banCustomText[:len(m.banCustomText)-1]
+			if m.banOverlay.CustomText != "" {
+				m.banOverlay.CustomText = m.banOverlay.CustomText[:len(m.banOverlay.CustomText)-1]
 			}
 			return m, nil
 		default:
 			switch msg.Type {
 			case tea.KeyRunes:
-				m.banCustomText += string(msg.Runes)
+				m.banOverlay.CustomText += string(msg.Runes)
 			case tea.KeySpace:
-				m.banCustomText += " "
+				m.banOverlay.CustomText += " "
 			}
 			return m, nil
 		}
@@ -539,80 +532,80 @@ func (m Model) handleBanOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.overlay = OverlayNone
 		return m, nil
 	case tea.KeyTab:
-		m.banFocusSection = (m.banFocusSection + 1) % 3
+		m.banOverlay.FocusSection = (m.banOverlay.FocusSection + 1) % 3
 		return m, nil
 	case tea.KeyShiftTab:
-		m.banFocusSection = (m.banFocusSection + 2) % 3
+		m.banOverlay.FocusSection = (m.banOverlay.FocusSection + 2) % 3
 		return m, nil
 	case tea.KeyUp:
-		switch m.banFocusSection {
+		switch m.banOverlay.FocusSection {
 		case 0: // criteria
-			if m.banCriteriaIndex > 0 {
-				m.banCriteriaIndex--
+			if m.banOverlay.CriteriaIndex > 0 {
+				m.banOverlay.CriteriaIndex--
 			}
 		case 1: // reasons
-			if m.banSelectedReason > 0 {
-				m.banSelectedReason--
+			if m.banOverlay.SelectedReason > 0 {
+				m.banOverlay.SelectedReason--
 			}
 		case 2: // buttons
-			if m.banButtonFocus > 0 {
-				m.banButtonFocus--
+			if m.banOverlay.ButtonFocus > 0 {
+				m.banOverlay.ButtonFocus--
 			}
 		}
 		return m, nil
 	case tea.KeyDown:
-		switch m.banFocusSection {
+		switch m.banOverlay.FocusSection {
 		case 0:
-			if m.banCriteriaIndex < m.banOverlayCriteriaCount()-1 {
-				m.banCriteriaIndex++
+			if m.banOverlay.CriteriaIndex < m.banOverlayCriteriaCount()-1 {
+				m.banOverlay.CriteriaIndex++
 			}
 		case 1:
-			if m.banSelectedReason < len(m.banReasons)-1 {
-				m.banSelectedReason++
+			if m.banOverlay.SelectedReason < len(m.banOverlay.Reasons)-1 {
+				m.banOverlay.SelectedReason++
 			}
 		case 2:
-			if m.banButtonFocus < 1 {
-				m.banButtonFocus++
+			if m.banOverlay.ButtonFocus < 1 {
+				m.banOverlay.ButtonFocus++
 			}
 		}
 		return m, nil
 	case tea.KeySpace:
-		if m.banFocusSection == 0 {
-			switch m.banCriteriaIndex {
+		if m.banOverlay.FocusSection == 0 {
+			switch m.banOverlay.CriteriaIndex {
 			case 0:
-				m.banCriteriaIP = !m.banCriteriaIP
+				m.banOverlay.CriteriaIP = !m.banOverlay.CriteriaIP
 			case 1:
-				m.banCriteriaNick = !m.banCriteriaNick
+				m.banOverlay.CriteriaNick = !m.banOverlay.CriteriaNick
 			case 2:
-				m.banCriteriaHWID = !m.banCriteriaHWID
+				m.banOverlay.CriteriaHWID = !m.banOverlay.CriteriaHWID
 			}
-			m.banValidationError = "" // clear on change
+			m.banOverlay.ValidationError = "" // clear on change
 		}
 		return m, nil
 	case tea.KeyEnter:
-		if m.banFocusSection == 2 {
-			if m.banButtonFocus == 1 {
+		if m.banOverlay.FocusSection == 2 {
+			if m.banOverlay.ButtonFocus == 1 {
 				// Cancel
 				m.overlay = OverlayNone
 				return m, nil
 			}
 			// Confirm: get selected reason
 			reason := ""
-			if m.banSelectedReason > 0 && m.banSelectedReason < len(m.banReasons) && m.banSelectedReason != m.banCustomStart {
-				reason = m.banReasons[m.banSelectedReason]
+			if m.banOverlay.SelectedReason > 0 && m.banOverlay.SelectedReason < len(m.banOverlay.Reasons) && m.banOverlay.SelectedReason != m.banOverlay.CustomStart {
+				reason = m.banOverlay.Reasons[m.banOverlay.SelectedReason]
 			}
 			return m.executeBan(reason)
 		}
-		if m.banFocusSection == 1 {
-			if m.banSelectedReason == m.banCustomStart {
-				m.banCustomEditing = true
-				m.banCustomText = ""
+		if m.banOverlay.FocusSection == 1 {
+			if m.banOverlay.SelectedReason == m.banOverlay.CustomStart {
+				m.banOverlay.CustomEditing = true
+				m.banOverlay.CustomText = ""
 				return m, nil
 			}
-			if m.banSelectedReason == 0 {
+			if m.banOverlay.SelectedReason == 0 {
 				return m.executeBan("")
 			}
-			return m.executeBan(m.banReasons[m.banSelectedReason])
+			return m.executeBan(m.banOverlay.Reasons[m.banOverlay.SelectedReason])
 		}
 		// Enter in criteria section does nothing (Space toggles)
 		return m, nil
@@ -912,29 +905,29 @@ func (m Model) openKickOverlay(clientID, nickname string) Model {
 	reasons = append(reasons, i18n.T("reason_custom"))
 
 	m.overlay = OverlayKick
-	m.kickClientID = clientID
-	m.kickClientNick = nickname
-	m.kickReasons = reasons
-	m.kickRecentStart = recentStart
-	m.kickCustomStart = customStart
-	m.kickSelectedIndex = 0
-	m.kickCustomText = ""
-	m.kickCustomEditing = false
-	m.kickFocusButton = 0
+	m.kickOverlay.ClientID = clientID
+	m.kickOverlay.ClientNick = nickname
+	m.kickOverlay.Reasons = reasons
+	m.kickOverlay.RecentStart = recentStart
+	m.kickOverlay.CustomStart = customStart
+	m.kickOverlay.SelectedIndex = 0
+	m.kickOverlay.CustomText = ""
+	m.kickOverlay.CustomEditing = false
+	m.kickOverlay.FocusButton = 0
 	return m
 }
 
 // executeKick sends the kick command with the given reason and shows a flash message.
 func (m Model) executeKick(reason string) (tea.Model, tea.Cmd) {
 	if m.cmdCh != nil {
-		m.cmdCh <- ClientCommand{Action: ActionKick, ClientID: m.kickClientID, Reason: reason}
+		m.cmdCh <- ClientCommand{Action: ActionKick, ClientID: m.kickOverlay.ClientID, Reason: reason}
 	}
 	if reason != "" {
 		_ = SaveRecentReason(reason) //nolint:errcheck // best-effort
 	}
-	nick := m.kickClientNick
+	nick := m.kickOverlay.ClientNick
 	if nick == "" {
-		nick = m.kickClientID
+		nick = m.kickOverlay.ClientID
 	}
 	m.overlay = OverlayNone
 	m.flashMsg = nick + " kicked"
@@ -945,29 +938,29 @@ func (m Model) executeKick(reason string) (tea.Model, tea.Cmd) {
 // handleKickOverlayKeys handles key events when the kick overlay is active.
 func (m Model) handleKickOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Custom editing mode: capture text input
-	if m.kickCustomEditing {
+	if m.kickOverlay.CustomEditing {
 		switch msg.Type {
 		case tea.KeyEsc:
-			m.kickCustomEditing = false
+			m.kickOverlay.CustomEditing = false
 			return m, nil
 		case tea.KeyEnter:
-			text := strings.TrimSpace(m.kickCustomText)
+			text := strings.TrimSpace(m.kickOverlay.CustomText)
 			if text == "" {
 				// Enter with empty custom = no reason
 				return m.executeKick("")
 			}
 			return m.executeKick(text)
 		case tea.KeyBackspace:
-			if m.kickCustomText != "" {
-				m.kickCustomText = m.kickCustomText[:len(m.kickCustomText)-1]
+			if m.kickOverlay.CustomText != "" {
+				m.kickOverlay.CustomText = m.kickOverlay.CustomText[:len(m.kickOverlay.CustomText)-1]
 			}
 			return m, nil
 		default:
 			switch msg.Type {
 			case tea.KeyRunes:
-				m.kickCustomText += string(msg.Runes)
+				m.kickOverlay.CustomText += string(msg.Runes)
 			case tea.KeySpace:
-				m.kickCustomText += " "
+				m.kickOverlay.CustomText += " "
 			}
 			return m, nil
 		}
@@ -978,57 +971,57 @@ func (m Model) handleKickOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.overlay = OverlayNone
 		return m, nil
 	case tea.KeyUp:
-		if m.kickFocusButton > 0 {
-			m.kickFocusButton--
-			if m.kickFocusButton == 0 {
+		if m.kickOverlay.FocusButton > 0 {
+			m.kickOverlay.FocusButton--
+			if m.kickOverlay.FocusButton == 0 {
 				// Back to list
-				m.kickSelectedIndex = len(m.kickReasons) - 1
+				m.kickOverlay.SelectedIndex = len(m.kickOverlay.Reasons) - 1
 			}
-		} else if m.kickSelectedIndex > 0 {
-			m.kickSelectedIndex--
+		} else if m.kickOverlay.SelectedIndex > 0 {
+			m.kickOverlay.SelectedIndex--
 		}
 		return m, nil
 	case tea.KeyDown:
-		if m.kickFocusButton == 0 {
-			if m.kickSelectedIndex < len(m.kickReasons)-1 {
-				m.kickSelectedIndex++
+		if m.kickOverlay.FocusButton == 0 {
+			if m.kickOverlay.SelectedIndex < len(m.kickOverlay.Reasons)-1 {
+				m.kickOverlay.SelectedIndex++
 			} else {
-				m.kickFocusButton = 1
+				m.kickOverlay.FocusButton = 1
 			}
-		} else if m.kickFocusButton < 2 {
-			m.kickFocusButton++
+		} else if m.kickOverlay.FocusButton < 2 {
+			m.kickOverlay.FocusButton++
 		}
 		return m, nil
 	case tea.KeyTab:
-		m.kickFocusButton = (m.kickFocusButton + 1) % 3
+		m.kickOverlay.FocusButton = (m.kickOverlay.FocusButton + 1) % 3
 		return m, nil
 	case tea.KeyEnter:
-		if m.kickFocusButton == 2 {
+		if m.kickOverlay.FocusButton == 2 {
 			// Cancel
 			m.overlay = OverlayNone
 			return m, nil
 		}
-		if m.kickFocusButton == 1 {
+		if m.kickOverlay.FocusButton == 1 {
 			// [Kick] button: use selected reason
 			reason := ""
-			if m.kickSelectedIndex > 0 && m.kickSelectedIndex < len(m.kickReasons) && m.kickSelectedIndex != m.kickCustomStart {
-				reason = m.kickReasons[m.kickSelectedIndex]
+			if m.kickOverlay.SelectedIndex > 0 && m.kickOverlay.SelectedIndex < len(m.kickOverlay.Reasons) && m.kickOverlay.SelectedIndex != m.kickOverlay.CustomStart {
+				reason = m.kickOverlay.Reasons[m.kickOverlay.SelectedIndex]
 			}
 			return m.executeKick(reason)
 		}
 		// Focus on list
-		if m.kickSelectedIndex == m.kickCustomStart {
+		if m.kickOverlay.SelectedIndex == m.kickOverlay.CustomStart {
 			// Enter custom editing mode
-			m.kickCustomEditing = true
-			m.kickCustomText = ""
+			m.kickOverlay.CustomEditing = true
+			m.kickOverlay.CustomText = ""
 			return m, nil
 		}
-		if m.kickSelectedIndex == 0 {
+		if m.kickOverlay.SelectedIndex == 0 {
 			// (no reason)
 			return m.executeKick("")
 		}
 		// Predefined or recent reason
-		return m.executeKick(m.kickReasons[m.kickSelectedIndex])
+		return m.executeKick(m.kickOverlay.Reasons[m.kickOverlay.SelectedIndex])
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
 		if m.stopCh != nil {
 			m.stopOnce.Do(func() { close(m.stopCh) })
@@ -1205,7 +1198,10 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc, tea.KeyCtrlD:
 		m.overlay = OverlayNone
-		return m, nil
+		// Persist any runtime volume/AGC adjustments back to the preset
+		// so the next launch restores what the user set here, not the
+		// stale setup-screen snapshot.
+		return m, persistRuntimeDeviceStateCmd(m.config, m.deviceStates)
 	case tea.KeyTab:
 		// Toggle between input and output sections.
 		if m.deviceOverlaySection == 0 && len(outputs) > 0 {
@@ -1237,7 +1233,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceToggleMute, DeviceID: ds.ID}
+				m.sendDeviceCmd(DeviceCommand{Action: DeviceToggleMute, DeviceID: ds.ID})
 			}
 		}
 		return m, nil
@@ -1252,7 +1248,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceToggleAGC, DeviceID: ds.ID}
+				m.sendDeviceCmd(DeviceCommand{Action: DeviceToggleAGC, DeviceID: ds.ID})
 			}
 		}
 		return m, nil
@@ -1278,9 +1274,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeUp, DeviceID: ds.ID}
-			}
+			m.sendDeviceCmd(DeviceCommand{Action: DeviceVolumeUp, DeviceID: ds.ID})
 			return m, nil
 		}
 		if key == "-" && m.deviceOverlayIndex < len(currentList) {
@@ -1294,9 +1288,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
-			if m.deviceCmdCh != nil {
-				m.deviceCmdCh <- DeviceCommand{Action: DeviceVolumeDown, DeviceID: ds.ID}
-			}
+			m.sendDeviceCmd(DeviceCommand{Action: DeviceVolumeDown, DeviceID: ds.ID})
 			return m, nil
 		}
 	}

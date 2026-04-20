@@ -42,16 +42,9 @@ type ClientApp struct {
 	signalerFactory SignalerFactory
 	peerFactory     PeerFactory
 
-	// TUI stats reporting channels (optional, nil if not using TUI).
-	statsCh chan<- transport.ConnectionStats
-	errCh   chan<- error
-
-	// statsHook is an optional callback invoked on every stats tick with
-	// the same ConnectionStats value that would be sent to statsCh. The
-	// daemon wires it to Node.UpdateStats so GET /api/v1/stats returns
-	// live bytes without requiring a TUI statsCh. Additive to the TUI
-	// path; both sinks receive the same values.
-	statsHook func(transport.ConnectionStats)
+	// Stats publishing (shared with ServerApp via mixin).
+	StatsMixin
+	errCh chan<- error
 
 	// Graceful stop: closed when TUI requests shutdown (before context cancellation).
 	stopCh <-chan struct{}
@@ -70,15 +63,9 @@ type ClientApp struct {
 	// Used for capture path (outgoing audio).
 	captureLevelMeter *audio.LevelMeter
 
-	// Recording support (client-side).
-	recorder       *audio.ConferenceRecorder
-	recorderMu     sync.Mutex
+	// Recording support (shared with ServerApp via mixin).
+	RecordingMixin
 	recordingCmdCh <-chan RecordingCommand
-
-	// recState tracks recording metadata for the daemon-API
-	// RecordingController adapter. See internal/app/recording_adapter.go
-	// for the rationale (same pattern as ServerApp.recState).
-	recState recordingAdapterState
 
 	// Chat client for text messaging.
 	chatClient *ChatClient
@@ -359,37 +346,9 @@ func (c *ClientApp) GetChatClient() *ChatClient {
 	return c.chatClient
 }
 
-// startRecordingInternal starts client-side recording. Public entry
-// points: the TUI bridge (processRecordingCommands) and the daemon API
-// adapter (recording_adapter.go) both call this helper. Renamed from
-// the former exported StartRecording in phase 5c so the ClientApp type
-// can satisfy echowarp.RecordingController with the public-typed
-// signature without a name clash.
-func (c *ClientApp) startRecordingInternal(mode audio.RecordingMode) error {
-	c.recorderMu.Lock()
-	defer c.recorderMu.Unlock()
-	c.recorder = audio.NewConferenceRecorder(mode, c.cfg.SampleRate, 1)
-	return c.recorder.Start(c.cfg.EffectiveRecordDir())
-}
-
-// stopRecordingInternal stops client-side recording. See
-// startRecordingInternal for why this is unexported.
-func (c *ClientApp) stopRecordingInternal() (time.Duration, uint64, int, error) {
-	c.recorderMu.Lock()
-	defer c.recorderMu.Unlock()
-	if c.recorder == nil {
-		return 0, 0, 0, nil
-	}
-	dur, size, files, err := c.recorder.Stop()
-	c.recorder = nil
-	return dur, size, files, err
-}
-
 // IsRecording returns whether client-side recording is active.
 func (c *ClientApp) IsRecording() bool {
-	c.recorderMu.Lock()
-	defer c.recorderMu.Unlock()
-	return c.recorder != nil && c.recorder.IsActive()
+	return c.isRecordingActive()
 }
 
 // processRecordingCommands handles recording start/stop commands from TUI.
@@ -406,7 +365,7 @@ func (c *ClientApp) processRecordingCommands(ctx context.Context) {
 				return
 			}
 			if cmd.Start {
-				if err := c.startRecordingInternal(cmd.Mode); err != nil {
+				if err := c.startRecordingInternal(cmd.Mode, c.cfg.SampleRate, c.cfg.EffectiveRecordDir()); err != nil {
 					c.logger.Error("Failed to start recording", "error", err)
 				} else {
 					c.logger.Info("Recording started", "mode", cmd.Mode)
@@ -445,22 +404,6 @@ func (c *ClientApp) flushRecordingHeaders(ctx context.Context) {
 	}
 }
 
-// publishStats forwards a ConnectionStats snapshot to both the TUI statsCh
-// (if configured) and the API statsHook (if configured). Non-blocking for
-// the channel sink — the fallback drops the value when the TUI is not
-// draining, matching the original reportStats behavior.
-func (c *ClientApp) publishStats(stats transport.ConnectionStats) {
-	if c.statsCh != nil {
-		select {
-		case c.statsCh <- stats:
-		default:
-		}
-	}
-	if c.statsHook != nil {
-		c.statsHook(stats)
-	}
-}
-
 // reportStats periodically sends connection statistics to all configured
 // sinks (TUI statsCh and/or API statsHook). Started immediately when the
 // message loop begins (before DC ready), so the TUI transitions to the
@@ -482,14 +425,6 @@ func (c *ClientApp) reportStats(ctx context.Context, peer transport.PeerManager)
 			c.publishStats(peer.GetStats())
 		}
 	}
-}
-
-// sendDisconnected sends a final "disconnected" stats update to all sinks.
-func (c *ClientApp) sendDisconnected() {
-	if c.statsCh == nil && c.statsHook == nil {
-		return
-	}
-	c.publishStats(transport.ConnectionStats{State: "disconnected"})
 }
 
 // Run connects to the server and starts streaming. It blocks until the context
@@ -811,57 +746,13 @@ func (c *ClientApp) setupSendAudioPipeline(ctx context.Context, peer transport.P
 
 // newPauseFilterCh creates a forwarding channel that drops audio frames when capturePaused is set.
 func (c *ClientApp) newPauseFilterCh(ctx context.Context, dst chan<- []byte) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if c.capturePaused.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, &c.capturePaused)
 }
 
 // newServerMuteIncomingFilterCh creates a forwarding channel that drops audio frames
 // when the server has muted incoming audio from this client.
 func (c *ClientApp) newServerMuteIncomingFilterCh(ctx context.Context, dst chan<- []byte) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if c.serverMutedIncoming.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, &c.serverMutedIncoming)
 }
 
 // setupReceiveAudioPipeline creates audio playback pipeline for normal mode (client receives).
@@ -878,7 +769,32 @@ func (c *ClientApp) setupReceiveAudioPipeline(ctx context.Context, peer transpor
 			_ = rec.WriteMix(samples) //nolint:errcheck
 		}
 	}
-	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap)
+	// Build gain control for the playback device so Ctrl+D volume/mute
+	// affects actual audio output. Initial volume comes from the first
+	// playback device entry (TUI single-device path).
+	var initialVol float32 = 1.0
+	playbackDevs := c.cfg.PlaybackDevices()
+	if len(playbackDevs) == 1 {
+		initialVol = float32(playbackDevs[0].Volume)
+	}
+	if initialVol <= 0 {
+		initialVol = 1.0
+	}
+	gainCtl := NewDeviceGainControl(initialVol)
+	// Build AGC processors for playback devices so runtime Ctrl+D AGC toggle
+	// works. Processors default to DeviceEntry.AGC state from setup.
+	agcMap := buildAGCProcessors(playbackDevs, c.cfg.SampleRate)
+	var playbackAGC *audio.AGCProcessor
+	if len(playbackDevs) == 1 {
+		playbackAGC = agcMap[playbackDevs[0].ID]
+	}
+	// Start device command handler only if not already running (duplex mode
+	// starts it in runCapturePipeline). In normal (receive-only) mode, this
+	// is the only place it gets wired.
+	if !c.cfg.Duplex && !c.cfg.Reverse {
+		go HandleDeviceCommands(ctx, c.deviceCmdCh, gainCtl, agcMap, c.logger)
+	}
+	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap, gainCtl, playbackAGC)
 	return nil
 }
 
@@ -1223,7 +1139,7 @@ func (c *ClientApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			LevelMeter:    captureLevel,
 			AGCProcessors: buildAGCProcessors(captureDevices, c.cfg.SampleRate),
 		}, c.logger)
-		go HandleDeviceCommands(ctx, c.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), nil, c.logger)
+		go HandleDeviceCommands(ctx, c.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), c.logger)
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1268,6 +1184,6 @@ func (c *ClientApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		GainControl:          gainCtl,
 	}, c.logger)
 
-	go HandleDeviceCommands(ctx, c.deviceCmdCh, nil, agcMap, gainCtl, c.logger)
+	go HandleDeviceCommands(ctx, c.deviceCmdCh, gainCtl, agcMap, c.logger)
 	return pipeline.Run(ctx, sendCh)
 }
