@@ -19,6 +19,9 @@ type BanEntry struct {
 	Banned         bool      `json:"banned" yaml:"banned"`
 	LastAttempt    time.Time `json:"last_attempt" yaml:"last_attempt"`
 	BannedAt       time.Time `json:"banned_at,omitempty" yaml:"banned_at,omitempty"`
+	// Reason is an optional human-readable note attached to an API-initiated
+	// ban. Older entries saved before this field was added have it empty.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
 // banFileData is the structure for persistent storage (YAML, with JSON fallback).
@@ -116,9 +119,16 @@ func (bm *FileBanManager) RecordSuccess(addr string) {
 }
 
 // Ban immediately bans an address and persists to disk.
+// Persistence errors are swallowed — use BanWithReason when the caller needs
+// to learn about disk-write failures (e.g. to return a 500 from an API).
 func (bm *FileBanManager) Ban(addr string) {
-	bm.mu.Lock()
+	_ = bm.BanWithReason(addr, "") //nolint:errcheck
+}
 
+// BanWithReason immediately bans an address, records an optional human-readable
+// reason, and returns any persistence error to the caller.
+func (bm *FileBanManager) BanWithReason(addr, reason string) error {
+	bm.mu.Lock()
 	entry, ok := bm.entries[addr]
 	if !ok {
 		entry = &BanEntry{Address: addr}
@@ -126,9 +136,11 @@ func (bm *FileBanManager) Ban(addr string) {
 	}
 	entry.Banned = true
 	entry.BannedAt = time.Now()
-
+	if reason != "" {
+		entry.Reason = reason
+	}
 	bm.mu.Unlock()
-	_ = bm.save() //nolint:errcheck
+	return bm.save()
 }
 
 // Unban removes the ban status from an address and persists to disk.
@@ -159,6 +171,21 @@ func (bm *FileBanManager) BannedList() []string {
 	return list
 }
 
+// BannedEntries returns full ban entries (with BannedAt timestamp and Reason)
+// for all currently banned IP addresses. Prefer this over BannedList when the
+// caller needs metadata.
+func (bm *FileBanManager) BannedEntries() []BanEntry {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	var list []BanEntry
+	for _, entry := range bm.entries {
+		if entry.Banned {
+			list = append(list, *entry)
+		}
+	}
+	return list
+}
+
 // IsHWIDBanned returns true if the HWID is currently banned.
 func (bm *FileBanManager) IsHWIDBanned(hwid string) bool {
 	bm.mu.RLock()
@@ -169,9 +196,16 @@ func (bm *FileBanManager) IsHWIDBanned(hwid string) bool {
 }
 
 // BanHWID immediately bans a hardware identifier and persists to disk.
+// Persistence errors are swallowed — use BanHWIDWithReason when the caller
+// needs to learn about disk-write failures.
 func (bm *FileBanManager) BanHWID(hwid string) {
-	bm.mu.Lock()
+	_ = bm.BanHWIDWithReason(hwid, "") //nolint:errcheck
+}
 
+// BanHWIDWithReason bans a hardware identifier with an optional reason and
+// returns any persistence error to the caller.
+func (bm *FileBanManager) BanHWIDWithReason(hwid, reason string) error {
+	bm.mu.Lock()
 	entry, ok := bm.hwidBans[hwid]
 	if !ok {
 		entry = &BanEntry{Address: hwid}
@@ -179,9 +213,11 @@ func (bm *FileBanManager) BanHWID(hwid string) {
 	}
 	entry.Banned = true
 	entry.BannedAt = time.Now()
-
+	if reason != "" {
+		entry.Reason = reason
+	}
 	bm.mu.Unlock()
-	_ = bm.save() //nolint:errcheck
+	return bm.save()
 }
 
 // UnbanHWID removes the ban for a hardware identifier and persists to disk.
@@ -211,6 +247,19 @@ func (bm *FileBanManager) BannedHWIDList() []string {
 	return list
 }
 
+// BannedHWIDEntries returns full ban entries for all banned HWIDs.
+func (bm *FileBanManager) BannedHWIDEntries() []BanEntry {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	var list []BanEntry
+	for _, entry := range bm.hwidBans {
+		if entry.Banned {
+			list = append(list, *entry)
+		}
+	}
+	return list
+}
+
 // IsNicknameBanned returns true if the nickname is currently banned.
 func (bm *FileBanManager) IsNicknameBanned(nickname string) bool {
 	bm.mu.RLock()
@@ -221,9 +270,16 @@ func (bm *FileBanManager) IsNicknameBanned(nickname string) bool {
 }
 
 // BanNickname immediately bans a nickname and persists to disk.
+// Persistence errors are swallowed — use BanNicknameWithReason when the caller
+// needs to learn about disk-write failures.
 func (bm *FileBanManager) BanNickname(nickname string) {
-	bm.mu.Lock()
+	_ = bm.BanNicknameWithReason(nickname, "") //nolint:errcheck
+}
 
+// BanNicknameWithReason bans a nickname with an optional reason and returns
+// any persistence error to the caller.
+func (bm *FileBanManager) BanNicknameWithReason(nickname, reason string) error {
+	bm.mu.Lock()
 	entry, ok := bm.nickBans[nickname]
 	if !ok {
 		entry = &BanEntry{Address: nickname}
@@ -231,9 +287,11 @@ func (bm *FileBanManager) BanNickname(nickname string) {
 	}
 	entry.Banned = true
 	entry.BannedAt = time.Now()
-
+	if reason != "" {
+		entry.Reason = reason
+	}
 	bm.mu.Unlock()
-	_ = bm.save() //nolint:errcheck
+	return bm.save()
 }
 
 // UnbanNickname removes the ban for a nickname and persists to disk.
@@ -258,6 +316,19 @@ func (bm *FileBanManager) BannedNicknameList() []string {
 	for nick, entry := range bm.nickBans {
 		if entry.Banned {
 			list = append(list, nick)
+		}
+	}
+	return list
+}
+
+// BannedNicknameEntries returns full ban entries for all banned nicknames.
+func (bm *FileBanManager) BannedNicknameEntries() []BanEntry {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	var list []BanEntry
+	for _, entry := range bm.nickBans {
+		if entry.Banned {
+			list = append(list, *entry)
 		}
 	}
 	return list

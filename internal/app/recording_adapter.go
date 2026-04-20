@@ -89,26 +89,21 @@ func (s *ServerApp) StartRecording(mode echowarp.RecordingMode) error {
 		return nil
 	}
 
-	// Non-conference mode: use server-local recorder.
-	s.recorderMu.Lock()
-	if s.recorder != nil && s.recorder.IsActive() {
-		s.recorderMu.Unlock()
+	// Non-conference mode: use server-local recorder. startRecordingSession
+	// performs the check-and-start atomically under the mixin lock so two
+	// concurrent API calls cannot both create recorders.
+	dir, alreadyActive, err := s.startRecordingSession(audioMode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir())
+	if alreadyActive {
 		return ewerrors.NewError(ewerrors.ErrInternalState, "Recording already active").
 			WithSuggestion("Stop the current recording via POST /api/v1/recording/stop before starting a new one")
 	}
-	s.recorderMu.Unlock()
-
-	if err := s.startRecordingInternal(audioMode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
+	if err != nil {
 		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to start recording")
 	}
 	s.recState.mu.Lock()
 	s.recState.mode = mode
 	s.recState.startedAt = time.Now()
-	s.recorderMu.Lock()
-	if s.recorder != nil {
-		s.recState.dir = s.recorder.Dir()
-	}
-	s.recorderMu.Unlock()
+	s.recState.dir = dir
 	s.recState.mu.Unlock()
 	s.logger.Info("Recording started via API", "mode", mode)
 	return nil
@@ -162,9 +157,7 @@ func (s *ServerApp) RecordingStatus() echowarp.RecordingStatus {
 	if s.conference != nil {
 		active = s.conference.IsRecording()
 	} else {
-		s.recorderMu.Lock()
-		active = s.recorder != nil && s.recorder.IsActive()
-		s.recorderMu.Unlock()
+		active = s.isRecordingActive()
 	}
 	if !active {
 		return echowarp.RecordingStatus{}
@@ -191,29 +184,22 @@ func (s *ServerApp) RecordingStatus() echowarp.RecordingStatus {
 
 // StartRecording implements echowarp.RecordingController.
 func (c *ClientApp) StartRecording(mode echowarp.RecordingMode) error {
-	c.recorderMu.Lock()
-	if c.recorder != nil && c.recorder.IsActive() {
-		c.recorderMu.Unlock()
+	audioMode := recordingModeToAudio(mode)
+	// Atomic check-and-start via the mixin — fixes the previous TOCTOU where
+	// the recorderMu was released between IsActive() and startRecordingInternal
+	// so two concurrent API calls could both pass the guard and leak a recorder.
+	dir, alreadyActive, err := c.startRecordingSession(audioMode, c.cfg.SampleRate, c.cfg.EffectiveRecordDir())
+	if alreadyActive {
 		return ewerrors.NewError(ewerrors.ErrInternalState, "Recording already active").
 			WithSuggestion("Stop the current recording via POST /api/v1/recording/stop before starting a new one")
 	}
-	c.recorderMu.Unlock()
-
-	audioMode := recordingModeToAudio(mode)
-	// Delegate to the existing internal helper so the directory
-	// resolution (Documents/EchoWarp_records/<ts>) stays in one place.
-	if err := c.startRecordingInternal(audioMode, c.cfg.SampleRate, c.cfg.EffectiveRecordDir()); err != nil {
+	if err != nil {
 		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to start recording")
 	}
-
 	c.recState.mu.Lock()
 	c.recState.mode = mode
 	c.recState.startedAt = time.Now()
-	c.recorderMu.Lock()
-	if c.recorder != nil {
-		c.recState.dir = c.recorder.Dir()
-	}
-	c.recorderMu.Unlock()
+	c.recState.dir = dir
 	c.recState.mu.Unlock()
 	c.logger.Info("Recording started via API", "mode", mode)
 	return nil
@@ -255,10 +241,7 @@ func (c *ClientApp) StopRecording() (echowarp.RecordingResult, error) {
 
 // RecordingStatus implements echowarp.RecordingController.
 func (c *ClientApp) RecordingStatus() echowarp.RecordingStatus {
-	c.recorderMu.Lock()
-	active := c.recorder != nil && c.recorder.IsActive()
-	c.recorderMu.Unlock()
-	if !active {
+	if !c.isRecordingActive() {
 		return echowarp.RecordingStatus{}
 	}
 	c.recState.mu.Lock()

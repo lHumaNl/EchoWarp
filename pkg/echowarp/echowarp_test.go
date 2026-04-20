@@ -71,14 +71,30 @@ func (m *mockBanManager) BannedList() []string {
 }
 func (m *mockBanManager) Close() error { return nil }
 
-func (m *mockBanManager) IsHWIDBanned(_ string) bool     { return false }
-func (m *mockBanManager) BanHWID(_ string)               {}
-func (m *mockBanManager) UnbanHWID(_ string)             {}
-func (m *mockBanManager) BannedHWIDList() []string       { return nil }
-func (m *mockBanManager) IsNicknameBanned(_ string) bool { return false }
-func (m *mockBanManager) BanNickname(_ string)           {}
-func (m *mockBanManager) UnbanNickname(_ string)         {}
-func (m *mockBanManager) BannedNicknameList() []string   { return nil }
+func (m *mockBanManager) BanWithReason(addr, _ string) error { m.Ban(addr); return nil }
+func (m *mockBanManager) BannedEntries() []ban.BanEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ban.BanEntry, 0, len(m.banned))
+	for addr, b := range m.banned {
+		if b {
+			out = append(out, ban.BanEntry{Address: addr, Banned: true})
+		}
+	}
+	return out
+}
+func (m *mockBanManager) IsHWIDBanned(_ string) bool              { return false }
+func (m *mockBanManager) BanHWID(_ string)                        {}
+func (m *mockBanManager) BanHWIDWithReason(_, _ string) error     { return nil }
+func (m *mockBanManager) UnbanHWID(_ string)                      {}
+func (m *mockBanManager) BannedHWIDList() []string                { return nil }
+func (m *mockBanManager) BannedHWIDEntries() []ban.BanEntry       { return nil }
+func (m *mockBanManager) IsNicknameBanned(_ string) bool          { return false }
+func (m *mockBanManager) BanNickname(_ string)                    {}
+func (m *mockBanManager) BanNicknameWithReason(_, _ string) error { return nil }
+func (m *mockBanManager) UnbanNickname(_ string)                  {}
+func (m *mockBanManager) BannedNicknameList() []string            { return nil }
+func (m *mockBanManager) BannedNicknameEntries() []ban.BanEntry   { return nil }
 
 var _ ban.BanManager = (*mockBanManager)(nil)
 

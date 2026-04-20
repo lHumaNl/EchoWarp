@@ -53,7 +53,7 @@ func TestVolumeAdjust_FullChain(t *testing.T) {
 	// But tryStart is value receiver - let's call it explicitly.
 	m2, cmd := m.tryStart()
 	_ = m2
-	
+
 	// tryStart returns a tea.Cmd that produces SetupDoneMsg. Execute it.
 	if cmd == nil {
 		t.Log("Step 3: tryStart returned nil cmd (validation error?)")
@@ -62,14 +62,14 @@ func TestVolumeAdjust_FullChain(t *testing.T) {
 		// is BuildConfig preserves volume, which we verified above.
 		return
 	}
-	
+
 	msg := cmd()
 	doneMsg, ok := msg.(SetupDoneMsg)
 	if !ok {
 		t.Logf("Step 3: cmd returned %T, not SetupDoneMsg", msg)
 		return
 	}
-	
+
 	t.Logf("Step 3: SetupDoneMsg devices count = %d", len(doneMsg.Config.Devices))
 	for i, d := range doneMsg.Config.Devices {
 		t.Logf("  Device[%d]: %s Volume=%.2f", i, d.Name, d.Volume)
@@ -96,11 +96,11 @@ func TestVolumeAdjust_SimulateUpdateLoop(t *testing.T) {
 
 	// Simulate Update() returning after handleVolumeAdjust
 	m, _ = m.handleVolumeAdjust(true) // 0.9
-	
+
 	// Check: does the RETURNED m have the updated outputDevices?
 	t.Logf("After handleVolumeAdjust, m.outputDevices[0].Volume = %.2f", m.outputDevices[0].Volume)
 	assert.InDelta(t, 0.9, m.outputDevices[0].Volume, 0.01)
-	
+
 	// Simulate another call
 	m, _ = m.handleVolumeAdjust(true) // 0.8
 	t.Logf("After 2nd handleVolumeAdjust, m.outputDevices[0].Volume = %.2f", m.outputDevices[0].Volume)

@@ -106,7 +106,6 @@ func TestPersistServerRuntime_UpdatesVolumeAndAGC(t *testing.T) {
 	assert.True(t, mp.Devices[0].AGC)
 	// Device Name preserved:
 	assert.Equal(t, "Mic", mp.Devices[0].Name)
-
 }
 
 func TestPersistRuntime_EmptyStatesIsNoop(t *testing.T) {
