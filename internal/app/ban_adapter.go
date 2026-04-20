@@ -31,32 +31,33 @@ func (s *ServerApp) BanList() []echowarp.BanEntry {
 	if s.banMgr == nil {
 		return []echowarp.BanEntry{}
 	}
-	ips := s.banMgr.BannedList()
-	hwids := s.banMgr.BannedHWIDList()
-	nicks := s.banMgr.BannedNicknameList()
+	ips := s.banMgr.BannedEntries()
+	hwids := s.banMgr.BannedHWIDEntries()
+	nicks := s.banMgr.BannedNicknameEntries()
 
 	out := make([]echowarp.BanEntry, 0, len(ips)+len(hwids)+len(nicks))
-	// TODO(task-019): the file-backed ban.BanManager interface does not
-	// expose the BannedAt timestamp for listing, only via the internal
-	// banFileData. Until that API is widened, CreatedAt on listed
-	// entries is the zero value. The Reason field is likewise lost on
-	// round-trip (the internal BanEntry has no Reason column).
-	for _, ip := range ips {
+	for _, e := range ips {
 		out = append(out, echowarp.BanEntry{
-			ID: banIDPrefixIP + ip,
-			IP: ip,
+			ID:        banIDPrefixIP + e.Address,
+			IP:        e.Address,
+			Reason:    e.Reason,
+			CreatedAt: e.BannedAt,
 		})
 	}
-	for _, hwid := range hwids {
+	for _, e := range hwids {
 		out = append(out, echowarp.BanEntry{
-			ID:   banIDPrefixHWID + hwid,
-			HWID: hwid,
+			ID:        banIDPrefixHWID + e.Address,
+			HWID:      e.Address,
+			Reason:    e.Reason,
+			CreatedAt: e.BannedAt,
 		})
 	}
-	for _, nick := range nicks {
+	for _, e := range nicks {
 		out = append(out, echowarp.BanEntry{
-			ID:       banIDPrefixNickname + nick,
-			Nickname: nick,
+			ID:        banIDPrefixNickname + e.Address,
+			Nickname:  e.Address,
+			Reason:    e.Reason,
+			CreatedAt: e.BannedAt,
 		})
 	}
 	return out
@@ -73,25 +74,24 @@ func (s *ServerApp) AddBan(entry echowarp.BanEntry) error {
 		return ewerrors.NewError(ewerrors.ErrInternalState, "Server has no ban manager configured").
 			WithSuggestion("Configure a ban manager via WithBanManager on the Node before adding bans")
 	}
+	var persistErr error
 	switch {
 	case entry.IP != "":
-		s.banMgr.Ban(entry.IP)
+		persistErr = s.banMgr.BanWithReason(entry.IP, entry.Reason)
 	case entry.HWID != "":
-		s.banMgr.BanHWID(entry.HWID)
+		persistErr = s.banMgr.BanHWIDWithReason(entry.HWID, entry.Reason)
 	case entry.Nickname != "":
-		s.banMgr.BanNickname(entry.Nickname)
+		persistErr = s.banMgr.BanNicknameWithReason(entry.Nickname, entry.Reason)
 	default:
 		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Ban entry requires a subject").
 			WithSuggestion("Set exactly one of ip, hwid, or nickname on the ban entry")
 	}
-	// TODO(task-019): s.banMgr.Ban* methods swallow their persistence
-	// error (see pkg/echowarp/ban/manager.go — _ = bm.save()). Once
-	// that is widened to return an error, propagate it here so the
-	// API caller learns about disk write failures. Similarly, the
-	// internal BanEntry has no Reason/CreatedAt columns, so those
-	// request fields are dropped on persist.
-	_ = entry.CreatedAt
-	_ = entry.Reason
+	if persistErr != nil {
+		return ewerrors.Wrap(persistErr, ewerrors.ErrInternalState, "Failed to persist ban")
+	}
+	// entry.CreatedAt is not threaded through — the ban manager uses
+	// wall-clock time at the moment of persistence (BannedAt field). Same
+	// value is returned from subsequent GET /bans via BannedEntries().
 	return nil
 }
 
