@@ -229,19 +229,23 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 			// across restarts. Only when cfg.LogLevel is still at default.
 			if cfg.LogLevel == "" || cfg.LogLevel == "info" {
 				for _, rs := range recentServers {
-					if rs.LogLevel != "" {
-						m.cfg.LogLevel = rs.LogLevel
-						setField := func(fields []SetupField, key, value string) {
-							for i := range fields {
-								if fields[i].Key == key {
-									fields[i].SetValue(value, SourceConfig)
-									return
-								}
-							}
-						}
-						setField(m.AdvancedFields, "log_level", rs.LogLevel)
-						break
+					if rs.LogLevel == "" {
+						continue
 					}
+					m.cfg.LogLevel = rs.LogLevel
+					// "info" is the default — restore it with SourceDefault
+					// so the UI doesn't flag it with a ✓ user-set marker.
+					src := SourceConfig
+					if rs.LogLevel == "info" {
+						src = SourceDefault
+					}
+					for i := range m.AdvancedFields {
+						if m.AdvancedFields[i].Key == "log_level" {
+							m.AdvancedFields[i].SetValue(rs.LogLevel, src)
+							break
+						}
+					}
+					break
 				}
 			}
 		}
@@ -314,10 +318,27 @@ func (m SetupModel) WithUnifiedDuplex(allDevices list.Model) SetupModel {
 // In duplex: two checkbox columns (Capture/Playback). In normal/reverse: one column (Select).
 func (m SetupModel) WithUnifiedDeviceList(isDuplex bool) SetupModel {
 	m.unifiedDuplex = true
-	m.isDuplexMode = isDuplex
+	// Preserve isDuplexMode when already set by applyFieldDependencies from the
+	// restored Mode field (duplex/conference presets): overwriting with the
+	// caller's isDuplex flag (derived from cfg.Duplex, which is false after a
+	// plain restart without CLI) would hide the output section on startup.
+	if isDuplex {
+		m.isDuplexMode = true
+	}
 	m.multiSelect = make(map[string]DeviceRoleSet)
 	m.HasOutputList = false
-	m.DeviceSection = SectionInput
+	// Pick the initial focused section based on which ones are visible.
+	// In reverse mode the input section is hidden, so the cursor must start
+	// on Output — otherwise ↑/↓ scroll the invisible inputDevices list and
+	// no ▸ cursor is drawn until the user presses →← to re-sync.
+	showInput, showOutput := m.visibleSections()
+	if showInput {
+		m.DeviceSection = SectionInput
+	} else if showOutput {
+		m.DeviceSection = SectionOutput
+	} else {
+		m.DeviceSection = SectionInput
+	}
 	m.deviceCursor = 0
 	m.rebuildDeviceGroups()
 
