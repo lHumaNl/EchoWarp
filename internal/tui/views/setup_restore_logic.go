@@ -332,20 +332,66 @@ func (m *SetupModel) restoreModePreset(mp presetpkg.ModePreset) {
 		}
 	}
 
-	if mp.Port != 0 {
-		setIfNonEmpty(m.Fields, "port", fmt.Sprintf("%d", mp.Port))
+	// Apply per-mode defaults for fields that are zero in the stored preset —
+	// these are omitted on Save when they match DefaultsFor(mode), so we must
+	// re-hydrate them here. Otherwise conference starts with max_clients=1
+	// from cfg defaults instead of the mode default 2.
+	currentMode := ""
+	for _, f := range m.Fields {
+		if f.Key == "mode" {
+			currentMode = modeKeyFromValue(f.Value)
+			break
+		}
 	}
+	if currentMode == "" {
+		currentMode = "normal"
+	}
+	d := presetpkg.DefaultsFor(currentMode)
+	if mp.Port == 0 {
+		mp.Port = d.Port
+	}
+	if mp.MaxClients == 0 {
+		mp.MaxClients = d.MaxClients
+	}
+
+	// Use SourceDefault when the restored value matches the mode default, so
+	// unchanged fields don't get a ✓ user-set marker (symmetric with
+	// loadPresetForMode).
+	setFieldWithDefault := func(fields []SetupField, key, value, defaultValue string) {
+		for i := range fields {
+			if fields[i].Key == key {
+				src := SourceConfig
+				if value == defaultValue {
+					src = SourceDefault
+				}
+				fields[i].SetValue(value, src)
+				return
+			}
+		}
+	}
+	setFieldWithDefault(m.Fields, "port", fmt.Sprintf("%d", mp.Port), fmt.Sprintf("%d", d.Port))
 	setIfNonEmpty(m.Fields, "password", mp.Password)
-	if mp.MaxClients != 0 {
-		setIfNonEmpty(m.Fields, "max_clients", fmt.Sprintf("%d", mp.MaxClients))
-	}
+	setFieldWithDefault(m.Fields, "max_clients", fmt.Sprintf("%d", mp.MaxClients), fmt.Sprintf("%d", d.MaxClients))
 
 	if mp.TLS {
 		setIfNonEmpty(m.AdvancedFields, "tls", "on")
 	}
 	setIfNonEmpty(m.AdvancedFields, "tls_cert", mp.TLSCert)
 	setIfNonEmpty(m.AdvancedFields, "tls_key", mp.TLSKey)
-	setIfNonEmpty(m.AdvancedFields, "log_level", mp.LogLevel)
+	// log_level: compare to the "info" default — use SourceDefault so the UI
+	// doesn't mark an unchanged value with a ✓. Symmetric with loadPresetForMode.
+	if mp.LogLevel != "" {
+		src := SourceConfig
+		if mp.LogLevel == "info" {
+			src = SourceDefault
+		}
+		for i := range m.AdvancedFields {
+			if m.AdvancedFields[i].Key == "log_level" {
+				m.AdvancedFields[i].SetValue(mp.LogLevel, src)
+				break
+			}
+		}
+	}
 
 	m.applyFieldDependencies()
 }
@@ -391,9 +437,14 @@ func (m *SetupModel) loadPresetForMode(mode string) {
 	setField(m.AdvancedFields, "tls", tlsVal, "off")
 	setField(m.AdvancedFields, "tls_cert", mp.TLSCert, "")
 	setField(m.AdvancedFields, "tls_key", mp.TLSKey, "")
-	if mp.LogLevel != "" {
-		setField(m.AdvancedFields, "log_level", mp.LogLevel, "info")
+	// Always reset log_level on mode switch — if the target mode's preset has
+	// no log_level saved, fall back to the "info" default instead of leaking
+	// the previous mode's value.
+	logLevel := mp.LogLevel
+	if logLevel == "" {
+		logLevel = "info"
 	}
+	setField(m.AdvancedFields, "log_level", logLevel, "info")
 
 	m.applyFieldDependencies()
 }
