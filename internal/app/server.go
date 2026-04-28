@@ -82,6 +82,15 @@ type ServerApp struct {
 	// Recording command channel for receiving start/stop commands from TUI.
 	recordingCmdCh <-chan RecordingCommand
 
+	// captureHub is the single shared capture goroutine for non-conference
+	// multi-client mode. Created lazily on the first DirectionSend client via
+	// ensureCaptureHub; per-client encoders subscribe to it and apply
+	// per-client gain before encoding. See .tasks/024-*.md.
+	captureHub     *SharedCaptureHub
+	captureHubMu   sync.Mutex
+	captureHubGain *DeviceGainControl
+	captureHubAGC  map[uint32]*audio.AGCProcessor
+
 	// Non-conference recording support (shared with ClientApp via mixin).
 	RecordingMixin
 
@@ -186,6 +195,25 @@ type multiClient struct {
 	mutedOutgoing atomic.Bool           // Server-initiated mute: server stops sending audio to this client.
 	mutedIncoming atomic.Bool           // Server-initiated mute: server stops receiving audio from this client.
 	paused        atomic.Bool           // Per-client pause: client paused its capture.
+
+	// clientGain controls per-client output volume when the server streams via
+	// SharedCaptureHub (non-conference, non-duplex multi-client). Nil when
+	// per-client gain is not applicable (conference uses its mixer, duplex
+	// multi-client still uses per-pipeline capture — see .tasks/024-*.md).
+	clientGainMu sync.RWMutex
+	clientGain   *DeviceGainControl
+}
+
+func (mc *multiClient) setClientGain(gain *DeviceGainControl) {
+	mc.clientGainMu.Lock()
+	defer mc.clientGainMu.Unlock()
+	mc.clientGain = gain
+}
+
+func (mc *multiClient) getClientGain() *DeviceGainControl {
+	mc.clientGainMu.RLock()
+	defer mc.clientGainMu.RUnlock()
+	return mc.clientGain
 }
 
 // NewServerApp creates a new server application with the given configuration.

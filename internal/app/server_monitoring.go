@@ -338,7 +338,25 @@ func (s *ServerApp) adjustClientVolume(clientID string, delta float64) {
 		return
 	}
 
-	s.logger.Info("Client volume adjusted (no conference mixer)", "clientID", clientID, "nickname", nick, "delta", delta)
+	// Non-conference multi-client: route to the per-client gain on the
+	// SharedCaptureHub subscriber. The gain pointer is guarded because it is set by
+	// startSharedCaptureClient when the per-client encoder starts.
+	clientGain := mc.getClientGain()
+	if clientGain != nil {
+		cur := clientGain.Gain()
+		newVol := cur + float32(delta)
+		if newVol > 1.5 {
+			newVol = 1.5
+		}
+		if newVol < 0 {
+			newVol = 0
+		}
+		clientGain.SetGain(newVol)
+		s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", newVol)
+		return
+	}
+
+	s.logger.Info("Client volume adjusted (no per-client gain wired)", "clientID", clientID, "nickname", nick, "delta", delta)
 }
 
 // processRecordingCommands handles recording start/stop commands from TUI.

@@ -442,9 +442,10 @@ func TestServerApp_SetupMultiClientAudio_Success(t *testing.T) {
 	require.NoError(t, err)
 	defer peer.Close()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	audioDone, ok := app.setupMultiClientAudio(ctx, peer, transport.DirectionSend, "client-1")
+	audioDone, ok := app.setupMultiClientAudio(ctx, ctx, peer, transport.DirectionSend, "client-1")
 
 	assert.True(t, ok)
 	assert.NotNil(t, audioDone)

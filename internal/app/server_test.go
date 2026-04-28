@@ -1252,8 +1252,9 @@ func TestServerApp_SetupMultiClientAudio_ReceiveMode(t *testing.T) {
 	require.NoError(t, err)
 	defer peer.Close()
 
-	ctx := context.Background()
-	audioDone, ok := app.setupMultiClientAudio(ctx, peer, transport.DirectionReceive, "test-client")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	audioDone, ok := app.setupMultiClientAudio(ctx, ctx, peer, transport.DirectionReceive, "test-client")
 
 	assert.True(t, ok)
 	assert.NotNil(t, audioDone)
@@ -1270,8 +1271,9 @@ func TestServerApp_SetupMultiClientAudio_SendMode(t *testing.T) {
 	require.NoError(t, err)
 	defer peer.Close()
 
-	ctx := context.Background()
-	audioDone, ok := app.setupMultiClientAudio(ctx, peer, transport.DirectionSend, "test-client")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	audioDone, ok := app.setupMultiClientAudio(ctx, ctx, peer, transport.DirectionSend, "test-client")
 
 	assert.True(t, ok)
 	assert.NotNil(t, audioDone)

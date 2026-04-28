@@ -231,7 +231,7 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 		return
 	}
 
-	audioDone, ok := s.setupMultiClientAudio(sigCtx, peer, direction, clientID)
+	audioDone, ok := s.setupMultiClientAudio(ctx, sigCtx, peer, direction, clientID)
 	if !ok {
 		return
 	}
@@ -333,7 +333,7 @@ func (s *ServerApp) createMultiClientPeer(mc *multiClient, clientID string) (tra
 	return peer, direction, true
 }
 
-func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string) (<-chan error, bool) {
+func (s *ServerApp) setupMultiClientAudio(serverCtx, clientCtx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string) (<-chan error, bool) {
 	if s.conference != nil {
 		s.mu.RLock()
 		mc := s.clients[clientID]
@@ -342,7 +342,7 @@ func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.Pe
 		if mc != nil {
 			muteIncomingFlag = &mc.mutedIncoming
 		}
-		audioDone, err := s.setupConferenceAudioPipeline(ctx, peer, clientID, muteIncomingFlag)
+		audioDone, err := s.setupConferenceAudioPipeline(clientCtx, peer, clientID, muteIncomingFlag)
 		if err != nil {
 			s.logger.Warn("Failed to setup conference audio", "clientID", clientID, "error", err)
 			return nil, false
@@ -361,7 +361,7 @@ func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.Pe
 		muteIncomingFlag = &mc.mutedIncoming
 	}
 
-	audioDone, err := s.setupAudioPipelineMulti(ctx, peer, direction, muteFlag, muteOutgoingFlag, muteIncomingFlag)
+	audioDone, err := s.setupAudioPipelineMulti(serverCtx, clientCtx, peer, direction, clientID, mc, muteFlag, muteOutgoingFlag, muteIncomingFlag)
 	if err != nil {
 		s.logger.Warn("Failed to setup audio", "clientID", clientID, "error", err)
 		return nil, false
@@ -372,7 +372,12 @@ func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.Pe
 // setupAudioPipelineMulti is like setupAudioPipeline but uses per-client mute flags
 // instead of the shared s.clientMuted. This ensures muting one client doesn't affect others.
 // muteFlag is client-initiated mute, muteOutgoingFlag is server-initiated mute.
-func (s *ServerApp) setupAudioPipelineMulti(ctx context.Context, peer transport.PeerManager, direction transport.MediaDirection, muteFlag, muteOutgoingFlag, muteIncomingFlag *atomic.Bool) (<-chan error, error) {
+//
+// For DirectionSend (normal mode), the server uses a single SharedCaptureHub and
+// a per-client encoder with per-client gain — see .tasks/024-*.md. Duplex and
+// reverse paths still run per-client capture pipelines; that migration is
+// Phase 2 and requires an AEC semantics decision.
+func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string, mc *multiClient, muteFlag, muteOutgoingFlag, muteIncomingFlag *atomic.Bool) (<-chan error, error) {
 	audioDone := make(chan error, 2)
 
 	// Use no-op flags if nil (shouldn't happen, but safe).
@@ -392,26 +397,191 @@ func (s *ServerApp) setupAudioPipelineMulti(ctx context.Context, peer transport.
 		if err != nil {
 			return nil, ewerrors.Wrap(err, ewerrors.ErrConnectionFailed, "add audio track")
 		}
-		filteredSendCh := newCombinedMuteFilterCh(ctx, sendCh, muteFlag, muteOutgoingFlag)
-		filteredSendCh = s.newServerPauseFilterCh(ctx, filteredSendCh)
+		filteredSendCh := newCombinedMuteFilterCh(clientCtx, sendCh, muteFlag, muteOutgoingFlag)
+		filteredSendCh = s.newServerPauseFilterCh(clientCtx, filteredSendCh)
 		go func() {
-			audioDone <- s.runCapturePipeline(ctx, filteredSendCh)
+			audioDone <- s.runCapturePipeline(clientCtx, filteredSendCh)
 		}()
-		s.setupReverseAudioMuted(ctx, peer, audioDone, "", muteIncomingFlag)
+		s.setupReverseAudioMuted(clientCtx, peer, audioDone, "", muteIncomingFlag)
 	case transport.DirectionSend:
 		sendCh, err := peer.AddAudioTrack(s.cfg.SampleRate, s.cfg.Channels)
 		if err != nil {
 			return nil, ewerrors.Wrap(err, ewerrors.ErrConnectionFailed, "add audio track")
 		}
-		filteredSendCh := newCombinedMuteFilterCh(ctx, sendCh, muteFlag, muteOutgoingFlag)
-		filteredSendCh = s.newServerPauseFilterCh(ctx, filteredSendCh)
-		go func() {
-			audioDone <- s.runCapturePipeline(ctx, filteredSendCh)
-		}()
+		filteredSendCh := newCombinedMuteFilterCh(clientCtx, sendCh, muteFlag, muteOutgoingFlag)
+		filteredSendCh = s.newServerPauseFilterCh(clientCtx, filteredSendCh)
+		if s.shouldUseLegacyMultiCapture() {
+			s.logger.Warn("Shared capture hub: multi-device capture not supported in Phase 1; using legacy per-client multi-capture path")
+			go func() {
+				audioDone <- s.runCapturePipeline(clientCtx, filteredSendCh)
+			}()
+			break
+		}
+		if err := s.startSharedCaptureClient(serverCtx, clientCtx, clientID, mc, filteredSendCh, audioDone); err != nil {
+			return nil, err
+		}
 	default:
-		s.setupReverseAudioMuted(ctx, peer, audioDone, "", muteIncomingFlag)
+		s.setupReverseAudioMuted(clientCtx, peer, audioDone, "", muteIncomingFlag)
 	}
 	return audioDone, nil
+}
+
+func (s *ServerApp) shouldUseLegacyMultiCapture() bool {
+	return len(s.cfg.CaptureDevices()) > 1
+}
+
+// startSharedCaptureClient starts a per-client encoder goroutine backed by the
+// shared capture hub. The hub is created on first call and reused for all
+// subsequent clients in this server run.
+func (s *ServerApp) startSharedCaptureClient(serverCtx, clientCtx context.Context, clientID string, mc *multiClient, sendCh chan<- []byte, audioDone chan<- error) error {
+	hub, err := s.ensureCaptureHub(serverCtx)
+	if err != nil {
+		return err
+	}
+
+	// Per-client volume control, stored on multiClient for adjustClientVolume.
+	gain := NewDeviceGainControl(1.0)
+	if mc != nil {
+		mc.setClientGain(gain)
+	}
+
+	sub := hub.Subscribe(clientID)
+
+	encCfg := PerClientEncoderConfig{
+		SampleRate: s.cfg.SampleRate,
+		Channels:   s.cfg.Channels,
+		Encoder: EncoderConfig{
+			Bitrate:     s.cfg.OpusBitrate,
+			Complexity:  s.cfg.OpusComplexity,
+			DTX:         s.cfg.OpusDTX,
+			FEC:         s.cfg.OpusFEC,
+			Application: s.cfg.OpusApplication,
+		},
+		Gain: gain,
+		ConfigureEncoder: func(enc *audio.OpusEncoder) {
+			if err := enc.SetComplexity(s.cfg.OpusComplexity); err != nil {
+				s.logger.Warn("Failed to set opus complexity", "error", err)
+			}
+			if err := enc.SetDTX(s.cfg.OpusDTX); err != nil {
+				s.logger.Warn("Failed to set opus DTX", "error", err)
+			}
+			if err := enc.SetInBandFEC(s.cfg.OpusFEC); err != nil {
+				s.logger.Warn("Failed to set opus FEC", "error", err)
+			}
+		},
+	}
+
+	go func() {
+		audioDone <- runPerClientEncoder(clientCtx, sub, encCfg, sendCh, s.logger)
+	}()
+	return nil
+}
+
+// ensureCaptureHub lazily creates and starts the shared capture hub. Thread-safe;
+// subsequent callers receive the running hub. Hub lifetime is bound to the
+// passed ctx — in practice the server's runMulti ctx.
+func (s *ServerApp) ensureCaptureHub(ctx context.Context) (*SharedCaptureHub, error) {
+	s.captureHubMu.Lock()
+	defer s.captureHubMu.Unlock()
+	if s.captureHub != nil {
+		return s.captureHub, nil
+	}
+
+	captureSpectrum := s.captureSpectrum
+	captureLevel := s.captureLevelMeter
+	if captureSpectrum == nil {
+		captureSpectrum = s.spectrum
+	}
+	if captureLevel == nil {
+		captureLevel = s.levelMeter
+	}
+
+	// Recording tap feeds the non-conference recorder exactly once per frame,
+	// fixing the per-pipeline duplicate writes from the old architecture.
+	recTap := func(samples []float32) {
+		s.recorderMu.Lock()
+		rec := s.recorder
+		s.recorderMu.Unlock()
+		if rec != nil && rec.IsActive() {
+			_ = rec.WriteMix(samples) //nolint:errcheck
+		}
+	}
+
+	captureDevices := s.cfg.CaptureDevices()
+	var deviceID uint32
+	if len(captureDevices) >= 1 {
+		deviceID = captureDevices[0].ID
+		if len(captureDevices) > 1 {
+			return nil, ewerrors.NewError(ewerrors.ErrInternalState, "shared capture hub does not support multiple capture devices")
+		}
+	} else if s.cfg.DeviceID != nil {
+		deviceID = *s.cfg.DeviceID
+	}
+	// deviceID = 0 is tolerated here: hub.Run will fail at capturer.Start,
+	// which surfaces asynchronously via audioDone — matches old
+	// runCapturePipeline behavior that tests rely on.
+
+	var initialVol float32 = 1.0
+	if len(captureDevices) == 1 {
+		initialVol = float32(captureDevices[0].Volume)
+	}
+	gainCtl := NewDeviceGainControl(initialVol)
+
+	agcMap := buildAGCProcessors(captureDevices, s.cfg.SampleRate)
+	var agcProc *audio.AGCProcessor
+	if agcMap != nil {
+		agcProc = agcMap[deviceID]
+	}
+
+	hubCfg := CapturePipelineConfig{
+		SampleRate:           s.cfg.SampleRate,
+		Channels:             s.cfg.Channels,
+		DeviceID:             deviceID,
+		AudioBufferFrames:    s.cfg.EffectiveAudioBufferFrames(),
+		IsLoopback:           s.cfg.Loopback,
+		LoopbackOutputDevice: s.cfg.LoopbackOutputDevice,
+		LoopbackBlackHole:    s.cfg.LoopbackBlackHole,
+		AEC:                  s.aec,
+		AGC:                  agcProc,
+		Spectrum:             captureSpectrum,
+		LevelMeter:           captureLevel,
+		RecordingTap:         recTap,
+		GainControl:          gainCtl,
+	}
+
+	hub := NewSharedCaptureHub(hubCfg, s.logger)
+	hubCtx, hubCancel := context.WithCancel(ctx)
+
+	go func() {
+		defer hubCancel()
+		err := hub.Run(hubCtx)
+		s.resetCaptureHub(hub)
+		if err != nil && ctx.Err() == nil {
+			s.logger.Error("Shared capture hub exited with error", "error", err)
+		}
+	}()
+
+	// Single HandleDeviceCommands consumer for the server — previously each
+	// per-client pipeline started its own goroutine which raced on the shared
+	// s.deviceCmdCh (commands landed in whichever goroutine won the race).
+	go HandleDeviceCommands(hubCtx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
+
+	s.captureHub = hub
+	s.captureHubGain = gainCtl
+	s.captureHubAGC = agcMap
+
+	return hub, nil
+}
+
+func (s *ServerApp) resetCaptureHub(hub *SharedCaptureHub) {
+	s.captureHubMu.Lock()
+	defer s.captureHubMu.Unlock()
+	if s.captureHub != hub {
+		return
+	}
+	s.captureHub = nil
+	s.captureHubGain = nil
+	s.captureHubAGC = nil
 }
 
 // setupConferenceAudioPipeline creates bidirectional audio for conference mode:
