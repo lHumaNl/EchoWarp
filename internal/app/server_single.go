@@ -931,7 +931,15 @@ func (s *ServerApp) handleDCControl(raw []byte, connStart time.Time, nickname st
 	return false
 }
 
+type capturePipelineOptions struct {
+	HandleDeviceCommands bool
+}
+
 func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte) error {
+	return s.runCapturePipelineWithOptions(ctx, sendCh, capturePipelineOptions{HandleDeviceCommands: true})
+}
+
+func (s *ServerApp) runCapturePipelineWithOptions(ctx context.Context, sendCh chan<- []byte, opts capturePipelineOptions) error {
 	encCfg := EncoderConfig{
 		Bitrate:     s.cfg.OpusBitrate,
 		Complexity:  s.cfg.OpusComplexity,
@@ -978,7 +986,9 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
 			RecordingTap:  recTap,
 		}, s.logger)
-		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
+		if opts.HandleDeviceCommands {
+			go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
+		}
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1026,6 +1036,8 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		GainControl:          gainCtl,
 	}, s.logger)
 
-	go HandleDeviceCommands(ctx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
+	if opts.HandleDeviceCommands {
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
+	}
 	return pipeline.Run(ctx, sendCh)
 }

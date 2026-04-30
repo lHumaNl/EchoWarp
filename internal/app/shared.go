@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -342,8 +343,13 @@ pumpLoop:
 // is started and mixed with the stream before writing to the output device.
 // Sends any error to audioDone. Does nothing if deviceID is nil.
 func startAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}) {
+	startAudioPlayerWithStartup(ctx, logger, cfg, playbackCh, audioDone, readyCh, nil)
+}
+
+func startAudioPlayerWithStartup(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}, startupCh chan<- error) {
 	if cfg.DeviceID == nil {
 		logger.Warn("No output device specified, audio will not be played")
+		notifyAudioPlayerStartup(ctx, startupCh, errors.New("no output device specified"))
 		return
 	}
 
@@ -364,63 +370,84 @@ func startAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Confi
 		actualPlaybackCh = mixedCh
 	}
 
-	go func() {
-		player, err := audio.NewPlayer(cfg.SampleRate, cfg.Channels)
-		if err != nil {
-			logger.Error("Player: NewPlayer failed", "error", err, "deviceID", *cfg.DeviceID)
-			audioDone <- err
+	go runAudioPlayer(ctx, logger, cfg, actualPlaybackCh, audioDone, readyCh, startupCh)
+}
+
+func runAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}, startupCh chan<- error) {
+	player, err := audio.NewPlayer(cfg.SampleRate, cfg.Channels)
+	if err != nil {
+		logger.Error("Player: NewPlayer failed", "error", err, "deviceID", *cfg.DeviceID)
+		reportAudioPlayerStartupFailure(ctx, audioDone, startupCh, err)
+		return
+	}
+	defer func() { _ = player.Close() }() //nolint:errcheck
+	if err := waitAudioPlayerReady(ctx, logger, readyCh); err != nil {
+		reportAudioPlayerStartupFailure(ctx, audioDone, startupCh, err)
+		return
+	}
+	if err := player.Start(ctx, *cfg.DeviceID, playbackCh); err != nil {
+		logger.Error("Player: Start failed — no audio output", "error", err, "deviceID", *cfg.DeviceID)
+		reportAudioPlayerStartupFailure(ctx, audioDone, startupCh, err)
+		return
+	}
+	notifyAudioPlayerStartup(ctx, startupCh, nil)
+	logger.Info("Player started", "deviceID", *cfg.DeviceID, "sampleRate", cfg.SampleRate, "channels", cfg.Channels)
+	go logPlayerSilenceFills(ctx, logger, player)
+	<-ctx.Done()
+	audioDone <- ctx.Err()
+}
+
+func waitAudioPlayerReady(ctx context.Context, logger *slog.Logger, readyCh <-chan struct{}) error {
+	if readyCh == nil {
+		return nil
+	}
+	select {
+	case <-readyCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(5 * time.Second):
+		logger.Warn("Player: pre-fill timeout, starting device anyway")
+		return nil
+	}
+}
+
+func reportAudioPlayerStartupFailure(ctx context.Context, audioDone chan<- error, startupCh chan<- error, err error) {
+	notifyAudioPlayerStartup(ctx, startupCh, err)
+	audioDone <- err
+}
+
+func notifyAudioPlayerStartup(ctx context.Context, startupCh chan<- error, err error) {
+	if startupCh == nil {
+		return
+	}
+	select {
+	case startupCh <- err:
+	case <-ctx.Done():
+	}
+}
+
+func logPlayerSilenceFills(ctx context.Context, logger *slog.Logger, player interface{ SilenceFills() uint64 }) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	var prev uint64
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			logPlayerSilenceDelta(logger, player, &prev)
 		}
-		defer func() { _ = player.Close() }() //nolint:errcheck
-		// Wait for the pump to pre-fill playbackCh before opening the
-		// hardware device. This avoids the first ~60 malgo callbacks
-		// seeing an empty channel and emitting silence at startup.
-		// Timeout (5s) is a fallback so the player is not blocked forever
-		// if the remote track never sends audio.
-		if readyCh != nil {
-			select {
-			case <-readyCh:
-			case <-ctx.Done():
-				audioDone <- ctx.Err()
-				return
-			case <-time.After(5 * time.Second):
-				logger.Warn("Player: pre-fill timeout, starting device anyway")
-			}
-		}
-		if err := player.Start(ctx, *cfg.DeviceID, actualPlaybackCh); err != nil {
-			logger.Error("Player: Start failed — no audio output", "error", err, "deviceID", *cfg.DeviceID)
-			audioDone <- err
-			return
-		}
-		logger.Info("Player started", "deviceID", *cfg.DeviceID, "sampleRate", cfg.SampleRate, "channels", cfg.Channels)
-		// Diagnostic: log player callback silence-fills every 2 seconds,
-		// but only when the counter actually grows (delta > 0). Each fill
-		// is a pop/click caused by the player emitting zeros when
-		// playbackCh was empty at callback time.
-		go func() {
-			ticker := time.NewTicker(2 * time.Second)
-			defer ticker.Stop()
-			var prev uint64
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-ticker.C:
-					cur := player.SilenceFills()
-					delta := cur - prev
-					prev = cur
-					if delta > 0 {
-						logger.Info("Player silence-fill events",
-							"in_last_2s", delta,
-							"total", cur,
-						)
-					}
-				}
-			}
-		}()
-		<-ctx.Done()
-		audioDone <- ctx.Err()
-	}()
+	}
+}
+
+func logPlayerSilenceDelta(logger *slog.Logger, player interface{ SilenceFills() uint64 }, prev *uint64) {
+	cur := player.SilenceFills()
+	delta := cur - *prev
+	*prev = cur
+	if delta > 0 {
+		logger.Info("Player silence-fill events", "in_last_2s", delta, "total", cur)
+	}
 }
 
 // mixLocalInput captures audio from a local input device and mixes it with the

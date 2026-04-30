@@ -59,6 +59,15 @@ type ServerApp struct {
 	// AEC processor shared between capture and playback pipelines in duplex mode.
 	aec *audio.AECProcessor
 
+	// monitorMixer owns the single server-side monitor playback mix used by
+	// multi-client duplex. It is intentionally server-level: all client receive
+	// sources feed one local playback stream and one AEC reference.
+	monitorMixer        *ServerMonitorMixer
+	monitorMixerMu      sync.Mutex
+	monitorPlayerStart  monitorPlayerStarter
+	monitorPlaybackGain *DeviceGainControl
+	monitorPlaybackAGC  map[uint32]*audio.AGCProcessor
+
 	// Spectrum analyzer for TUI visualization (optional).
 	// Used for playback/decode path (incoming audio).
 	spectrum *audio.SpectrumAnalyzer

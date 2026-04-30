@@ -374,9 +374,10 @@ func (s *ServerApp) setupMultiClientAudio(serverCtx, clientCtx context.Context, 
 // muteFlag is client-initiated mute, muteOutgoingFlag is server-initiated mute.
 //
 // For DirectionSend (normal mode), the server uses a single SharedCaptureHub and
-// a per-client encoder with per-client gain — see .tasks/024-*.md. Duplex and
-// reverse paths still run per-client capture pipelines; that migration is
-// Phase 2 and requires an AEC semantics decision.
+// a per-client encoder with per-client gain. In multi-client duplex the same
+// shared capture path is used for single logical capture sources, while all
+// client receive sources feed one server monitor mixer/player for local playback
+// and AEC reference. Clients are never routed to each other here.
 func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string, mc *multiClient, muteFlag, muteOutgoingFlag, muteIncomingFlag *atomic.Bool) (<-chan error, error) {
 	audioDone := make(chan error, 2)
 
@@ -399,10 +400,17 @@ func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context
 		}
 		filteredSendCh := newCombinedMuteFilterCh(clientCtx, sendCh, muteFlag, muteOutgoingFlag)
 		filteredSendCh = s.newServerPauseFilterCh(clientCtx, filteredSendCh)
-		go func() {
-			audioDone <- s.runCapturePipeline(clientCtx, filteredSendCh)
-		}()
-		s.setupReverseAudioMuted(clientCtx, peer, audioDone, "", muteIncomingFlag)
+		if s.shouldUseLegacyMultiCapture() {
+			s.logger.Warn("Multi-client duplex: multiple capture devices require legacy per-client capture with device command handling disabled; AEC uses the shared server monitor mix reference")
+			go func() {
+				audioDone <- s.runLegacyMultiClientCapture(clientCtx, filteredSendCh)
+			}()
+		} else if err := s.startSharedCaptureClient(serverCtx, clientCtx, clientID, mc, filteredSendCh, audioDone); err != nil {
+			return nil, err
+		}
+		if err := s.setupServerMonitorSource(serverCtx, clientCtx, peer, clientID, muteIncomingFlag, audioDone); err != nil {
+			return nil, err
+		}
 	case transport.DirectionSend:
 		sendCh, err := peer.AddAudioTrack(s.cfg.SampleRate, s.cfg.Channels)
 		if err != nil {
@@ -411,9 +419,9 @@ func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context
 		filteredSendCh := newCombinedMuteFilterCh(clientCtx, sendCh, muteFlag, muteOutgoingFlag)
 		filteredSendCh = s.newServerPauseFilterCh(clientCtx, filteredSendCh)
 		if s.shouldUseLegacyMultiCapture() {
-			s.logger.Warn("Shared capture hub: multi-device capture not supported in Phase 1; using legacy per-client multi-capture path")
+			s.logger.Warn("Shared capture hub: multi-device capture not supported; using legacy per-client capture with device command handling disabled")
 			go func() {
-				audioDone <- s.runCapturePipeline(clientCtx, filteredSendCh)
+				audioDone <- s.runLegacyMultiClientCapture(clientCtx, filteredSendCh)
 			}()
 			break
 		}
@@ -428,6 +436,12 @@ func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context
 
 func (s *ServerApp) shouldUseLegacyMultiCapture() bool {
 	return len(s.cfg.CaptureDevices()) > 1
+}
+
+func (s *ServerApp) runLegacyMultiClientCapture(ctx context.Context, sendCh chan<- []byte) error {
+	return s.runCapturePipelineWithOptions(ctx, sendCh, capturePipelineOptions{
+		HandleDeviceCommands: false,
+	})
 }
 
 // startSharedCaptureClient starts a per-client encoder goroutine backed by the
