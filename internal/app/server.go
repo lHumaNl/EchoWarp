@@ -92,9 +92,9 @@ type ServerApp struct {
 	recordingCmdCh <-chan RecordingCommand
 
 	// captureHub is the single shared capture goroutine for non-conference
-	// multi-client mode. Created lazily on the first DirectionSend client via
-	// ensureCaptureHub; per-client encoders subscribe to it and apply
-	// per-client gain before encoding. See .tasks/024-*.md.
+	// multi-client send paths. Created lazily for DirectionSend and DirectionDuplex
+	// unless more than one explicit capture device requires legacy fallback;
+	// per-client encoders subscribe and apply per-client gain before encoding.
 	captureHub     *SharedCaptureHub
 	captureHubMu   sync.Mutex
 	captureHubGain *DeviceGainControl
@@ -165,10 +165,10 @@ type ServerApp struct {
 	onClientLeave func(clientID string)
 
 	// deviceCmdCh is the internal channel into which device control commands
-	// (mute/volume) are pushed by HandleDeviceCommand. A consumer goroutine
-	// that actually applies the commands to the mixer is wired up by the CLI
-	// / task 013 — the app layer only owns the buffered channel so the API
-	// layer has a non-blocking place to deliver commands.
+	// (mute/volume) are pushed by HandleDeviceCommand. Active audio paths wire the
+	// HandleDeviceCommands consumer that applies commands to capture, playback, or
+	// shared-capture gain controls, except legacy multi-device fallback which
+	// disables it to avoid multiple consumers; the app owns the buffered channel.
 	deviceCmdCh chan DeviceCommand
 
 	// participantCmdChAPI is the internal channel into which participant
@@ -205,10 +205,10 @@ type multiClient struct {
 	mutedIncoming atomic.Bool           // Server-initiated mute: server stops receiving audio from this client.
 	paused        atomic.Bool           // Per-client pause: client paused its capture.
 
-	// clientGain controls per-client output volume when the server streams via
-	// SharedCaptureHub (non-conference, non-duplex multi-client). Nil when
-	// per-client gain is not applicable (conference uses its mixer, duplex
-	// multi-client still uses per-pipeline capture — see .tasks/024-*.md).
+	// clientGain controls per-client output volume when the server streams to
+	// this client via SharedCaptureHub. Nil when per-client gain is not
+	// applicable, such as conference mode or the legacy multi-device fallback
+	// that still uses runCapturePipelineWithOptions per client.
 	clientGainMu sync.RWMutex
 	clientGain   *DeviceGainControl
 }

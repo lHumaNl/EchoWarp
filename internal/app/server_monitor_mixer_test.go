@@ -82,6 +82,42 @@ func TestSetupAudioPipelineMultiDuplex_UsesSharedCaptureAndMonitor(t *testing.T)
 	assert.Equal(t, int32(1), starts.Load())
 }
 
+func TestSetupAudioPipelineMultiDuplex_WiresPerClientGain(t *testing.T) {
+	t.Parallel()
+	const (
+		clientID             = "client-1"
+		clientNickname       = "Client 1"
+		volumeDelta          = 0.25
+		highVolumeDelta      = 10.0
+		lowVolumeDelta       = -10.0
+		expectedAdjustedGain = 1.25
+		maxClientGain        = float32(1.5)
+		minClientGain        = float32(0)
+		gainTolerance        = 1e-6
+	)
+	app, _ := newTestDuplexMultiServer(t, nil)
+	mc := &multiClient{id: clientID, nickname: clientNickname}
+	app.mu.Lock()
+	app.clients[clientID] = mc
+	app.mu.Unlock()
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+	clientCtx, cancelClient := context.WithCancel(serverCtx)
+	defer cancelClient()
+
+	_, err := app.setupAudioPipelineMulti(serverCtx, clientCtx, &serverMockPeerManager{}, transport.DirectionDuplex, clientID, mc, nil, nil, nil)
+	require.NoError(t, err)
+	gain := mc.getClientGain()
+	require.NotNil(t, gain)
+
+	app.adjustClientVolume(clientID, volumeDelta)
+	assert.InDelta(t, expectedAdjustedGain, float64(gain.Gain()), gainTolerance)
+	app.adjustClientVolume(clientID, highVolumeDelta)
+	assert.Equal(t, maxClientGain, gain.Gain())
+	app.adjustClientVolume(clientID, lowVolumeDelta)
+	assert.Equal(t, minClientGain, gain.Gain())
+}
+
 func TestSetupAudioPipelineMultiDuplex_ReusesOneServerMonitorMixer(t *testing.T) {
 	t.Parallel()
 	app, starts := newTestDuplexMultiServer(t, nil)

@@ -374,10 +374,11 @@ func (s *ServerApp) setupMultiClientAudio(serverCtx, clientCtx context.Context, 
 // muteFlag is client-initiated mute, muteOutgoingFlag is server-initiated mute.
 //
 // For DirectionSend (normal mode), the server uses a single SharedCaptureHub and
-// a per-client encoder with per-client gain. In multi-client duplex the same
-// shared capture path is used for single logical capture sources, while all
-// client receive sources feed one server monitor mixer/player for local playback
-// and AEC reference. Clients are never routed to each other here.
+// a per-client encoder with per-client gain. In multi-client duplex, that same
+// shared capture path is used unless more than one explicit capture device
+// requires the legacy per-client capture fallback. All client receive sources
+// feed one server monitor mixer/player for local playback and AEC reference.
+// Clients are never routed to each other.
 func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string, mc *multiClient, muteFlag, muteOutgoingFlag, muteIncomingFlag *atomic.Bool) (<-chan error, error) {
 	audioDone := make(chan error, 2)
 
@@ -439,6 +440,10 @@ func (s *ServerApp) shouldUseLegacyMultiCapture() bool {
 }
 
 func (s *ServerApp) runLegacyMultiClientCapture(ctx context.Context, sendCh chan<- []byte) error {
+	// Multi-device capture still depends on the old per-pipeline mixer. Do not
+	// start a HandleDeviceCommands consumer here: each fallback client would race
+	// on s.deviceCmdCh, so fallback device commands remain disabled until this
+	// path can expose one coordinated device-control owner.
 	return s.runCapturePipelineWithOptions(ctx, sendCh, capturePipelineOptions{
 		HandleDeviceCommands: false,
 	})
