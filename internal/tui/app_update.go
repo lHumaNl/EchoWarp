@@ -693,7 +693,7 @@ func (m Model) proceedWithStart(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		m.conference = true
 		m.serverMuted = m.config.ServerMuted
 		m.muteState = NewMuteState()
-	} else if m.config.MaxClients > 1 && !m.multiClient {
+	} else if m.config.Mode == config.ModeServer && m.config.MaxClients > 1 && !m.multiClient {
 		m.multiClient = true
 	}
 

@@ -21,15 +21,28 @@ import (
 // Subscriber channels are bounded (cap 4) and use drop-oldest semantics so a
 // slow consumer cannot back-pressure the capture loop or other subscribers.
 type SharedCaptureHub struct {
-	cfg    CapturePipelineConfig
-	logger *slog.Logger
+	cfg         CapturePipelineConfig
+	logger      *slog.Logger
+	newCapturer sharedCapturerFactory
 
 	subsMu sync.RWMutex
 	subs   map[string]chan []float32
 
+	readyMu   sync.Mutex
+	readyOnce sync.Once
+	readyCh   chan struct{}
+	readyErr  error
+
 	// Runtime state.
 	started atomic.Bool
 }
+
+type sharedCapturer interface {
+	Start(ctx context.Context, deviceID uint32, outCh chan<- []float32) error
+	Close() error
+}
+
+type sharedCapturerFactory func(sampleRate, channels uint32, opts ...audio.CapturerOption) (sharedCapturer, error)
 
 type captureStartResult struct {
 	err error
@@ -39,10 +52,16 @@ type captureStartResult struct {
 // EncoderConfig on cfg is ignored — subscribers encode independently.
 func NewSharedCaptureHub(cfg CapturePipelineConfig, logger *slog.Logger) *SharedCaptureHub {
 	return &SharedCaptureHub{
-		cfg:    cfg,
-		logger: logger,
-		subs:   make(map[string]chan []float32),
+		cfg:         cfg,
+		logger:      logger,
+		newCapturer: defaultSharedCapturerFactory,
+		subs:        make(map[string]chan []float32),
+		readyCh:     make(chan struct{}),
 	}
+}
+
+func defaultSharedCapturerFactory(sampleRate, channels uint32, opts ...audio.CapturerOption) (sharedCapturer, error) {
+	return audio.NewCapturer(sampleRate, channels, opts...)
 }
 
 // CaptureSubscription exposes a bounded PCM channel to a single subscriber.
@@ -92,6 +111,25 @@ func (h *SharedCaptureHub) SubscriberCount() int {
 	return len(h.subs)
 }
 
+// WaitReady blocks until Run reports capture startup success or failure.
+func (h *SharedCaptureHub) WaitReady(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-h.readyCh:
+		h.readyMu.Lock()
+		defer h.readyMu.Unlock()
+		return h.readyErr
+	}
+}
+
+func (h *SharedCaptureHub) signalReady(err error) {
+	h.readyMu.Lock()
+	h.readyErr = err
+	h.readyMu.Unlock()
+	h.readyOnce.Do(func() { close(h.readyCh) })
+}
+
 // dispatch sends frame to all current subscribers non-blockingly.
 // A subscriber whose channel is full drops its oldest queued frame before the
 // new frame is enqueued, so slow consumers keep the freshest capture frames.
@@ -124,7 +162,14 @@ func dropOldestAndSend(ch chan []float32, frame []float32) {
 // Run drives the capture loop: opens the device, applies AEC/AGC/device-gain,
 // feeds spectrum/level/recordingTap, and fans out PCM to subscribers. Blocks
 // until ctx is done or a fatal capture error occurs. Safe to call exactly once.
-func (h *SharedCaptureHub) Run(ctx context.Context) error {
+func (h *SharedCaptureHub) Run(ctx context.Context) (runErr error) {
+	startupReported := false
+	defer func() {
+		if !startupReported {
+			h.signalReady(runErr)
+		}
+	}()
+
 	if !h.started.CompareAndSwap(false, true) {
 		return ewerrors.NewError(ewerrors.ErrInternalState, "shared capture hub already started")
 	}
@@ -149,7 +194,7 @@ func (h *SharedCaptureHub) Run(ctx context.Context) error {
 			"captureDevice", deviceID)
 	}
 
-	capturer, err := audio.NewCapturer(h.cfg.SampleRate, h.cfg.Channels, capturerOpts...)
+	capturer, err := h.newCapturer(h.cfg.SampleRate, h.cfg.Channels, capturerOpts...)
 	if err != nil {
 		return ewerrors.Wrap(err, ewerrors.ErrDeviceNotFound, "shared capture: create audio capturer")
 	}
@@ -167,17 +212,34 @@ func (h *SharedCaptureHub) Run(ctx context.Context) error {
 		startDone <- captureStartResult{err: err}
 	}()
 
+	if err := h.waitForCaptureStart(ctx, startDone); err != nil {
+		return err
+	}
+	startupReported = true
+	h.signalReady(nil)
+
 	h.logger.Info("Shared capture hub running",
 		"device", deviceID, "sampleRate", h.cfg.SampleRate, "channels", h.cfg.Channels)
 
+	return h.forwardPCM(ctx, pcmCh)
+}
+
+func (h *SharedCaptureHub) waitForCaptureStart(ctx context.Context, startDone <-chan captureStartResult) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case result := <-startDone:
+		if result.err != nil && ctx.Err() == nil {
+			return ewerrors.Wrap(result.err, ewerrors.ErrDeviceNotFound, "shared capture: start audio capturer")
+		}
+		return ctx.Err()
+	}
+}
+
+func (h *SharedCaptureHub) forwardPCM(ctx context.Context, pcmCh <-chan []float32) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case result := <-startDone:
-			if result.err != nil && ctx.Err() == nil {
-				return ewerrors.Wrap(result.err, ewerrors.ErrDeviceNotFound, "shared capture: start audio capturer")
-			}
 			return ctx.Err()
 		case samples, ok := <-pcmCh:
 			if !ok {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"sync"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 )
 
 func testHubLogger() *slog.Logger {
@@ -114,6 +117,75 @@ func TestSharedCaptureHub_RecordingTapOncePerFrameWithSubscribers(t *testing.T) 
 	assert.Equal(t, int32(1), tapCalls.Load())
 }
 
+func TestSharedCaptureHub_RunKeepsRunningAfterStartSuccess(t *testing.T) {
+	t.Parallel()
+	h := newFakeCaptureHub(&fakeSharedCapturer{})
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := runSharedCaptureHub(ctx, h)
+
+	require.NoError(t, h.WaitReady(ctx))
+	assertRunStillActive(t, runDone)
+
+	cancel()
+	require.ErrorIs(t, <-runDone, context.Canceled)
+}
+
+func TestSharedCaptureHub_RunDeliversPCMAfterStartSuccess(t *testing.T) {
+	t.Parallel()
+	frame := []float32{0.125, -0.25}
+	fake := &fakeSharedCapturer{start: sendFrameOnStart(frame)}
+	h := newFakeCaptureHub(fake)
+	sub := h.Subscribe("client-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := runSharedCaptureHub(ctx, h)
+
+	require.NoError(t, h.WaitReady(ctx))
+	assertReceivesFrame(t, sub.PCM, frame)
+	assertSubscriptionOpen(t, sub.PCM)
+
+	cancel()
+	require.ErrorIs(t, <-runDone, context.Canceled)
+}
+
+func TestSharedCaptureHub_RunClosesSubscriptionOnContextCancel(t *testing.T) {
+	t.Parallel()
+	h := newFakeCaptureHub(&fakeSharedCapturer{})
+	sub := h.Subscribe("client-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := runSharedCaptureHub(ctx, h)
+
+	require.NoError(t, h.WaitReady(ctx))
+	cancel()
+	require.ErrorIs(t, <-runDone, context.Canceled)
+	assertSubscriptionClosed(t, sub.PCM)
+}
+
+func TestSharedCaptureHub_RunClosesSubscriptionOnFatalPCMClose(t *testing.T) {
+	t.Parallel()
+	fake := &fakeSharedCapturer{start: closePCMOnStart}
+	h := newFakeCaptureHub(fake)
+	sub := h.Subscribe("client-1")
+	ctx := context.Background()
+	runDone := runSharedCaptureHub(ctx, h)
+
+	err := <-runDone
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "PCM channel closed")
+	assertSubscriptionClosed(t, sub.PCM)
+}
+
+func TestSharedCaptureHub_RunPropagatesStartupError(t *testing.T) {
+	t.Parallel()
+	startErr := errors.New("start failed")
+	fake := &fakeSharedCapturer{start: failCaptureStart(startErr)}
+	h := newFakeCaptureHub(fake)
+	sub := h.Subscribe("client-1")
+
+	err := h.Run(context.Background())
+	require.ErrorIs(t, err, startErr)
+	assertSubscriptionClosed(t, sub.PCM)
+}
+
 func TestSharedCaptureHub_FirstSubscriberCloseKeepsHubUsable(t *testing.T) {
 	t.Parallel()
 	h := NewSharedCaptureHub(CapturePipelineConfig{}, testHubLogger())
@@ -139,6 +211,88 @@ func assertReceivesFrame(t *testing.T, ch <-chan []float32, want []float32) {
 		assert.Equal(t, want, got)
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("subscriber did not receive frame")
+	}
+}
+
+type fakeSharedCapturer struct {
+	start  func(context.Context, uint32, chan<- []float32) error
+	closed atomic.Bool
+}
+
+func (f *fakeSharedCapturer) Start(ctx context.Context, deviceID uint32, outCh chan<- []float32) error {
+	if f.start == nil {
+		return nil
+	}
+	return f.start(ctx, deviceID, outCh)
+}
+
+func (f *fakeSharedCapturer) Close() error {
+	f.closed.Store(true)
+	return nil
+}
+
+func newFakeCaptureHub(c *fakeSharedCapturer) *SharedCaptureHub {
+	h := NewSharedCaptureHub(CapturePipelineConfig{SampleRate: 48000, Channels: 1}, testHubLogger())
+	h.newCapturer = func(uint32, uint32, ...audio.CapturerOption) (sharedCapturer, error) {
+		return c, nil
+	}
+	return h
+}
+
+func runSharedCaptureHub(ctx context.Context, h *SharedCaptureHub) <-chan error {
+	runDone := make(chan error, 1)
+	go func() { runDone <- h.Run(ctx) }()
+	return runDone
+}
+
+func assertRunStillActive(t *testing.T, runDone <-chan error) {
+	t.Helper()
+	select {
+	case err := <-runDone:
+		t.Fatalf("hub exited after successful start: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func sendFrameOnStart(frame []float32) func(context.Context, uint32, chan<- []float32) error {
+	return func(ctx context.Context, _ uint32, outCh chan<- []float32) error {
+		go func() {
+			select {
+			case outCh <- frame:
+			case <-ctx.Done():
+			}
+		}()
+		return nil
+	}
+}
+
+func closePCMOnStart(_ context.Context, _ uint32, outCh chan<- []float32) error {
+	close(outCh)
+	return nil
+}
+
+func failCaptureStart(err error) func(context.Context, uint32, chan<- []float32) error {
+	return func(context.Context, uint32, chan<- []float32) error {
+		return err
+	}
+}
+
+func assertSubscriptionOpen(t *testing.T, ch <-chan []float32) {
+	t.Helper()
+	select {
+	case _, ok := <-ch:
+		require.True(t, ok, "subscription closed immediately after startup")
+	default:
+	}
+}
+
+func assertSubscriptionClosed(t *testing.T, ch <-chan []float32) {
+	t.Helper()
+	select {
+	case _, ok := <-ch:
+		require.False(t, ok, "subscription channel should be closed")
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("subscription channel did not close")
 	}
 }
 

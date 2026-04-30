@@ -568,7 +568,11 @@ func (s *ServerApp) ensureCaptureHub(ctx context.Context) (*SharedCaptureHub, er
 		GainControl:          gainCtl,
 	}
 
-	hub := NewSharedCaptureHub(hubCfg, s.logger)
+	hubFactory := s.newSharedCaptureHub
+	if hubFactory == nil {
+		hubFactory = NewSharedCaptureHub
+	}
+	hub := hubFactory(hubCfg, s.logger)
 	hubCtx, hubCancel := context.WithCancel(ctx)
 
 	go func() {
@@ -579,6 +583,10 @@ func (s *ServerApp) ensureCaptureHub(ctx context.Context) (*SharedCaptureHub, er
 			s.logger.Error("Shared capture hub exited with error", "error", err)
 		}
 	}()
+	if err := hub.WaitReady(ctx); err != nil {
+		hubCancel()
+		return nil, err
+	}
 
 	// Single HandleDeviceCommands consumer for the server — previously each
 	// per-client pipeline started its own goroutine which raced on the shared

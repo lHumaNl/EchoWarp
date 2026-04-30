@@ -95,6 +95,9 @@ func ApplyProbeToConfig(cfg *config.Config, probe *ProbeServerResult) error {
 	if probe.OpusBitrate > 0 {
 		cfg.OpusBitrate = probe.OpusBitrate
 	}
+	if probe.MaxClients > 0 {
+		cfg.MaxClients = probe.MaxClients
+	}
 
 	// TLS
 	cfg.TLS = probe.TLSRequired

@@ -99,6 +99,9 @@ type ServerApp struct {
 	captureHubMu   sync.Mutex
 	captureHubGain *DeviceGainControl
 	captureHubAGC  map[uint32]*audio.AGCProcessor
+	// newSharedCaptureHub optionally overrides shared hub construction in tests.
+	// Nil uses NewSharedCaptureHub.
+	newSharedCaptureHub func(CapturePipelineConfig, *slog.Logger) *SharedCaptureHub
 
 	// Non-conference recording support (shared with ClientApp via mixin).
 	RecordingMixin
