@@ -56,12 +56,14 @@ func (m *SetupModel) tryShowRestoreOverlay(addr string, port int, mode string) t
 			return nil
 		}
 
+		m.recreateMissingVirtualSinks(preset)
+
 		// Skip if current selection already matches the preset
 		if m.currentSelectionMatchesPreset(preset) {
 			return nil
 		}
 
-		return m.autoRestore(preset, mode)
+		return m.restoreVisiblePreset(preset)
 	}
 	return nil
 }
@@ -95,44 +97,26 @@ func (m *SetupModel) tryShowServerRestoreOverlay() tea.Cmd {
 	}
 
 	devPreset := recent.DevicePreset{Devices: p.Devices}
+	m.recreateMissingVirtualSinks(devPreset)
+
 	// Skip if current selection already matches the preset
 	if m.currentSelectionMatchesPreset(devPreset) {
 		return nil
 	}
 
-	return m.autoRestore(devPreset, mode)
+	return m.restoreVisiblePreset(devPreset)
 }
 
 // autoRestore silently restores matched devices and shows overlay only for missing virtual devices.
 func (m *SetupModel) autoRestore(preset recent.DevicePreset, _ string) tea.Cmd {
+	m.recreateMissingVirtualSinks(preset)
+	return m.restoreVisiblePreset(preset)
+}
+
+func (m *SetupModel) restoreVisiblePreset(preset recent.DevicePreset) tea.Cmd {
 	visiblePreset := m.filterPresetForVisibleSections(preset)
 	if len(visiblePreset.Devices) == 0 {
 		return nil
-	}
-
-	// Auto-create virtual sinks with OnStart == SinkRecreate before matching.
-	for _, pd := range visiblePreset.Devices {
-		if pd.VirtualSink == nil || pd.VirtualSink.OnStart != recent.SinkRecreate {
-			continue
-		}
-		// Check if already present by name.
-		if m.hasOutputDeviceNamed(pd.VirtualSink.SinkName) {
-			continue
-		}
-		// Create the virtual sink.
-		moduleID, err := createPulseAudioSinkFn(pd.VirtualSink.SinkName)
-		if err == nil {
-			m.virtualMicCreated = true
-			m.virtualMicModule = moduleID
-			m.virtualMicManageable = true
-			m.virtualMicManagedModule = moduleID
-			m.virtualSinkOnStop = pd.VirtualSink.OnStop
-			m.virtualSinkOnStart = pd.VirtualSink.OnStart
-			// Wait for PulseAudio and refresh device list.
-			time.Sleep(200 * time.Millisecond)
-			m.refreshDevicesFromOS()
-			m.rebuildDeviceGroups()
-		}
 	}
 
 	matched, unmatched := matchPresetDevices(visiblePreset, m.inputDevices, m.outputDevices)
@@ -297,6 +281,67 @@ func (m SetupModel) hasOutputDeviceNamed(name string) bool {
 		}
 	}
 	return false
+}
+
+func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
+	seen := make(map[string]bool)
+	for _, pd := range preset.Devices {
+		vs, ok := recreateVirtualSinkPreset(pd)
+		if !ok || seen[vs.SinkName] {
+			continue
+		}
+		seen[vs.SinkName] = true
+		m.createMissingVirtualSink(*vs)
+	}
+}
+
+func recreateVirtualSinkPreset(pd recent.PresetDevice) (*recent.VirtualSinkPreset, bool) {
+	vs := pd.VirtualSink
+	if vs == nil && isEchoWarpMonitorPreset(pd) {
+		vs = defaultVirtualSinkPreset()
+	}
+	if vs == nil || vs.OnStart != recent.SinkRecreate || vs.SinkName == "" {
+		return nil, false
+	}
+	return vs, true
+}
+
+func isEchoWarpMonitorPreset(pd recent.PresetDevice) bool {
+	return pd.Virtual && pd.IsInput && pd.Name == echowarpMonitorName
+}
+
+func (m *SetupModel) createMissingVirtualSink(vs recent.VirtualSinkPreset) {
+	if !isLinuxRuntime || m.hasTrackedVirtualSink(vs.SinkName) || m.hasOutputDeviceNamed(vs.SinkName) {
+		return
+	}
+	moduleID, err := createPulseAudioSinkFn(vs.SinkName)
+	if err != nil {
+		return
+	}
+	m.markVirtualSinkCreated(moduleID, vs)
+	time.Sleep(200 * time.Millisecond)
+	m.refreshDevicesAfterVirtualSinkCreate()
+}
+
+func (m SetupModel) hasTrackedVirtualSink(sinkName string) bool {
+	return sinkName == echowarpSinkName && m.virtualMicCreated
+}
+
+func (m *SetupModel) refreshDevicesAfterVirtualSinkCreate() {
+	if m.refreshDevicesFn == nil {
+		return
+	}
+	m.refreshDevicesFromOS()
+	m.rebuildDeviceGroups()
+}
+
+func (m *SetupModel) markVirtualSinkCreated(moduleID string, vs recent.VirtualSinkPreset) {
+	m.virtualMicCreated = true
+	m.virtualMicModule = moduleID
+	m.virtualMicManageable = true
+	m.virtualMicManagedModule = moduleID
+	m.virtualSinkOnStop = vs.OnStop
+	m.virtualSinkOnStart = vs.OnStart
 }
 
 // restoreLastMode applies the saved top-level last_mode to the Mode field, if set.

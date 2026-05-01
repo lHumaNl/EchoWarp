@@ -13,14 +13,18 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 
 	for _, d := range m.inputDevices {
 		if _, ok := m.multiSelect[d.selectKey()]; ok {
-			devices = append(devices, recent.PresetDevice{
+			pd := recent.PresetDevice{
 				ID:      d.ID,
 				Name:    d.Name,
 				IsInput: true,
 				Virtual: d.IsVirtual,
 				Volume:  d.Volume,
 				AGC:     d.AGC,
-			})
+			}
+			if isEchoWarpMonitorDevice(d) {
+				pd.VirtualSink = m.defaultVirtualSinkPreset()
+			}
+			devices = append(devices, pd)
 		}
 	}
 
@@ -36,20 +40,7 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 			}
 			// Save virtual sink preset for virtual output devices.
 			if d.IsVirtual {
-				onStop := m.virtualSinkOnStop
-				if onStop == "" {
-					onStop = recent.SinkDelete
-				}
-				onStart := m.virtualSinkOnStart
-				if onStart == "" {
-					onStart = recent.SinkRecreate
-				}
-				pd.VirtualSink = &recent.VirtualSinkPreset{
-					ModuleType: "module-null-sink",
-					SinkName:   echowarpSinkName,
-					OnStop:     onStop,
-					OnStart:    onStart,
-				}
+				pd.VirtualSink = m.defaultVirtualSinkPreset()
 			}
 			// Save mix input for virtual output devices.
 			if d.IsVirtual {
@@ -69,6 +60,35 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 	}
 
 	return recent.DevicePreset{Devices: devices}
+}
+
+func isEchoWarpMonitorDevice(d deviceRow) bool {
+	return d.IsVirtual && d.IsInput && d.Name == echowarpMonitorName
+}
+
+func (m SetupModel) defaultVirtualSinkPreset() *recent.VirtualSinkPreset {
+	onStop := m.virtualSinkOnStop
+	if onStop == "" {
+		onStop = recent.SinkDelete
+	}
+	onStart := m.virtualSinkOnStart
+	if onStart == "" {
+		onStart = recent.SinkRecreate
+	}
+	return virtualSinkPresetWithLifecycle(onStop, onStart)
+}
+
+func defaultVirtualSinkPreset() *recent.VirtualSinkPreset {
+	return virtualSinkPresetWithLifecycle(recent.SinkDelete, recent.SinkRecreate)
+}
+
+func virtualSinkPresetWithLifecycle(onStop, onStart recent.SinkLifecycle) *recent.VirtualSinkPreset {
+	return &recent.VirtualSinkPreset{
+		ModuleType: "module-null-sink",
+		SinkName:   echowarpSinkName,
+		OnStop:     onStop,
+		OnStart:    onStart,
+	}
 }
 
 // CollectModePreset returns a full ModePreset snapshot for the given mode,

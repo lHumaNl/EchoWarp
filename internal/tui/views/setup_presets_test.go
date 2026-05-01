@@ -87,6 +87,27 @@ func TestCollectPresetDevices_VirtualDeviceMarkedCorrectly(t *testing.T) {
 	assert.True(t, p.Devices[0].Virtual)
 	assert.Equal(t, "BlackHole 2ch", p.Devices[0].Name)
 	assert.Equal(t, uint32(10), p.Devices[0].ID)
+	assert.Nil(t, p.Devices[0].VirtualSink)
+}
+
+func TestCollectPresetDevices_EchoWarpMonitorHasVirtualSinkPreset(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 10, Name: echowarpMonitorName, IsVirtual: true, IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{
+			selectKeyFor(10, echowarpMonitorName, true): {Capture: true},
+		},
+	)
+
+	p := m.CollectPresetDevices()
+
+	require.Len(t, p.Devices, 1)
+	d := p.Devices[0]
+	assert.True(t, d.IsInput)
+	require.NotNil(t, d.VirtualSink)
+	assert.Equal(t, echowarpSinkName, d.VirtualSink.SinkName)
+	assert.Equal(t, recent.SinkDelete, d.VirtualSink.OnStop)
+	assert.Equal(t, recent.SinkRecreate, d.VirtualSink.OnStart)
 }
 
 func TestCollectPresetDevices_OnlySelectedDevicesIncluded(t *testing.T) {

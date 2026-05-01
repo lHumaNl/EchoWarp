@@ -106,17 +106,11 @@ func (v *VirtualDeviceOverlay) viewCreate(contentW int) string {
 	var sb strings.Builder
 
 	sb.WriteString(styles.SetupDimValue.Render(
-		"EchoWarp will create an audio output named\n" +
-			"\"EchoWarp\" for received sound.\n\n" +
-			"In other apps, use its monitor as the\n" +
-			"microphone/input source."))
-	sb.WriteString("\n\n")
-	sb.WriteString(styles.SetupDimValue.Render("In Discord / Zoom / OBS select:"))
-	sb.WriteString("\n")
-	sb.WriteString(styles.ConnParamValue.Render("  \"Monitor of EchoWarp\" as microphone"))
+		"Creates audio output named \"EchoWarp\".\n" +
+			"Use \"Monitor of EchoWarp\" as microphone."))
 	sb.WriteString("\n\n")
 
-	sb.WriteString(v.renderButtons("[Create Device]", "[Cancel]", contentW))
+	sb.WriteString(v.renderButtons("[Create]", "[Cancel]", contentW))
 	sb.WriteString("\n\n")
 	sb.WriteString(v.renderFooter(contentW))
 

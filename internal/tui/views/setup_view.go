@@ -69,6 +69,10 @@ func (m SetupModel) compositeOverlay(base, overlay string) string {
 
 	baseLines := strings.Split(base, "\n")
 	overlayLines := strings.Split(overlay, "\n")
+	targetLines := max(len(baseLines), m.bodyHeight(), len(overlayLines))
+	for len(baseLines) < targetLines {
+		baseLines = append(baseLines, "")
+	}
 
 	// Center overlay vertically
 	startY := (len(baseLines) - len(overlayLines)) / 2
@@ -78,15 +82,13 @@ func (m SetupModel) compositeOverlay(base, overlay string) string {
 
 	for i, line := range overlayLines {
 		idx := startY + i
-		if idx < len(baseLines) {
-			// Center horizontally using full screen width
-			overlayW := lipgloss.Width(line)
-			startX := (m.width - overlayW) / 2
-			if startX < 0 {
-				startX = 0
-			}
-			baseLines[idx] = strings.Repeat(" ", startX) + line
+		// Center horizontally using full screen width
+		overlayW := lipgloss.Width(line)
+		startX := (m.width - overlayW) / 2
+		if startX < 0 {
+			startX = 0
 		}
+		baseLines[idx] = strings.Repeat(" ", startX) + line
 	}
 
 	return strings.Join(baseLines, "\n")

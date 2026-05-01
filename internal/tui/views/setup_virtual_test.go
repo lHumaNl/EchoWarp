@@ -1,6 +1,7 @@
 package views
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,9 +17,22 @@ func TestVirtualOverlay_CreateConfirmation(t *testing.T) {
 	view := overlay.View(80)
 	assert.Contains(t, view, "Create Virtual Audio Device")
 	assert.Contains(t, view, "audio output named")
-	assert.Contains(t, view, "[Create Device]")
+	assert.Contains(t, view, "[Create]")
 	assert.Contains(t, view, "[Cancel]")
 	assert.Contains(t, view, "Monitor of EchoWarp")
+}
+
+func TestVirtualOverlay_CreateCompositeNotClippedAtSmallHeight(t *testing.T) {
+	m := SetupModel{width: 80, height: 14}
+	overlay := NewVirtualDeviceOverlay(false, echowarpSinkName).View(80)
+
+	view := m.compositeOverlay("base", overlay)
+
+	assert.Contains(t, view, "Create Virtual Audio Device")
+	assert.Contains(t, view, "[Create]")
+	assert.Contains(t, view, "esc: cancel")
+	assert.Contains(t, view, "╰")
+	assert.GreaterOrEqual(t, len(strings.Split(view, "\n")), len(strings.Split(overlay, "\n")))
 }
 
 func TestVirtualOverlay_ExistsState(t *testing.T) {

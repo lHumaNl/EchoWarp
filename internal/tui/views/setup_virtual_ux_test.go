@@ -28,7 +28,7 @@ func TestVirtualDeviceOverlayCopyUsesUserFriendlyTerms(t *testing.T) {
 	assert.Contains(t, view, "Create Virtual Audio Device")
 	assert.Contains(t, view, "audio output named")
 	assert.Contains(t, view, "Monitor of EchoWarp")
-	assert.Contains(t, view, "Create Device")
+	assert.Contains(t, view, "[Create]")
 	assert.NotContains(t, view, "Virtual Microphone")
 	assert.NotContains(t, view, "PulseAudio virtual sink")
 }

@@ -43,6 +43,7 @@ func TestExistingEchoWarpExtraDoesNotBecomeManageable(t *testing.T) {
 }
 
 func TestMissingVirtualDevicesDoNotOpenStartupPrompt(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
 	m := newInputOnlyRestoreModel()
 	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
 		Name: echowarpMonitorName, IsInput: true, Virtual: true,
@@ -55,6 +56,7 @@ func TestMissingVirtualDevicesDoNotOpenStartupPrompt(t *testing.T) {
 	assert.Equal(t, SetupOverlayNone, m.overlay)
 	assert.Nil(t, m.restoreOverlay)
 	assert.Empty(t, m.flashMsg)
+	assert.Empty(t, stub.createdNames)
 }
 
 func TestMissingVirtualDevicesNeverOpenStartupPrompt(t *testing.T) {
@@ -70,6 +72,75 @@ func TestMissingVirtualDevicesNeverOpenStartupPrompt(t *testing.T) {
 
 	assert.Nil(t, cmd)
 	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+	assert.Equal(t, SetupOverlayNone, m.overlay)
+	assert.Nil(t, m.restoreOverlay)
+}
+
+func TestInputOnlyHiddenOutputRecreateCreatesSink(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
+		Name: echowarpSinkName, IsInput: false, Virtual: true,
+		VirtualSink: virtualSinkPreset(recent.SinkRecreate),
+	}}}
+
+	cmd := m.autoRestore(preset, "normal")
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+	assert.Equal(t, SetupOverlayNone, m.overlay)
+	assert.Nil(t, m.restoreOverlay)
+}
+
+func TestInputOnlyInferredMonitorRecreateCreatesSink(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
+		Name: echowarpMonitorName, IsInput: true, Virtual: true,
+	}}}
+
+	cmd := m.autoRestore(preset, "normal")
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+	assert.Equal(t, SetupOverlayNone, m.overlay)
+	assert.Nil(t, m.restoreOverlay)
+}
+
+func TestHiddenOutputRecreateRunsBeforeSelectionMatchSkip(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	m.inputDevices = []deviceRow{{ID: 1, Name: "Mic", IsInput: true}}
+	m.multiSelect[m.inputDevices[0].selectKey()] = DeviceRoleSet{Capture: true}
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{
+		{ID: 1, Name: "Mic", IsInput: true},
+		{Name: echowarpSinkName, IsInput: false, Virtual: true, VirtualSink: virtualSinkPreset(recent.SinkRecreate)},
+	}}
+	m.recentServers = []recent.Server{{
+		Address: "127.0.0.1", Port: 4415,
+		Presets: map[string]recent.DevicePreset{"normal": preset},
+	}}
+
+	cmd := m.tryShowRestoreOverlay("127.0.0.1", 4415, "normal")
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+	assert.Equal(t, SetupOverlayNone, m.overlay)
+	assert.Nil(t, m.restoreOverlay)
+}
+
+func TestInputOnlyHiddenOutputKeepDoesNotCreateSink(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
+		Name: echowarpSinkName, IsInput: false, Virtual: true,
+		VirtualSink: virtualSinkPreset(recent.SinkKeep),
+	}}}
+
+	cmd := m.autoRestore(preset, "normal")
+
+	assert.Nil(t, cmd)
+	assert.Empty(t, stub.createdNames)
 	assert.Equal(t, SetupOverlayNone, m.overlay)
 	assert.Nil(t, m.restoreOverlay)
 }
