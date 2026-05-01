@@ -167,6 +167,7 @@ type SetupModel struct {
 	virtualSinkOnStop              recent.SinkLifecycle // default: SinkDelete
 	virtualSinkOnStart             recent.SinkLifecycle // default: SinkRecreate
 	virtualSinkLifecycleConfigured bool                 // true after app-managed lifecycle setup
+	pendingVirtualSinkSelection    map[string]bool      // sinks that should be selected after refresh
 
 	// Mix input: maps virtual output device selectKey → set of input device selectKeys
 	// whose audio should be mixed into that output.
@@ -365,7 +366,8 @@ func (m *SetupModel) refreshTrackedVirtualSinkAfterEnumeratorInstall() {
 	if !isLinuxRuntime || !m.hasVirtualMicModuleState() {
 		return
 	}
-	m.refreshDevicesAfterVirtualSinkEnsure(echowarpSinkName)
+	m.refreshDevicesAfterVirtualSinkEnsure()
+	m.selectPendingVirtualSink(echowarpSinkName)
 }
 
 // WithVirtualSinkLifecycle sets cleanup/startup behavior for the virtual sink.

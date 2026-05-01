@@ -639,7 +639,8 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			action := m.virtualDeviceOverlay.Update(msg)
 			switch action {
 			case VirtualActionCreate:
-				if err := m.ensureVirtualSink(*m.defaultVirtualSinkPreset()); err != nil {
+				options := virtualSinkEnsureOptions{selectAfterEnsure: true}
+				if err := m.ensureVirtualSink(*m.defaultVirtualSinkPreset(), options); err != nil {
 					m.virtualDeviceOverlay.Error = err.Error()
 					return m, nil
 				}

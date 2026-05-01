@@ -274,26 +274,36 @@ func (m SetupModel) filterPresetForVisibleSections(preset recent.DevicePreset) r
 	return recent.DevicePreset{Devices: filtered, VirtualSinks: preset.VirtualSinks}
 }
 
+type virtualSinkEnsureOptions struct {
+	selectAfterEnsure bool
+}
+
 func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
 	seen := make(map[string]bool)
 	for _, vs := range preset.VirtualSinks {
-		m.recreateVirtualSink(vs, seen)
+		m.recreateVirtualSink(vs, seen, virtualSinkEnsureOptions{})
 	}
 	for _, pd := range preset.Devices {
 		vs, ok := recreateVirtualSinkPreset(pd)
 		if ok {
-			m.recreateVirtualSink(*vs, seen)
+			options := virtualSinkEnsureOptions{selectAfterEnsure: true}
+			m.recreateVirtualSink(*vs, seen, options)
 		}
 	}
 }
 
-func (m *SetupModel) recreateVirtualSink(vs recent.VirtualSinkPreset, seen map[string]bool) {
+func (m *SetupModel) recreateVirtualSink(
+	vs recent.VirtualSinkPreset,
+	seen map[string]bool,
+	options virtualSinkEnsureOptions,
+) {
 	m.rememberVirtualSinkLifecycle(vs)
 	if vs.OnStart != recent.SinkRecreate || vs.SinkName == "" || seen[vs.SinkName] {
+		m.selectVirtualSinkIfRequested(vs.SinkName, options)
 		return
 	}
 	seen[vs.SinkName] = true
-	m.createMissingVirtualSink(vs)
+	m.createMissingVirtualSink(vs, options)
 }
 
 func (m *SetupModel) rememberVirtualSinkLifecycle(vs recent.VirtualSinkPreset) {
@@ -331,11 +341,18 @@ func isEchoWarpMonitorPreset(pd recent.PresetDevice) bool {
 	return pd.Virtual && pd.IsInput && pd.Name == echowarpMonitorName
 }
 
-func (m *SetupModel) createMissingVirtualSink(vs recent.VirtualSinkPreset) {
-	if !isLinuxRuntime || m.hasTrackedVirtualSink(vs.SinkName) {
+func (m *SetupModel) createMissingVirtualSink(
+	vs recent.VirtualSinkPreset,
+	options virtualSinkEnsureOptions,
+) {
+	if !isLinuxRuntime {
 		return
 	}
-	if err := m.ensureVirtualSink(vs); err != nil {
+	if m.hasTrackedVirtualSink(vs.SinkName) {
+		m.selectVirtualSinkIfRequested(vs.SinkName, options)
+		return
+	}
+	if err := m.ensureVirtualSink(vs, options); err != nil {
 		return
 	}
 }
@@ -344,17 +361,36 @@ func (m SetupModel) hasTrackedVirtualSink(sinkName string) bool {
 	return sinkName == echowarpSinkName && m.virtualMicCreated
 }
 
-func (m *SetupModel) ensureVirtualSink(vs recent.VirtualSinkPreset) error {
+func (m *SetupModel) ensureVirtualSink(
+	vs recent.VirtualSinkPreset,
+	options virtualSinkEnsureOptions,
+) error {
 	moduleID, found, err := findPulseAudioModuleFn(vs.SinkName)
 	if err != nil {
 		return err
 	}
 	if found {
 		m.markVirtualSinkFound(moduleID, vs)
-		m.refreshDevicesAfterVirtualSinkEnsure(vs.SinkName)
+		m.refreshDevicesAfterVirtualSinkEnsure()
+		m.selectVirtualSinkIfRequested(vs.SinkName, options)
 		return nil
 	}
-	return m.createAndTrackVirtualSink(vs)
+	if err := m.createAndTrackVirtualSink(vs); err != nil {
+		return err
+	}
+	m.selectVirtualSinkIfRequested(vs.SinkName, options)
+	return nil
+}
+
+func (m *SetupModel) selectVirtualSinkIfRequested(
+	sinkName string,
+	options virtualSinkEnsureOptions,
+) {
+	if !options.selectAfterEnsure {
+		return
+	}
+	m.rememberPendingVirtualSinkSelection(sinkName)
+	m.selectPendingVirtualSink(sinkName)
 }
 
 func (m *SetupModel) createAndTrackVirtualSink(vs recent.VirtualSinkPreset) error {
@@ -364,13 +400,12 @@ func (m *SetupModel) createAndTrackVirtualSink(vs recent.VirtualSinkPreset) erro
 	}
 	m.markVirtualSinkCreated(moduleID, vs)
 	time.Sleep(200 * time.Millisecond)
-	m.refreshDevicesAfterVirtualSinkEnsure(vs.SinkName)
+	m.refreshDevicesAfterVirtualSinkEnsure()
 	return nil
 }
 
-func (m *SetupModel) refreshDevicesAfterVirtualSinkEnsure(sinkName string) {
+func (m *SetupModel) refreshDevicesAfterVirtualSinkEnsure() {
 	m.refreshDevicesAfterVirtualSinkCreate()
-	m.autoSelectVirtualDevice(sinkName)
 }
 
 func (m *SetupModel) refreshDevicesAfterVirtualSinkCreate() {

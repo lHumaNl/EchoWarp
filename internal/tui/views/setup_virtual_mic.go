@@ -132,35 +132,58 @@ func (m *SetupModel) updateVirtualMicField(created bool) {
 }
 
 // autoSelectVirtualDevice finds the newly created virtual device and selects it.
-func (m *SetupModel) autoSelectVirtualDevice(name string) {
+func (m *SetupModel) autoSelectVirtualDevice(name string) bool {
 	if m.multiSelect == nil {
 		m.multiSelect = make(map[string]DeviceRoleSet)
 	}
 	showInput, showOutput := m.visibleSections()
+	selected := false
 	if showInput {
-		m.selectVirtualInputMonitor(name)
+		selected = m.selectVirtualInputMonitor(name) || selected
 	}
 	if showOutput {
-		m.selectVirtualOutputSink(name)
+		selected = m.selectVirtualOutputSink(name) || selected
 	}
+	return selected
 }
 
-func (m *SetupModel) selectVirtualInputMonitor(sinkName string) {
+func (m *SetupModel) selectVirtualInputMonitor(sinkName string) bool {
 	monitorName := "Monitor of " + sinkName
 	for _, d := range m.inputDevices {
 		if d.Name == monitorName && d.IsVirtual {
 			m.setSelectedRole(d, true)
-			return
+			return true
 		}
 	}
+	return false
 }
 
-func (m *SetupModel) selectVirtualOutputSink(sinkName string) {
+func (m *SetupModel) selectVirtualOutputSink(sinkName string) bool {
 	for _, d := range m.outputDevices {
 		if d.Name == sinkName && d.IsVirtual {
 			m.setSelectedRole(d, false)
-			return
+			return true
 		}
+	}
+	return false
+}
+
+func (m *SetupModel) rememberPendingVirtualSinkSelection(sinkName string) {
+	if sinkName == "" {
+		return
+	}
+	if m.pendingVirtualSinkSelection == nil {
+		m.pendingVirtualSinkSelection = make(map[string]bool)
+	}
+	m.pendingVirtualSinkSelection[sinkName] = true
+}
+
+func (m *SetupModel) selectPendingVirtualSink(sinkName string) {
+	if !m.pendingVirtualSinkSelection[sinkName] {
+		return
+	}
+	if m.autoSelectVirtualDevice(sinkName) {
+		delete(m.pendingVirtualSinkSelection, sinkName)
 	}
 }
 
