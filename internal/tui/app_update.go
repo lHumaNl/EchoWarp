@@ -939,8 +939,10 @@ func (m *Model) cleanupVirtualSinks() {
 	if err := removePulseAudioSink(moduleID); err != nil {
 		return
 	}
+	if err := m.setupModel.MarkVirtualSinkCleaned(); err != nil {
+		return
+	}
 	m.virtualSinkCleanupDone = true
-	m.setupModel.MarkVirtualSinkCleaned()
 }
 
 func (m *Model) resetVirtualSinkCleanupLatchIfSessionSinkRecorded(before views.VirtualSinkCleanupPlan) {

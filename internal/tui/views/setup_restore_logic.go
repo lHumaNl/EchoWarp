@@ -11,6 +11,7 @@ import (
 
 	presetpkg "github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 )
 
 type clientProbeIdentity struct {
@@ -404,6 +405,8 @@ func (m SetupModel) filterPresetForVisibleSections(preset recent.DevicePreset) r
 
 type virtualSinkEnsureOptions struct {
 	selectAfterEnsure bool
+	explicitCreate    bool
+	stateDriven       bool
 }
 
 func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
@@ -418,6 +421,7 @@ func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
 			m.recreateVirtualSink(*vs, seen, options)
 		}
 	}
+	m.recreateVirtualSinksFromState(seen)
 }
 
 func (m *SetupModel) recreateVirtualSink(
@@ -425,6 +429,9 @@ func (m *SetupModel) recreateVirtualSink(
 	seen map[string]bool,
 	options virtualSinkEnsureOptions,
 ) {
+	if m.virtualStateSuppressesLegacy(vs) {
+		return
+	}
 	m.rememberVirtualSinkLifecycle(vs)
 	if vs.OnStart != recent.SinkRecreate || vs.SinkName == "" || seen[vs.SinkName] {
 		m.selectVirtualSinkIfRequested(vs.SinkName, options)
@@ -485,6 +492,65 @@ func (m *SetupModel) createMissingVirtualSink(
 	}
 }
 
+func (m *SetupModel) recreateVirtualSinksFromState(seen map[string]bool) {
+	device, ok := m.stateDeviceForRecreate()
+	if !ok || (seen != nil && seen[device.SinkName]) {
+		return
+	}
+	vs := recent.VirtualSinkPreset{
+		ModuleType: device.ModuleType,
+		SinkName:   device.SinkName,
+		OnStop:     device.Policy.OnStop,
+		OnStart:    device.Policy.OnStart,
+	}
+	m.rememberVirtualSinkLifecycle(vs)
+	m.createMissingVirtualSink(vs, virtualSinkEnsureOptions{stateDriven: true})
+	if seen != nil {
+		seen[device.SinkName] = true
+	}
+}
+
+func (m SetupModel) stateDeviceForRecreate() (virtualstate.Device, bool) {
+	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
+	if err != nil || !ok || !virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole()) {
+		return virtualstate.Device{}, false
+	}
+	if device.State.Desired != virtualstate.DesiredPresent {
+		return virtualstate.Device{}, false
+	}
+	return device, device.Policy.OnStart == recent.SinkRecreate
+}
+
+func (m SetupModel) virtualStateSuppressesLegacy(vs recent.VirtualSinkPreset) bool {
+	device, ok, err := virtualstate.LoadDevice(vs.SinkName)
+	return err == nil && ok && device.State.Desired == virtualstate.DesiredAbsent
+}
+
+func (m SetupModel) virtualStateAllowsCreate(
+	vs recent.VirtualSinkPreset,
+	options virtualSinkEnsureOptions,
+) bool {
+	if options.stateDriven {
+		return true
+	}
+	device, ok, err := virtualstate.LoadDevice(vs.SinkName)
+	if err != nil {
+		return false
+	}
+	if !ok {
+		return true
+	}
+	return !virtualstate.IsOtherRoleOwner(device, m.virtualStateRole())
+}
+
+func (m SetupModel) currentRoleOwnsPresentVirtualState() bool {
+	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
+	if err != nil || !ok || device.State.Desired == virtualstate.DesiredAbsent {
+		return false
+	}
+	return virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole())
+}
+
 func (m SetupModel) hasTrackedVirtualSink(sinkName string) bool {
 	return sinkName == echowarpSinkName && m.virtualMicCreated
 }
@@ -498,16 +564,79 @@ func (m *SetupModel) ensureVirtualSink(
 		return err
 	}
 	if found {
+		if err := m.rejectOtherRoleExplicitCreate(vs.SinkName, options); err != nil {
+			return err
+		}
 		m.markVirtualSinkFound(moduleID, vs)
+		if err := m.persistFoundVirtualSink(moduleID, vs, options); err != nil {
+			return err
+		}
 		m.refreshDevicesAfterVirtualSinkEnsure()
 		m.selectVirtualSinkIfRequested(vs.SinkName, options)
 		return nil
+	}
+	if !m.virtualStateAllowsCreate(vs, options) {
+		return m.disallowedVirtualSinkCreateError(vs.SinkName, options)
 	}
 	if err := m.createAndTrackVirtualSink(vs); err != nil {
 		return err
 	}
 	m.selectVirtualSinkIfRequested(vs.SinkName, options)
 	return nil
+}
+
+func (m *SetupModel) persistFoundVirtualSink(
+	moduleID string,
+	vs recent.VirtualSinkPreset,
+	options virtualSinkEnsureOptions,
+) error {
+	device, ok, err := virtualstate.LoadDevice(vs.SinkName)
+	if err != nil {
+		return err
+	}
+	if ok && virtualstate.IsOtherRoleOwner(device, m.virtualStateRole()) {
+		return virtualstate.ImportObservedPresent(vs.SinkName, echowarpMonitorName, moduleID)
+	}
+	if options.explicitCreate || options.stateDriven || m.currentRoleOwnsPresentVirtualState() {
+		return m.persistVirtualSinkPresent(moduleID, vs)
+	}
+	return virtualstate.ImportObservedPresent(vs.SinkName, echowarpMonitorName, moduleID)
+}
+
+func (m SetupModel) rejectOtherRoleExplicitCreate(
+	sinkName string,
+	options virtualSinkEnsureOptions,
+) error {
+	if !options.explicitCreate {
+		return nil
+	}
+	return m.virtualSinkOwnershipConflictError(sinkName)
+}
+
+func (m SetupModel) disallowedVirtualSinkCreateError(
+	sinkName string,
+	options virtualSinkEnsureOptions,
+) error {
+	if !options.explicitCreate {
+		return nil
+	}
+	return m.virtualSinkOwnershipConflictError(sinkName)
+}
+
+func (m SetupModel) virtualSinkOwnershipConflictError(sinkName string) error {
+	owner, conflict, err := m.otherRoleVirtualSinkOwner(sinkName)
+	if err != nil || !conflict {
+		return err
+	}
+	return fmt.Errorf("%s virtual audio device already exists and is owned by %s", sinkName, owner)
+}
+
+func (m SetupModel) otherRoleVirtualSinkOwner(sinkName string) (string, bool, error) {
+	device, ok, err := virtualstate.LoadDevice(sinkName)
+	if err != nil || !ok || !virtualstate.IsOtherRoleOwner(device, m.virtualStateRole()) {
+		return "", false, err
+	}
+	return device.Ownership.CreatedBy, true, nil
 }
 
 func (m *SetupModel) selectVirtualSinkIfRequested(
@@ -526,10 +655,20 @@ func (m *SetupModel) createAndTrackVirtualSink(vs recent.VirtualSinkPreset) erro
 	if err != nil {
 		return err
 	}
+	if err := m.persistVirtualSinkPresent(moduleID, vs); err != nil {
+		return m.handleCreatedVirtualSinkPersistError(moduleID, err)
+	}
 	m.markVirtualSinkCreated(moduleID, vs)
 	time.Sleep(200 * time.Millisecond)
 	m.refreshDevicesAfterVirtualSinkEnsure()
 	return nil
+}
+
+func (m *SetupModel) handleCreatedVirtualSinkPersistError(moduleID string, err error) error {
+	if removeErr := removePulseAudioSinkFn(moduleID); removeErr != nil {
+		return fmt.Errorf("persist virtual audio device state: %w; cleanup failed: %v", err, removeErr)
+	}
+	return fmt.Errorf("persist virtual audio device state: %w", err)
 }
 
 func (m *SetupModel) refreshDevicesAfterVirtualSinkEnsure() {

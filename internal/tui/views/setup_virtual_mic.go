@@ -9,6 +9,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 )
 
 const echowarpSinkName = "EchoWarp"
@@ -204,7 +207,11 @@ func (m *SetupModel) syncVirtualMicState() {
 	}
 	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
 	if err == nil && found {
-		m.markVirtualSinkFound(moduleID, *m.defaultVirtualSinkPreset())
+		vs := *m.defaultVirtualSinkPreset()
+		m.markVirtualSinkFound(moduleID, vs)
+		if persistErr := m.persistFoundVirtualSink(moduleID, vs, virtualSinkEnsureOptions{}); persistErr != nil {
+			m.clearVirtualMicManageState()
+		}
 		return
 	}
 	if err != nil && m.hasVirtualMicModuleState() {
@@ -248,6 +255,9 @@ func (m *SetupModel) clearVirtualSinkLifecycleState() {
 }
 
 func (m *SetupModel) removeManagedVirtualMic() error {
+	if err := m.ensureVirtualMicRemovalAllowed(); err != nil {
+		return err
+	}
 	moduleID, err := m.resolveVirtualMicModuleForRemoval()
 	if err != nil {
 		return err
@@ -255,9 +265,39 @@ func (m *SetupModel) removeManagedVirtualMic() error {
 	if err := removePulseAudioSinkFn(moduleID); err != nil {
 		return err
 	}
+	if err := virtualstate.MarkAbsent(echowarpSinkName, virtualstate.RoleUser); err != nil {
+		return fmt.Errorf("persist virtual audio device removal: %w", err)
+	}
 	m.clearVirtualMicManageState()
 	m.clearVirtualSinkLifecycleState()
 	return nil
+}
+
+func (m SetupModel) ensureVirtualMicRemovalAllowed() error {
+	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
+	if err != nil {
+		return fmt.Errorf("load virtual audio device state: %w", err)
+	}
+	if ok && virtualstate.IsOtherRoleOwner(device, m.virtualStateRole()) {
+		return otherRoleVirtualMicRemoveError(device.Ownership.CreatedBy)
+	}
+	return nil
+}
+
+func otherRoleVirtualMicRemoveError(owner string) error {
+	return fmt.Errorf("%s virtual audio device is owned by %s", echowarpSinkName, owner)
+}
+
+func (m *SetupModel) persistVirtualSinkPresent(moduleID string, vs recent.VirtualSinkPreset) error {
+	policy := virtualstate.DevicePolicy{OnStop: vs.OnStop, OnStart: vs.OnStart}
+	return virtualstate.UpsertPresent(vs.SinkName, echowarpMonitorName, moduleID, m.virtualStateRole(), policy)
+}
+
+func (m *SetupModel) persistVirtualSinkPolicy() error {
+	if m.virtualMicManagedModule == "" && m.virtualMicModule == "" {
+		return nil
+	}
+	return m.persistVirtualSinkPresent(m.virtualSinkCleanupModuleID(), *m.defaultVirtualSinkPreset())
 }
 
 func (m SetupModel) resolveVirtualMicModuleForRemoval() (string, error) {

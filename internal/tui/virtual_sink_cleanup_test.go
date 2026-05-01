@@ -9,6 +9,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 )
 
@@ -70,6 +71,24 @@ func TestCleanupRunsAgainAfterNewSessionVirtualSinkRecorded(t *testing.T) {
 func TestDirectQuitKeepsVirtualSinkWhenConfigured(t *testing.T) {
 	m := newVirtualSinkCleanupModel(t, recent.SinkKeep)
 	m.setupModel = m.setupModel.WithVirtualSinkCreatedForSession("7")
+	stub := stubVirtualSinkCleanup(t, "42")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	m = updated.(Model)
+
+	assert.True(t, m.quitting)
+	assert.Empty(t, stub.findSinkNames)
+	assert.Empty(t, stub.removedIDs)
+}
+
+func TestClientShutdownDoesNotDeleteServerOwnedVirtualSink(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	policy := virtualstate.DevicePolicy{OnStop: recent.SinkDelete, OnStart: recent.SinkRecreate}
+	require.NoError(t, virtualstate.UpsertPresent("EchoWarp", "Monitor of EchoWarp", "42", virtualstate.RoleServer, policy))
+	devices := []audio.AudioDevice{{ID: 99, Name: "EchoWarp", IsInput: false, Channels: 2, SampleRate: 48000}}
+	m := NewModel(config.Config{Mode: config.ModeClient, Reverse: true}, devices)
+	m.setupModel = m.setupModel.WithVirtualSinkLifecycle(recent.SinkDelete, recent.SinkRecreate)
+	m.screen = ScreenStreaming
 	stub := stubVirtualSinkCleanup(t, "42")
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})

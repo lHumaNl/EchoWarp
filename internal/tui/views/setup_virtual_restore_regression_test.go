@@ -122,7 +122,7 @@ func TestLifecycleOnlyPresetRecreatesMissingVirtualSink(t *testing.T) {
 	assert.True(t, m.virtualSinkLifecycleConfigured)
 }
 
-func TestLifecycleOnlyPresetExistingSinkCleanupPlanDeletesManagedModule(t *testing.T) {
+func TestLifecycleOnlyPresetExistingUnknownSinkCleanupPlanKeepsManagedModule(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	stub.foundModuleID = "42"
 	m := newInputOnlyRestoreModel()
@@ -135,8 +135,8 @@ func TestLifecycleOnlyPresetExistingSinkCleanupPlanDeletesManagedModule(t *testi
 
 	assert.Nil(t, cmd)
 	assert.Empty(t, stub.createdNames)
-	assert.True(t, plan.Delete)
-	assert.Equal(t, "42", plan.ModuleID)
+	assert.False(t, plan.Delete)
+	assert.Empty(t, plan.ModuleID)
 	assert.False(t, plan.AllowNameFallback)
 }
 
@@ -390,6 +390,7 @@ type virtualAudioStub struct {
 
 func stubVirtualAudioFuncs(t *testing.T) *virtualAudioStub {
 	t.Helper()
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
 	oldLinux := isLinuxRuntime
 	oldCreate := createPulseAudioSinkFn
 	oldRemove := removePulseAudioSinkFn

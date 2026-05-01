@@ -13,6 +13,7 @@ import (
 	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 )
@@ -351,6 +352,9 @@ func (m SetupModel) WithUnifiedDeviceList(isDuplex bool) SetupModel {
 	if m.cfg.Mode == config.ModeServer && m.serverPresets != nil {
 		m.pendingRestoreCmd = m.tryShowServerRestoreOverlay()
 	}
+	if m.cfg.Mode == config.ModeServer {
+		m.recreateVirtualSinksFromState(nil)
+	}
 
 	return m
 }
@@ -405,6 +409,17 @@ type VirtualSinkCleanupPlan struct {
 
 // VirtualSinkCleanupPlan returns the safe cleanup action for the EchoWarp sink.
 func (m SetupModel) VirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
+	if m.virtualMicCreated {
+		return m.sessionVirtualSinkCleanupPlan()
+	}
+	if plan, ok := m.stateVirtualSinkCleanupPlan(); ok {
+		return plan
+	}
+
+	return VirtualSinkCleanupPlan{SinkName: echowarpSinkName}
+}
+
+func (m SetupModel) sessionVirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
 	sinkName, shouldDelete := m.virtualSinkCleanupTarget()
 	return VirtualSinkCleanupPlan{
 		Delete:            shouldDelete,
@@ -414,11 +429,55 @@ func (m SetupModel) VirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
 	}
 }
 
+func (m SetupModel) stateVirtualSinkCleanupPlan() (VirtualSinkCleanupPlan, bool) {
+	device, ok := m.currentRoleVirtualStateDevice()
+	if !ok || device.State.Desired != virtualstate.DesiredPresent {
+		return VirtualSinkCleanupPlan{}, false
+	}
+	return VirtualSinkCleanupPlan{
+		Delete:   device.Policy.OnStop == recent.SinkDelete,
+		SinkName: device.SinkName,
+		ModuleID: firstNonEmpty(device.State.ModuleID, m.virtualMicManagedModule),
+	}, true
+}
+
+func (m SetupModel) currentRoleVirtualStateDevice() (virtualstate.Device, bool) {
+	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
+	if err != nil || !ok {
+		return virtualstate.Device{}, false
+	}
+	return device, virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole())
+}
+
 // MarkVirtualSinkCleaned clears session-local module state after cleanup.
-func (m *SetupModel) MarkVirtualSinkCleaned() {
+func (m *SetupModel) MarkVirtualSinkCleaned() error {
+	if err := virtualstate.MarkAbsent(echowarpSinkName, m.virtualStateRole()); err != nil {
+		return fmt.Errorf("persist virtual audio device cleanup: %w", err)
+	}
 	m.virtualMicCreated = false
 	m.virtualMicModule = ""
 	m.syncVirtualMicState()
+	return nil
+}
+
+func (m SetupModel) virtualStateRole() string {
+	switch m.cfg.Mode {
+	case config.ModeClient:
+		return virtualstate.RoleClient
+	case config.ModeServer:
+		return virtualstate.RoleServer
+	default:
+		return virtualstate.RoleUnknown
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (m SetupModel) virtualSinkCleanupTarget() (string, bool) {
