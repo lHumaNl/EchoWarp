@@ -54,7 +54,7 @@ func displayNameFromKey(key string) string {
 // IsVirtualDevice checks if a device name matches known virtual audio devices.
 func IsVirtualDevice(name string) bool {
 	lower := strings.ToLower(name)
-	virtuals := []string{"blackhole", "vb-audio", "cable", "virtual", "loopback", "soundflower", "existential"}
+	virtuals := []string{"echowarp", "blackhole", "vb-audio", "cable", "virtual", "loopback", "soundflower", "existential"}
 	for _, v := range virtuals {
 		if strings.Contains(lower, v) {
 			return true

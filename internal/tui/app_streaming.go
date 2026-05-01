@@ -225,10 +225,7 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 func (m Model) handleParticipantOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
-		if m.stopCh != nil {
-			m.stopOnce.Do(func() { close(m.stopCh) })
-		}
-		m.quitting = true
+		m.requestQuit()
 		return m, tea.Quit
 	case tea.KeyEsc:
 		m.participantOverlay.Hide()
@@ -275,10 +272,7 @@ func (m Model) handleParticipantOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 func (m Model) handleRecordingOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
-		if m.stopCh != nil {
-			m.stopOnce.Do(func() { close(m.stopCh) })
-		}
-		m.quitting = true
+		m.requestQuit()
 		return m, tea.Quit
 	case tea.KeyEsc:
 		m.recordingOverlay.Hide()
@@ -610,10 +604,7 @@ func (m Model) handleBanOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Enter in criteria section does nothing (Space toggles)
 		return m, nil
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
-		if m.stopCh != nil {
-			m.stopOnce.Do(func() { close(m.stopCh) })
-		}
-		m.quitting = true
+		m.requestQuit()
 		return m, tea.Quit
 	}
 	return m, nil
@@ -651,10 +642,7 @@ func (m Model) handleOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case tea.KeyCtrlQ, tea.KeyCtrlC:
-			if m.stopCh != nil {
-				m.stopOnce.Do(func() { close(m.stopCh) })
-			}
-			m.quitting = true
+			m.requestQuit()
 			return m, tea.Quit
 		}
 	}
@@ -818,10 +806,7 @@ func (m *Model) openClientPopup(clientID, clientNick string) {
 func (m Model) handleClientPopupKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
-		if m.stopCh != nil {
-			m.stopOnce.Do(func() { close(m.stopCh) })
-		}
-		m.quitting = true
+		m.requestQuit()
 		return m, tea.Quit
 	case tea.KeyEsc:
 		m.overlay = OverlayNone
@@ -1023,10 +1008,7 @@ func (m Model) handleKickOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Predefined or recent reason
 		return m.executeKick(m.kickOverlay.Reasons[m.kickOverlay.SelectedIndex])
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
-		if m.stopCh != nil {
-			m.stopOnce.Do(func() { close(m.stopCh) })
-		}
-		m.quitting = true
+		m.requestQuit()
 		return m, tea.Quit
 	}
 	return m, nil
@@ -1253,10 +1235,7 @@ func (m Model) handleDeviceOverlayKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
-		if m.stopCh != nil {
-			m.stopOnce.Do(func() { close(m.stopCh) })
-		}
-		m.quitting = true
+		m.requestQuit()
 		return m, tea.Quit
 	}
 

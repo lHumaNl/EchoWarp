@@ -11,11 +11,13 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/probe"
-	"github.com/lHumaNl/echowarp/internal/recent"
 	"github.com/lHumaNl/echowarp/internal/tui/views"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
 )
+
+var removePulseAudioSink = views.RemovePulseAudioSink
+var findPulseAudioSinkModule = views.FindPulseAudioSinkModule
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -652,7 +654,9 @@ func (m Model) updateDeviceSelect(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 
 	// Forward everything else to the setup model
 	var cmd tea.Cmd
+	beforeCleanupPlan := m.setupModel.VirtualSinkCleanupPlan()
 	m.setupModel, cmd = m.setupModel.Update(msg)
+	m.resetVirtualSinkCleanupLatchIfSessionSinkRecorded(beforeCleanupPlan)
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -911,14 +915,49 @@ func (m *Model) setDefaultFocus() {
 
 // cleanupVirtualSinks removes virtual sinks that have OnStop == SinkDelete.
 func (m *Model) cleanupVirtualSinks() {
-	moduleID := m.setupModel.VirtualMicModule()
+	if m.virtualSinkCleanupDone {
+		return
+	}
+	plan := m.setupModel.VirtualSinkCleanupPlan()
+	if !plan.Delete {
+		return
+	}
+	moduleID := plan.ModuleID
+	if moduleID == "" {
+		if !plan.AllowNameFallback {
+			return
+		}
+		resolvedID, found, err := findPulseAudioSinkModule(plan.SinkName)
+		if err != nil || !found {
+			return
+		}
+		moduleID = resolvedID
+	}
 	if moduleID == "" {
 		return
 	}
-	for _, vs := range m.setupModel.SelectedVirtualSinkPresets() {
-		if vs.OnStop == recent.SinkDelete {
-			_ = views.RemovePulseAudioSink(moduleID)
-			return
-		}
+	if err := removePulseAudioSink(moduleID); err != nil {
+		return
 	}
+	m.virtualSinkCleanupDone = true
+	m.setupModel.MarkVirtualSinkCleaned()
+}
+
+func (m *Model) resetVirtualSinkCleanupLatchIfSessionSinkRecorded(before views.VirtualSinkCleanupPlan) {
+	after := m.setupModel.VirtualSinkCleanupPlan()
+	if !after.AllowNameFallback {
+		return
+	}
+	if before.AllowNameFallback && before.ModuleID == after.ModuleID {
+		return
+	}
+	m.virtualSinkCleanupDone = false
+}
+
+func (m *Model) requestQuit() {
+	if m.stopCh != nil && m.stopOnce != nil {
+		m.stopOnce.Do(func() { close(m.stopCh) })
+	}
+	m.cleanupVirtualSinks()
+	m.quitting = true
 }

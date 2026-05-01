@@ -67,7 +67,8 @@ type Model struct {
 	deviceName      string
 
 	// Setup screen
-	setupModel views.SetupModel
+	setupModel             views.SetupModel
+	virtualSinkCleanupDone bool
 
 	// Error auto-dismiss timer (UX-11)
 	errorTimer time.Time

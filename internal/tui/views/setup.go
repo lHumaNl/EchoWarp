@@ -357,10 +357,65 @@ func (m SetupModel) WithDeviceRefreshFunc(fn func() ([]list.Item, error)) SetupM
 	return m
 }
 
+// WithVirtualSinkLifecycle sets cleanup/startup behavior for the virtual sink.
+func (m SetupModel) WithVirtualSinkLifecycle(onStop, onStart recent.SinkLifecycle) SetupModel {
+	m.virtualSinkOnStop = onStop
+	m.virtualSinkOnStart = onStart
+	return m
+}
+
+// WithVirtualSinkCreatedForSession records a virtual sink created by this process.
+func (m SetupModel) WithVirtualSinkCreatedForSession(moduleID string) SetupModel {
+	m.virtualMicCreated = true
+	m.virtualMicModule = moduleID
+	return m
+}
+
 // VirtualMicModule returns the PulseAudio module ID of the virtual mic created
 // this session (empty string if none). Used by the TUI to clean up on stop.
 func (m SetupModel) VirtualMicModule() string {
 	return m.virtualMicModule
+}
+
+// VirtualSinkCleanupPlan describes whether and how the app should remove a sink.
+type VirtualSinkCleanupPlan struct {
+	Delete            bool
+	SinkName          string
+	ModuleID          string
+	AllowNameFallback bool
+}
+
+// VirtualSinkCleanupPlan returns the safe cleanup action for the EchoWarp sink.
+func (m SetupModel) VirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
+	sinkName, shouldDelete := m.virtualSinkCleanupTarget()
+	return VirtualSinkCleanupPlan{
+		Delete:            shouldDelete,
+		SinkName:          sinkName,
+		ModuleID:          m.virtualMicModule,
+		AllowNameFallback: m.virtualMicCreated,
+	}
+}
+
+// MarkVirtualSinkCleaned clears session-local module state after cleanup.
+func (m *SetupModel) MarkVirtualSinkCleaned() {
+	m.virtualMicCreated = false
+	m.virtualMicModule = ""
+}
+
+func (m SetupModel) virtualSinkCleanupTarget() (string, bool) {
+	for _, vs := range m.SelectedVirtualSinkPresets() {
+		if vs.ModuleType == "module-null-sink" && vs.SinkName == echowarpSinkName {
+			return vs.SinkName, vs.OnStop == recent.SinkDelete
+		}
+	}
+	if !m.virtualMicCreated && m.virtualMicModule == "" {
+		return echowarpSinkName, false
+	}
+	onStop := m.virtualSinkOnStop
+	if onStop == "" {
+		onStop = recent.SinkDelete
+	}
+	return echowarpSinkName, onStop == recent.SinkDelete
 }
 
 // SelectedVirtualSinkPresets returns VirtualSinkPreset entries for all currently

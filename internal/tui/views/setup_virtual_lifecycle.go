@@ -63,26 +63,60 @@ func (o *VirtualSinkLifecycleOverlay) Update(msg tea.KeyMsg) VirtualSinkLifecycl
 	case tea.KeyEnter:
 		return VSLifecycleSave
 
+	case tea.KeyTab:
+		o.focusGroup = (o.focusGroup + 1) % 3
+
+	case tea.KeyShiftTab:
+		o.focusGroup = (o.focusGroup + 2) % 3
+
 	case tea.KeyUp:
+		o.selectPreviousOption()
+
+	case tea.KeyDown:
+		o.selectNextOption()
+
+	case tea.KeyLeft:
 		if o.focusGroup > 0 {
 			o.focusGroup--
 		}
 
-	case tea.KeyDown:
+	case tea.KeyRight:
 		if o.focusGroup < 2 {
 			o.focusGroup++
 		}
 
-	case tea.KeyLeft, tea.KeyRight, tea.KeySpace:
-		switch o.focusGroup {
-		case 0:
-			o.onStopIdx = 1 - o.onStopIdx
-		case 1:
-			o.onStartIdx = 1 - o.onStartIdx
-		}
+	case tea.KeySpace:
+		o.toggleFocusedOption()
 	}
 
 	return VSLifecycleNone
+}
+
+func (o *VirtualSinkLifecycleOverlay) selectPreviousOption() {
+	switch o.focusGroup {
+	case 0:
+		o.onStopIdx = (o.onStopIdx + 1) % 2
+	case 1:
+		o.onStartIdx = (o.onStartIdx + 1) % 2
+	}
+}
+
+func (o *VirtualSinkLifecycleOverlay) selectNextOption() {
+	switch o.focusGroup {
+	case 0:
+		o.onStopIdx = (o.onStopIdx + 1) % 2
+	case 1:
+		o.onStartIdx = (o.onStartIdx + 1) % 2
+	}
+}
+
+func (o *VirtualSinkLifecycleOverlay) toggleFocusedOption() {
+	switch o.focusGroup {
+	case 0:
+		o.onStopIdx = 1 - o.onStopIdx
+	case 1:
+		o.onStartIdx = 1 - o.onStartIdx
+	}
 }
 
 // View renders the overlay.
@@ -95,7 +129,7 @@ func (o *VirtualSinkLifecycleOverlay) View(width int) string {
 		overlayW = 35
 	}
 
-	title := styles.SetupColumnTitle.Render("Virtual Sink Options")
+	title := styles.SetupColumnTitle.Render("Virtual Audio Device Options")
 
 	var sb strings.Builder
 	sb.WriteString(title)
@@ -103,12 +137,12 @@ func (o *VirtualSinkLifecycleOverlay) View(width int) string {
 
 	// OnStop group
 	sb.WriteString(o.renderGroup("After stream stops:", o.focusGroup == 0,
-		[]string{"Delete sink", "Keep sink"}, o.onStopIdx))
+		[]string{"Delete virtual device", "Keep virtual device"}, o.onStopIdx))
 	sb.WriteString("\n")
 
 	// OnStart group
 	sb.WriteString(o.renderGroup("On next startup:", o.focusGroup == 1,
-		[]string{"Recreate automatically", "Don't recreate"}, o.onStartIdx))
+		[]string{"Create it again automatically", "Do not create automatically"}, o.onStartIdx))
 	sb.WriteString("\n")
 
 	// Buttons

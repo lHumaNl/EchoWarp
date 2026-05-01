@@ -103,10 +103,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (model Model, cmd tea.Cmd, handled b
 
 	switch msg.Type {
 	case tea.KeyCtrlQ, tea.KeyCtrlC:
-		if m.stopCh != nil && m.stopOnce != nil {
-			m.stopOnce.Do(func() { close(m.stopCh) })
-		}
-		m.quitting = true
+		m.requestQuit()
 		return m, tea.Quit, true
 	case tea.KeyEsc:
 		// Clear error banner on Esc (UX-11)

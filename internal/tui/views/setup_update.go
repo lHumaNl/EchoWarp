@@ -672,7 +672,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				time.Sleep(200 * time.Millisecond)
 				m.refreshDevicesFromOS()
 				m.rebuildDeviceGroups()
-				flashCmd := m.SetFlash("Virtual mic removed", 3*time.Second)
+				flashCmd := m.SetFlash("Virtual audio device removed", 3*time.Second)
 				return m, flashCmd
 			case VirtualActionCancel:
 				m.overlay = SetupOverlayNone
@@ -768,7 +768,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				m.virtualSinkOnStart = m.virtualSinkLifecycleOverlay.OnStart()
 				m.overlay = SetupOverlayNone
 				m.virtualSinkLifecycleOverlay = nil
-				flashCmd := m.SetFlash("✓ Virtual mic created — EchoWarp", 3*time.Second)
+				flashCmd := m.SetFlash("✓ Virtual audio device created — EchoWarp", 3*time.Second)
 				return m, flashCmd
 			case VSLifecycleCancel:
 				// Use defaults
@@ -776,7 +776,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				m.virtualSinkOnStart = recent.SinkRecreate
 				m.overlay = SetupOverlayNone
 				m.virtualSinkLifecycleOverlay = nil
-				flashCmd := m.SetFlash("✓ Virtual mic created — EchoWarp", 3*time.Second)
+				flashCmd := m.SetFlash("✓ Virtual audio device created — EchoWarp", 3*time.Second)
 				return m, flashCmd
 			}
 		}

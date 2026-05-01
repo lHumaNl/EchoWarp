@@ -51,7 +51,7 @@ help_virtual_device_overlay: "↑↓: navigate  enter: edit/create  space: toggl
 help_restore_overlay: "←→: select  enter: confirm  esc: skip"
 help_config_save_overlay: "enter: save  esc: cancel"
 help_config_load_overlay: "↑↓: browse  enter: load  ^D: delete  esc: cancel"
-help_virtual_sink_lifecycle: "↑↓: navigate  ←→/space: toggle  enter: save  esc: defaults"
+help_virtual_sink_lifecycle: "tab: section • ↑/↓: option • enter: save • esc: defaults"
 help_editing: "enter: confirm  esc: cancel"
 help_devices_unified_duplex: "↑↓: device  tab: section  space: toggle  +/-: volume  →: AGC  ^E: virtual  ↵: start  ^Q: quit"
 help_devices_duplex: "/: filter  ↑↓: device  ^↑^↓: section  tab: settings  ↵: start  ^Q: quit"
@@ -99,7 +99,7 @@ hint_reconnect_unlimited: "(0 = unlimited)"
 
 # Action labels
 action_advanced: "Advanced ▸"
-action_create_virtual: "Create ▸"
+action_create_virtual: "Create Virtual Audio Device ▸"
 
 # Mode options
 mode_normal: "normal (server → client)"

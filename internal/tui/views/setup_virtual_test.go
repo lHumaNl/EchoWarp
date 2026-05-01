@@ -14,9 +14,9 @@ func TestVirtualOverlay_CreateConfirmation(t *testing.T) {
 	assert.False(t, overlay.Exists)
 
 	view := overlay.View(80)
-	assert.Contains(t, view, "Virtual Microphone")
-	assert.Contains(t, view, "PulseAudio virtual sink")
-	assert.Contains(t, view, "[Create]")
+	assert.Contains(t, view, "Create Virtual Audio Device")
+	assert.Contains(t, view, "audio output named")
+	assert.Contains(t, view, "[Create Device]")
 	assert.Contains(t, view, "[Cancel]")
 	assert.Contains(t, view, "Monitor of EchoWarp")
 }
@@ -24,7 +24,7 @@ func TestVirtualOverlay_CreateConfirmation(t *testing.T) {
 func TestVirtualOverlay_ExistsState(t *testing.T) {
 	overlay := NewVirtualDeviceOverlay(true, "EchoWarp")
 	view := overlay.View(80)
-	assert.Contains(t, view, "Virtual mic active")
+	assert.Contains(t, view, "Virtual audio device active")
 	assert.Contains(t, view, "[Remove]")
 	assert.Contains(t, view, "[OK]")
 	assert.Contains(t, view, "Monitor of EchoWarp")

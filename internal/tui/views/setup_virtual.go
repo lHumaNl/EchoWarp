@@ -20,7 +20,7 @@ const (
 )
 
 // VirtualDeviceOverlay shows a confirmation screen for creating/removing
-// a PulseAudio virtual sink (Linux only).
+// a Linux virtual audio device.
 type VirtualDeviceOverlay struct {
 	Exists    bool   // true if virtual mic already created
 	SinkName  string // e.g. "EchoWarp"
@@ -79,7 +79,7 @@ func (v *VirtualDeviceOverlay) View(width int) string {
 		overlayW = 35
 	}
 
-	title := styles.SetupColumnTitle.Render("Virtual Microphone")
+	title := styles.SetupColumnTitle.Render("Create Virtual Audio Device")
 	contentW := overlayW - 4
 
 	var body string
@@ -106,16 +106,17 @@ func (v *VirtualDeviceOverlay) viewCreate(contentW int) string {
 	var sb strings.Builder
 
 	sb.WriteString(styles.SetupDimValue.Render(
-		"Create a PulseAudio virtual sink?\n\n" +
-			"EchoWarp will play received audio to this\n" +
-			"device. Other apps can capture it as a mic."))
+		"EchoWarp will create an audio output named\n" +
+			"\"EchoWarp\" for received sound.\n\n" +
+			"In other apps, use its monitor as the\n" +
+			"microphone/input source."))
 	sb.WriteString("\n\n")
 	sb.WriteString(styles.SetupDimValue.Render("In Discord / Zoom / OBS select:"))
 	sb.WriteString("\n")
 	sb.WriteString(styles.ConnParamValue.Render("  \"Monitor of EchoWarp\" as microphone"))
 	sb.WriteString("\n\n")
 
-	sb.WriteString(v.renderButtons("[Create]", "[Cancel]", contentW))
+	sb.WriteString(v.renderButtons("[Create Device]", "[Cancel]", contentW))
 	sb.WriteString("\n\n")
 	sb.WriteString(v.renderFooter(contentW))
 
@@ -125,7 +126,7 @@ func (v *VirtualDeviceOverlay) viewCreate(contentW int) string {
 func (v *VirtualDeviceOverlay) viewExists(contentW int) string {
 	var sb strings.Builder
 
-	sb.WriteString(styles.SetupReadyHint.Render("✓ Virtual mic active — " + v.SinkName))
+	sb.WriteString(styles.SetupReadyHint.Render("✓ Virtual audio device active — " + v.SinkName))
 	sb.WriteString("\n\n")
 	sb.WriteString(styles.SetupDimValue.Render("In Discord / Zoom / OBS select:"))
 	sb.WriteString("\n")

@@ -128,6 +128,8 @@ func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cm
 		if err == nil {
 			m.virtualMicCreated = true
 			m.virtualMicModule = moduleID
+			m.virtualSinkOnStop = pd.VirtualSink.OnStop
+			m.virtualSinkOnStart = pd.VirtualSink.OnStart
 			// Wait for PulseAudio and refresh device list.
 			time.Sleep(200 * time.Millisecond)
 			m.refreshDevicesFromOS()

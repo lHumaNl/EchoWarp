@@ -115,7 +115,7 @@ func (m SetupModel) viewTwoColumns() string {
 
 		m.DeviceList.SetSize(leftW-2, m.bodyHeight()-4)
 		leftBody := m.DeviceList.View()
-		flashLine := m.renderFlashLine()
+		flashLine := m.renderFlashLine(leftW)
 		if flashLine != "" {
 			flashLine += "\n"
 		}
@@ -194,7 +194,7 @@ func (m SetupModel) viewSingleColumn() string {
 		}
 		header := styles.SetupColumnTitle.Render(title)
 		m.DeviceList.SetSize(m.width-2, m.bodyHeight()-4)
-		flashLine := m.renderFlashLine()
+		flashLine := m.renderFlashLine(m.width)
 		if flashLine != "" {
 			flashLine += "\n"
 		}
@@ -357,11 +357,16 @@ func (m SetupModel) readyHint() string {
 }
 
 // renderFlashLine returns a styled flash notification line (empty string if no flash).
-func (m SetupModel) renderFlashLine() string {
+func (m SetupModel) renderFlashLine(width int) string {
 	if m.flashMsg == "" {
 		return ""
 	}
-	return styles.FlashSuccess.Render("  ⟳ " + m.flashMsg)
+	prefix := "  ⟳ "
+	messageWidth := width - lipgloss.Width(prefix)
+	if messageWidth <= 0 {
+		return styles.FlashSuccess.Render(TruncateToWidth(prefix+m.flashMsg, width))
+	}
+	return styles.FlashSuccess.Render(prefix + TruncateToWidth(m.flashMsg, messageWidth))
 }
 
 // HelpKeys returns the help keys string for the status bar.
@@ -433,7 +438,7 @@ func (m SetupModel) renderUnifiedDeviceList(width int) string {
 		result.WriteString(mi)
 		result.WriteString("\n")
 	}
-	if fl := m.renderFlashLine(); fl != "" {
+	if fl := m.renderFlashLine(width); fl != "" {
 		result.WriteString(fl)
 		result.WriteString("\n")
 	}
@@ -705,7 +710,7 @@ func (m SetupModel) renderDuplexDeviceLists(width int) string {
 	outputBody := m.OutputDeviceList.View()
 
 	sep := styles.Separator.Render(strings.Repeat("─", width))
-	flashLine := m.renderFlashLine()
+	flashLine := m.renderFlashLine(width)
 	if flashLine != "" {
 		flashLine += "\n"
 	}
