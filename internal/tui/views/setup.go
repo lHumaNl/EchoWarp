@@ -138,10 +138,11 @@ type SetupModel struct {
 	discoveryScanning bool
 
 	// Server probe state (client mode)
-	probeAddr   string // "addr:port" currently being probed (for dedup)
-	probeStatus string // "", "probing", "ok", "error"
-	probeError  string // error message when probeStatus == "error"
-	probeResult *ProbeServerResult
+	probeAddr     string // "addr:port" currently being probed (for dedup)
+	probeStatus   string // "", "probing", "ok", "error"
+	probeError    string // error message when probeStatus == "error"
+	probeResult   *ProbeServerResult
+	probeIdentity clientProbeIdentity
 
 	// Validation error feedback (UX-1)
 	validationError string

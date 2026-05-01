@@ -237,10 +237,17 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 
 		servers, _ := recent.Load()
 
+		var serverID string
+		if probeRes != nil && probeRes.ServerID != "" {
+			serverID = probeRes.ServerID
+		} else if selServer != nil && selServer.ServerID != "" {
+			serverID = selServer.ServerID
+		}
+
 		// Preserve existing presets for other modes.
 		existingPresets := make(map[string]recent.DevicePreset)
 		for _, s := range servers {
-			if s.Address == cfg.Address && s.Port == cfg.Port {
+			if recent.MatchesServer(s, cfg.Address, cfg.Port, serverID) {
 				for k, v := range s.Presets {
 					existingPresets[k] = v
 				}
@@ -248,13 +255,6 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 			}
 		}
 		existingPresets[mode] = devicePreset
-
-		var serverID string
-		if probeRes != nil && probeRes.ServerID != "" {
-			serverID = probeRes.ServerID
-		} else if selServer != nil && selServer.ServerID != "" {
-			serverID = selServer.ServerID
-		}
 
 		servers = recent.Add(servers, recent.Server{
 			Address:       cfg.Address,

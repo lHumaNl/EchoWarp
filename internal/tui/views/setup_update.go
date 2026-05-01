@@ -113,6 +113,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		// force a fresh probe to pick up server-side changes.
 		if msg.Entry.ProbeResult != nil {
 			// Apply cached result for now (UI stays responsive)
+			m.resetClientSelectionOnProbeChange(msg.Entry.Address, msg.Entry.Port, msg.Entry.ProbeResult)
 			m.probeResult = msg.Entry.ProbeResult
 			m.probeStatus = "probing"
 			m.probeError = ""
@@ -149,6 +150,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		if selectedEntry != nil {
 			if selectedEntry.ProbeResult != nil {
 				// This is the currently selected server — apply probe result to fields
+				m.resetClientSelectionOnProbeChange(selectedEntry.Address, selectedEntry.Port, selectedEntry.ProbeResult)
 				m.probeResult = selectedEntry.ProbeResult
 				m.probeStatus = "ok"
 				m.probeError = ""
@@ -195,6 +197,8 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		m.serverList.UpdateProbeResult(msg.Addr, msg.Result, msg.Err)
 
 		if msg.Result != nil {
+			probeHost, probedPort := probeAddressFromFields(m.Fields, msg.Addr)
+			m.resetClientSelectionOnProbeChange(probeHost, probedPort, msg.Result)
 			m.probeStatus = "ok"
 			m.probeError = ""
 			m.probeResult = msg.Result

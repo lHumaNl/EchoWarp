@@ -2,6 +2,8 @@ package views
 
 import (
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +12,13 @@ import (
 	presetpkg "github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
 )
+
+type clientProbeIdentity struct {
+	address  string
+	port     int
+	serverID string
+	mode     string
+}
 
 // startProbeIfReady returns a debounced probe command if address and port are filled.
 func (m *SetupModel) startProbeIfReady() tea.Cmd {
@@ -45,7 +54,7 @@ func (m *SetupModel) tryShowRestoreOverlay(addr string, port int, mode string) t
 
 	// Find preset for this server + mode
 	for _, rs := range m.recentServers {
-		if rs.Address != addr || rs.Port != port {
+		if !m.matchesCurrentRecentServer(rs, addr, port) {
 			continue
 		}
 		if rs.Presets == nil {
@@ -66,6 +75,125 @@ func (m *SetupModel) tryShowRestoreOverlay(addr string, port int, mode string) t
 		return m.restoreVisiblePreset(preset)
 	}
 	return nil
+}
+
+func (m SetupModel) matchesCurrentRecentServer(rs recent.Server, addr string, port int) bool {
+	serverID := ""
+	if m.probeResult != nil {
+		serverID = m.probeResult.ServerID
+	}
+	return recent.MatchesServer(rs, addr, port, serverID)
+}
+
+func (m *SetupModel) resetClientSelectionOnProbeChange(addr string, port int, result *ProbeServerResult) {
+	next := newClientProbeIdentity(addr, port, result)
+	if m.probeIdentity.isZero() {
+		m.probeIdentity = next
+		return
+	}
+	if m.probeIdentity.matches(next) {
+		return
+	}
+	m.clearClientRestoreSelection()
+	m.probeIdentity = next
+}
+
+func newClientProbeIdentity(addr string, port int, result *ProbeServerResult) clientProbeIdentity {
+	identity := clientProbeIdentity{address: addr, port: port}
+	if result != nil {
+		identity.serverID = result.ServerID
+		identity.mode = result.Mode
+	}
+	return identity
+}
+
+func (id clientProbeIdentity) isZero() bool {
+	return id.address == "" && id.port == 0 && id.serverID == "" && id.mode == ""
+}
+
+func (id clientProbeIdentity) matches(other clientProbeIdentity) bool {
+	if id.mode != other.mode {
+		return false
+	}
+	if id.serverID != "" || other.serverID != "" {
+		return id.serverID != "" && other.serverID != "" && id.serverID == other.serverID
+	}
+	return id.address == other.address && id.port == other.port
+}
+
+func (m *SetupModel) clearClientRestoreSelection() {
+	m.multiSelect = make(map[string]DeviceRoleSet)
+	m.mixInputs = make(map[string]map[string]bool)
+	m.clearClientVirtualRestoreState()
+	m.flashMsg = ""
+}
+
+func (m *SetupModel) clearClientVirtualRestoreState() {
+	m.pendingVirtualSinkSelection = nil
+	m.clearVirtualSinkLifecycleState()
+	m.clearSessionVirtualSinkPersistence()
+	m.refreshVirtualMicManageStateAfterClientReset()
+}
+
+func (m *SetupModel) clearSessionVirtualSinkPersistence() {
+	m.virtualMicCreated = false
+	m.virtualMicModule = ""
+}
+
+func (m *SetupModel) refreshVirtualMicManageStateAfterClientReset() {
+	if !isLinuxRuntime {
+		return
+	}
+	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
+	if err == nil && found {
+		m.markVirtualMicManageable(moduleID)
+		return
+	}
+	if err != nil && m.virtualMicManagedModule != "" {
+		m.updateVirtualMicField(true)
+		return
+	}
+	if m.hasExactEchoWarpOutput() && m.virtualMicManagedModule != "" {
+		m.updateVirtualMicField(true)
+		return
+	}
+	m.clearVirtualMicManageState()
+	m.updateVirtualMicField(false)
+}
+
+func (m *SetupModel) markVirtualMicManageable(moduleID string) {
+	m.virtualMicManageable = true
+	m.virtualMicManagedModule = moduleID
+	m.updateVirtualMicField(true)
+}
+
+func splitProbeAddress(addr string) (string, int) {
+	host, portValue, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr, 0
+	}
+	port, err := strconv.Atoi(portValue)
+	if err != nil {
+		return host, 0
+	}
+	return host, port
+}
+
+func probeAddressFromFields(fields []SetupField, fallbackAddr string) (string, int) {
+	host, portValue := "", ""
+	for _, field := range fields {
+		switch field.Key {
+		case "server_address":
+			host = field.Value
+		case "port":
+			portValue = field.Value
+		}
+	}
+	port, err := strconv.Atoi(portValue)
+	if host != "" && err == nil {
+		return host, port
+	}
+	return splitProbeAddress(fallbackAddr)
 }
 
 // tryShowServerRestoreOverlay checks if a server device preset exists for the current mode,

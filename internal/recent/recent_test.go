@@ -207,6 +207,36 @@ func TestAddFallsBackToAddrPortWhenNoServerID(t *testing.T) {
 	assert.Equal(t, "A-updated", result[0].Hostname)
 }
 
+func TestMatchesServerRequiresBothServerIDsWhenEitherSideHasID(t *testing.T) {
+	legacy := Server{Address: "10.0.0.1", Port: 4415}
+	identified := Server{Address: "10.0.0.1", Port: 4415, ServerID: "server-a"}
+
+	assert.False(t, MatchesServer(legacy, "10.0.0.1", 4415, "server-a"))
+	assert.False(t, MatchesServer(identified, "10.0.0.1", 4415, ""))
+	assert.False(t, MatchesServer(identified, "10.0.0.1", 4415, "server-b"))
+	assert.True(t, MatchesServer(identified, "192.168.1.10", 4415, "server-a"))
+	assert.True(t, MatchesServer(legacy, "10.0.0.1", 4415, ""))
+}
+
+func TestAddDoesNotMergeLegacyEntryWithIdentifiedServer(t *testing.T) {
+	now := time.Now()
+	legacyPreset := DevicePreset{Devices: []PresetDevice{{ID: 7, Name: "Legacy Mic"}}}
+	existing := []Server{{
+		Address: "10.0.0.1", Port: 4415, Hostname: "Legacy", LastConnected: now.Add(-time.Hour),
+		Presets: map[string]DevicePreset{"normal": legacyPreset},
+	}}
+
+	result := Add(existing, Server{
+		Address: "10.0.0.1", Port: 4415, Hostname: "New", ServerID: "server-a", LastConnected: now,
+	})
+
+	require.Len(t, result, 2)
+	assert.Equal(t, "server-a", result[0].ServerID)
+	assert.Empty(t, result[0].Presets, "new identified server must not inherit legacy presets")
+	assert.Empty(t, result[1].ServerID)
+	assert.Equal(t, legacyPreset, result[1].Presets["normal"])
+}
+
 func TestAddServerIDRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ECHOWARP_CONFIG_DIR", dir)

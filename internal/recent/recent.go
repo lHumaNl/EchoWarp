@@ -196,9 +196,9 @@ func Save(servers []Server) error {
 
 // Add upserts a server into the list.
 // Matching priority:
-//  1. By ServerID (if both have one) — handles servers that moved to a new IP.
+//  1. By ServerID (when both sides have one) — handles servers that moved to a new IP.
 //     When matched by ServerID but addr:port differs, the stored addr:port is updated.
-//  2. By address:port — fallback for old entries without a ServerID.
+//  2. By address:port — only when both entries are legacy entries without a ServerID.
 //
 // If the server already exists, it is updated and moved to front.
 // Presets from an existing entry are preserved when the new entry has no presets.
@@ -206,15 +206,7 @@ func Save(servers []Server) error {
 func Add(servers []Server, s Server) []Server {
 	filtered := make([]Server, 0, len(servers))
 	for _, existing := range servers {
-		matched := false
-		// Primary match: both have ServerID
-		if s.ServerID != "" && existing.ServerID == s.ServerID {
-			matched = true
-		} else if existing.Address == s.Address && existing.Port == s.Port {
-			// Fallback match: addr:port
-			matched = true
-		}
-		if matched {
+		if MatchesServer(existing, s.Address, s.Port, s.ServerID) {
 			// Preserve presets from existing entry if new entry has none
 			if len(s.Presets) == 0 && len(existing.Presets) > 0 {
 				s.Presets = existing.Presets
@@ -234,4 +226,15 @@ func Add(servers []Server, s Server) []Server {
 		result = result[:MaxEntries]
 	}
 	return result
+}
+
+// MatchesServer reports whether an existing recent entry identifies the same
+// server. If either side has a stable ServerID, both IDs must be present and
+// equal. Address and port are used only for legacy entries where both IDs are
+// missing.
+func MatchesServer(existing Server, address string, port int, serverID string) bool {
+	if existing.ServerID != "" || serverID != "" {
+		return existing.ServerID != "" && serverID != "" && existing.ServerID == serverID
+	}
+	return existing.Address == address && existing.Port == port
 }

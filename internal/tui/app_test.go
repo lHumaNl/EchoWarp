@@ -644,6 +644,33 @@ func TestSaveRecentServerCmd_PreservesPresetsForOtherModes(t *testing.T) {
 	assert.Equal(t, "OldDevice", presets["duplex"].Devices[0].Name)
 }
 
+func TestSaveRecentServerCmd_DoesNotInheritLegacyPresetForIdentifiedServer(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	cfg := config.Config{Mode: config.ModeClient, Address: "10.0.0.1", Port: 4415}
+	legacyPreset := recent.DevicePreset{Devices: []recent.PresetDevice{{ID: 99, Name: "LegacyDevice", Volume: 1}}}
+	initial := []recent.Server{{
+		Address: "10.0.0.1", Port: 4415, Hostname: "legacy",
+		Presets: map[string]recent.DevicePreset{"duplex": legacyPreset},
+	}}
+	require.NoError(t, recent.Save(initial))
+
+	newPreset := recent.DevicePreset{Devices: []recent.PresetDevice{{ID: 1, Name: "Mic"}}}
+	probeResult := &views.ProbeServerResult{ServerID: "server-a", ServerName: "new-server"}
+	cmd := saveRecentServerCmd(cfg, probeResult, nil, newPreset, "normal")
+	_ = cmd()
+
+	servers, err := recent.Load()
+	require.NoError(t, err)
+	require.Len(t, servers, 2)
+	assert.Equal(t, "server-a", servers[0].ServerID)
+	assert.Contains(t, servers[0].Presets, "normal")
+	assert.NotContains(t, servers[0].Presets, "duplex")
+	assert.Empty(t, servers[1].ServerID)
+	assert.Equal(t, legacyPreset, servers[1].Presets["duplex"])
+}
+
 func TestSaveRecentServerCmd_PreservesVirtualLifecycleWithOnlyRealMic(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
