@@ -291,9 +291,9 @@ func matchPresetDevices(preset recent.DevicePreset, inputDevices, outputDevices 
 
 		// Virtual sink: match by sink name (ID is unstable across reboots).
 		if pd.VirtualSink != nil {
-			sinkLower := strings.ToLower(pd.VirtualSink.SinkName)
+			targetName := virtualPresetDeviceName(pd)
 			for _, d := range allDevices {
-				if d.IsInput == pd.IsInput && strings.Contains(strings.ToLower(d.Name), sinkLower) {
+				if d.IsInput == pd.IsInput && d.Name == targetName {
 					matched = append(matched, d)
 					found = true
 					break
@@ -333,4 +333,14 @@ func matchPresetDevices(preset recent.DevicePreset, inputDevices, outputDevices 
 		unmatched = append(unmatched, pd.Name)
 	}
 	return matched, unmatched
+}
+
+func virtualPresetDeviceName(pd recent.PresetDevice) string {
+	if pd.VirtualSink == nil {
+		return pd.Name
+	}
+	if pd.IsInput {
+		return "Monitor of " + pd.VirtualSink.SinkName
+	}
+	return pd.VirtualSink.SinkName
 }

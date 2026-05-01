@@ -12,6 +12,14 @@ import (
 )
 
 const echowarpSinkName = "EchoWarp"
+const echowarpMonitorName = "Monitor of " + echowarpSinkName
+
+var (
+	isLinuxRuntime         = runtime.GOOS == "linux"
+	createPulseAudioSinkFn = createPulseAudioSink
+	removePulseAudioSinkFn = RemovePulseAudioSink
+	findPulseAudioModuleFn = FindPulseAudioSinkModule
+)
 
 type pulseAudioModule struct {
 	ID        string
@@ -21,10 +29,11 @@ type pulseAudioModule struct {
 
 // openVirtualMicOverlay opens the virtual mic overlay (Linux: create/remove, other: no-op).
 func (m SetupModel) openVirtualMicOverlay() (SetupModel, tea.Cmd) {
-	if runtime.GOOS != "linux" {
+	if !isLinuxRuntime {
 		return m, nil
 	}
-	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicCreated, echowarpSinkName)
+	m.syncVirtualMicState()
+	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicManageable, echowarpSinkName)
 	m.overlay = SetupOverlayVirtualDevice
 	return m, nil
 }
@@ -127,12 +136,111 @@ func (m *SetupModel) autoSelectVirtualDevice(name string) {
 	if m.multiSelect == nil {
 		m.multiSelect = make(map[string]DeviceRoleSet)
 	}
-	for _, d := range m.outputDevices {
-		if strings.Contains(d.Name, name) && d.IsVirtual {
-			key := d.selectKey()
-			role := m.multiSelect[key]
-			role.Playback = true
-			m.multiSelect[key] = role
+	showInput, showOutput := m.visibleSections()
+	if showInput {
+		m.selectVirtualInputMonitor(name)
+	}
+	if showOutput {
+		m.selectVirtualOutputSink(name)
+	}
+}
+
+func (m *SetupModel) selectVirtualInputMonitor(sinkName string) {
+	monitorName := "Monitor of " + sinkName
+	for _, d := range m.inputDevices {
+		if d.Name == monitorName && d.IsVirtual {
+			m.setSelectedRole(d, true)
+			return
 		}
 	}
+}
+
+func (m *SetupModel) selectVirtualOutputSink(sinkName string) {
+	for _, d := range m.outputDevices {
+		if d.Name == sinkName && d.IsVirtual {
+			m.setSelectedRole(d, false)
+			return
+		}
+	}
+}
+
+func (m *SetupModel) setSelectedRole(d deviceRow, capture bool) {
+	key := d.selectKey()
+	role := m.multiSelect[key]
+	if capture {
+		role.Capture = true
+	} else {
+		role.Playback = true
+	}
+	m.multiSelect[key] = role
+}
+
+func (m *SetupModel) syncVirtualMicState() {
+	if !isLinuxRuntime {
+		return
+	}
+	if !m.hasExactEchoWarpOutput() {
+		m.clearVirtualMicManageState()
+		m.updateVirtualMicField(false)
+		return
+	}
+	if m.virtualMicManagedModule != "" || m.virtualMicModule != "" {
+		m.virtualMicManageable = true
+		m.updateVirtualMicField(true)
+		return
+	}
+	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
+	if err != nil || !found {
+		m.virtualMicManageable = false
+		m.updateVirtualMicField(false)
+		return
+	}
+	m.virtualMicManageable = true
+	m.virtualMicManagedModule = moduleID
+	m.updateVirtualMicField(true)
+}
+
+func (m SetupModel) hasExactEchoWarpOutput() bool {
+	for _, d := range m.outputDevices {
+		if d.Name == echowarpSinkName {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *SetupModel) clearVirtualMicManageState() {
+	m.virtualMicCreated = false
+	m.virtualMicModule = ""
+	m.virtualMicManageable = false
+	m.virtualMicManagedModule = ""
+}
+
+func (m *SetupModel) removeManagedVirtualMic() error {
+	moduleID, err := m.resolveVirtualMicModuleForRemoval()
+	if err != nil {
+		return err
+	}
+	if err := removePulseAudioSinkFn(moduleID); err != nil {
+		return err
+	}
+	m.clearVirtualMicManageState()
+	return nil
+}
+
+func (m SetupModel) resolveVirtualMicModuleForRemoval() (string, error) {
+	if m.virtualMicManagedModule != "" {
+		return m.virtualMicManagedModule, nil
+	}
+	if m.virtualMicModule != "" {
+		return m.virtualMicModule, nil
+	}
+	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("virtual audio device %q was not found", echowarpSinkName)
+	}
+	return moduleID, nil
 }

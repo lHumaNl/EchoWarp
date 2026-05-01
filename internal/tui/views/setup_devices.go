@@ -41,16 +41,6 @@ func (d deviceRow) selectKey() string {
 	return fmt.Sprintf("%s:%d:%s", prefix, d.ID, d.Name)
 }
 
-// displayNameFromKey extracts the human-readable device name from a selectKey.
-func displayNameFromKey(key string) string {
-	// Key format: "I:123:Device Name" or "O:456:Device Name"
-	parts := strings.SplitN(key, ":", 3)
-	if len(parts) == 3 {
-		return parts[2]
-	}
-	return key
-}
-
 // IsVirtualDevice checks if a device name matches known virtual audio devices.
 func IsVirtualDevice(name string) bool {
 	lower := strings.ToLower(name)
@@ -133,6 +123,7 @@ func (m *SetupModel) rebuildDeviceGroups() {
 	}
 	sortDevices(m.inputDevices)
 	sortDevices(m.outputDevices)
+	m.syncVirtualMicState()
 }
 
 // handleMultiSelectToggle cycles the selected device through roles:
@@ -196,6 +187,49 @@ func (m SetupModel) currentSectionDevices() []deviceRow {
 		return m.outputDevices
 	}
 	return m.inputDevices
+}
+
+func (m SetupModel) selectedVisibleRows() []deviceRow {
+	showInput, showOutput := m.visibleSections()
+	rows := make([]deviceRow, 0, len(m.multiSelect))
+	if showInput {
+		rows = append(rows, m.selectedInputRows()...)
+	}
+	if showOutput {
+		rows = append(rows, m.selectedOutputRows()...)
+	}
+	return rows
+}
+
+func (m SetupModel) selectedInputRows() []deviceRow {
+	var rows []deviceRow
+	for _, d := range m.inputDevices {
+		if roles := m.multiSelect[d.selectKey()]; roles.Capture || roles.Playback {
+			rows = append(rows, d)
+		}
+	}
+	return rows
+}
+
+func (m SetupModel) selectedOutputRows() []deviceRow {
+	var rows []deviceRow
+	for _, d := range m.outputDevices {
+		if roles := m.multiSelect[d.selectKey()]; roles.Capture || roles.Playback {
+			rows = append(rows, d)
+		}
+	}
+	return rows
+}
+
+func (m SetupModel) selectedVisibleCounts() (captureCount, playbackCount int) {
+	showInput, showOutput := m.visibleSections()
+	if showInput {
+		captureCount = len(m.selectedInputRows())
+	}
+	if showOutput {
+		playbackCount = len(m.selectedOutputRows())
+	}
+	return captureCount, playbackCount
 }
 
 // currentSectionRowCount returns the number of navigable rows in the current section.

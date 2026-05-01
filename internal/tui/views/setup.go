@@ -158,8 +158,10 @@ type SetupModel struct {
 	pendingRestoreCmd tea.Cmd
 
 	// Virtual mic state (Linux only)
-	virtualMicCreated bool   // true when pactl sink was created this session
-	virtualMicModule  string // PulseAudio module ID for cleanup
+	virtualMicCreated       bool   // true when pactl sink was created this session
+	virtualMicModule        string // PulseAudio module ID for automatic cleanup
+	virtualMicManageable    bool   // true when an exact EchoWarp sink can be managed
+	virtualMicManagedModule string // PulseAudio module ID for explicit user removal
 
 	// Virtual sink lifecycle preferences (set via overlay after creation)
 	virtualSinkOnStop  recent.SinkLifecycle // default: SinkDelete
@@ -368,6 +370,8 @@ func (m SetupModel) WithVirtualSinkLifecycle(onStop, onStart recent.SinkLifecycl
 func (m SetupModel) WithVirtualSinkCreatedForSession(moduleID string) SetupModel {
 	m.virtualMicCreated = true
 	m.virtualMicModule = moduleID
+	m.virtualMicManageable = true
+	m.virtualMicManagedModule = moduleID
 	return m
 }
 
@@ -400,6 +404,7 @@ func (m SetupModel) VirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
 func (m *SetupModel) MarkVirtualSinkCleaned() {
 	m.virtualMicCreated = false
 	m.virtualMicModule = ""
+	m.syncVirtualMicState()
 }
 
 func (m SetupModel) virtualSinkCleanupTarget() (string, bool) {
@@ -1089,12 +1094,14 @@ func (m SetupModel) SelectedDeviceName() string {
 	if m.unifiedDuplex {
 		if m.isDuplexMode {
 			var caps, plays []string
-			for key := range m.multiSelect {
-				name := displayNameFromKey(key)
-				if strings.HasPrefix(key, "I:") {
-					caps = append(caps, name)
-				} else {
-					plays = append(plays, name)
+			for _, d := range m.inputDevices {
+				if roles := m.multiSelect[d.selectKey()]; roles.Capture {
+					caps = append(caps, d.Name)
+				}
+			}
+			for _, d := range m.outputDevices {
+				if roles := m.multiSelect[d.selectKey()]; roles.Playback {
+					plays = append(plays, d.Name)
 				}
 			}
 			if len(caps) > 0 && len(plays) > 0 {
@@ -1106,9 +1113,10 @@ func (m SetupModel) SelectedDeviceName() string {
 			return ""
 		}
 		// Non-duplex: just list selected names
-		var names []string
-		for key := range m.multiSelect {
-			names = append(names, displayNameFromKey(key))
+		rows := m.selectedVisibleRows()
+		names := make([]string, 0, len(rows))
+		for _, d := range rows {
+			names = append(names, d.Name)
 		}
 		return strings.Join(names, ", ")
 	}

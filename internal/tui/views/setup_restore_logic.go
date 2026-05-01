@@ -104,30 +104,28 @@ func (m *SetupModel) tryShowServerRestoreOverlay() tea.Cmd {
 }
 
 // autoRestore silently restores matched devices and shows overlay only for missing virtual devices.
-func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cmd {
+func (m *SetupModel) autoRestore(preset recent.DevicePreset, _ string) tea.Cmd {
+	visiblePreset := m.filterPresetForVisibleSections(preset)
+	if len(visiblePreset.Devices) == 0 {
+		return nil
+	}
+
 	// Auto-create virtual sinks with OnStart == SinkRecreate before matching.
-	for _, pd := range preset.Devices {
+	for _, pd := range visiblePreset.Devices {
 		if pd.VirtualSink == nil || pd.VirtualSink.OnStart != recent.SinkRecreate {
 			continue
 		}
 		// Check if already present by name.
-		sinkLower := strings.ToLower(pd.VirtualSink.SinkName)
-		alreadyExists := false
-		allDevs := append(append([]deviceRow{}, m.inputDevices...), m.outputDevices...)
-		for _, d := range allDevs {
-			if strings.Contains(strings.ToLower(d.Name), sinkLower) {
-				alreadyExists = true
-				break
-			}
-		}
-		if alreadyExists {
+		if m.hasOutputDeviceNamed(pd.VirtualSink.SinkName) {
 			continue
 		}
 		// Create the virtual sink.
-		moduleID, err := createPulseAudioSink(pd.VirtualSink.SinkName)
+		moduleID, err := createPulseAudioSinkFn(pd.VirtualSink.SinkName)
 		if err == nil {
 			m.virtualMicCreated = true
 			m.virtualMicModule = moduleID
+			m.virtualMicManageable = true
+			m.virtualMicManagedModule = moduleID
 			m.virtualSinkOnStop = pd.VirtualSink.OnStop
 			m.virtualSinkOnStart = pd.VirtualSink.OnStart
 			// Wait for PulseAudio and refresh device list.
@@ -137,24 +135,22 @@ func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cm
 		}
 	}
 
-	matched, unmatched := matchPresetDevices(preset, m.inputDevices, m.outputDevices)
+	matched, unmatched := matchPresetDevices(visiblePreset, m.inputDevices, m.outputDevices)
 
 	if len(matched) == 0 && len(unmatched) == 0 {
 		return nil
 	}
 
-	// Separate unmatched into virtual and non-virtual
-	var unmatchedVirtual []recent.PresetDevice
+	// Separate unmatched into virtual and non-virtual. Missing virtual devices are
+	// ignored here; OnStart controls automatic recreation above without prompts.
 	var unmatchedNonVirtual []string
 	unmatchedSet := make(map[string]bool, len(unmatched))
 	for _, name := range unmatched {
 		unmatchedSet[name] = true
 	}
-	for _, pd := range preset.Devices {
+	for _, pd := range visiblePreset.Devices {
 		if unmatchedSet[pd.Name] {
-			if pd.Virtual {
-				unmatchedVirtual = append(unmatchedVirtual, pd)
-			} else {
+			if !pd.Virtual {
 				unmatchedNonVirtual = append(unmatchedNonVirtual, pd.Name)
 			}
 		}
@@ -176,10 +172,10 @@ func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cm
 	}
 
 	// Restore mix inputs from preset data
-	m.restoreMixInputsFromPreset(preset, matched)
+	m.restoreMixInputsFromPreset(visiblePreset, matched)
 
 	// Restore volume and AGC from preset to deviceRow slices
-	m.restoreVolumeAGCFromPreset(preset, matched)
+	m.restoreVolumeAGCFromPreset(visiblePreset, matched)
 
 	// Build flash message
 	var restoredNames []string
@@ -187,23 +183,7 @@ func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cm
 		restoredNames = append(restoredNames, d.Name)
 	}
 
-	// If there are missing virtual devices that need creation → show overlay
-	if len(unmatchedVirtual) > 0 {
-		// Flash for restored devices (if any) — short duration
-		if len(restoredNames) > 0 {
-			m.flashMsg = "Restored: " + strings.Join(restoredNames, ", ")
-			m.flashTimer = time.Now().Add(3 * time.Second)
-		}
-		m.restoreOverlay = NewVirtualRestoreOverlay(unmatchedVirtual, mode)
-		m.overlay = SetupOverlayRestore
-		flashCmd := tea.Tick(3*time.Second, func(time.Time) tea.Msg { return FlashDismissMsg{} })
-		if len(restoredNames) > 0 {
-			return flashCmd
-		}
-		return nil
-	}
-
-	// No missing virtual devices — just flash
+	// Flash restored and missing non-virtual devices only.
 	flashDuration := 3 * time.Second
 	if len(restoredNames) > 0 && len(unmatchedNonVirtual) > 0 {
 		m.flashMsg = "Restored: " + strings.Join(restoredNames, ", ") +
@@ -225,11 +205,15 @@ func (m *SetupModel) autoRestore(preset recent.DevicePreset, mode string) tea.Cm
 // currentSelectionMatchesPreset returns true if the currently selected devices
 // already match (or exceed) the preset — no need to show the restore overlay.
 func (m *SetupModel) currentSelectionMatchesPreset(preset recent.DevicePreset) bool {
+	visiblePreset := m.filterPresetForVisibleSections(preset)
+	if len(visiblePreset.Devices) == 0 {
+		return true
+	}
 	if len(m.multiSelect) == 0 {
 		return false
 	}
 	allDevices := append(append([]deviceRow{}, m.inputDevices...), m.outputDevices...)
-	for _, pd := range preset.Devices {
+	for _, pd := range visiblePreset.Devices {
 		found := false
 		for _, d := range allDevices {
 			if d.Name == pd.Name && d.IsInput == pd.IsInput {
@@ -250,10 +234,10 @@ func (m *SetupModel) currentSelectionMatchesPreset(preset recent.DevicePreset) b
 // If skipVirtual is true, virtual devices are excluded.
 // Returns a tea.Cmd for flash messages about unmatched devices.
 func (m *SetupModel) applyRestore(preset recent.DevicePreset, skipVirtual bool) tea.Cmd {
-	filteredPreset := preset
+	filteredPreset := m.filterPresetForVisibleSections(preset)
 	if skipVirtual {
 		var filtered []recent.PresetDevice
-		for _, d := range preset.Devices {
+		for _, d := range filteredPreset.Devices {
 			if !d.Virtual {
 				filtered = append(filtered, d)
 			}
@@ -293,6 +277,26 @@ func (m *SetupModel) applyRestore(preset recent.DevicePreset, skipVirtual bool) 
 		return tea.Tick(3*time.Second, func(time.Time) tea.Msg { return FlashDismissMsg{} })
 	}
 	return nil
+}
+
+func (m SetupModel) filterPresetForVisibleSections(preset recent.DevicePreset) recent.DevicePreset {
+	showInput, showOutput := m.visibleSections()
+	filtered := make([]recent.PresetDevice, 0, len(preset.Devices))
+	for _, pd := range preset.Devices {
+		if (pd.IsInput && showInput) || (!pd.IsInput && showOutput) {
+			filtered = append(filtered, pd)
+		}
+	}
+	return recent.DevicePreset{Devices: filtered}
+}
+
+func (m SetupModel) hasOutputDeviceNamed(name string) bool {
+	for _, d := range m.outputDevices {
+		if d.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // restoreLastMode applies the saved top-level last_mode to the Mode field, if set.

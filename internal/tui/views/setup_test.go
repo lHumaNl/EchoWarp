@@ -615,12 +615,13 @@ func TestServerTUI_RestoreOnServer_DevicesAutoSelected(t *testing.T) {
 	assert.Equal(t, SetupOverlayNone, m.overlay)
 	assert.Nil(t, m.restoreOverlay)
 
-	// Both devices should be auto-selected
+	// Only the visible input-side device should be auto-selected in normal mode.
 	_, micSelected := m.multiSelect[selectKeyFor(1, "Mic", true)]
 	_, speakerSelected := m.multiSelect[selectKeyFor(2, "Speaker", false)]
 	assert.True(t, micSelected, "Mic should be auto-selected after restore")
-	assert.True(t, speakerSelected, "Speaker should be auto-selected after restore")
+	assert.False(t, speakerSelected, "hidden output device should not be auto-restored")
 	assert.Contains(t, m.flashMsg, "Restored")
+	assert.NotContains(t, m.flashMsg, "Speaker")
 }
 
 // TestAutoRestore_AlreadySelectedDevices_NoFlash verifies that if devices already match
@@ -653,7 +654,7 @@ func TestAutoRestore_AlreadySelectedDevices_NoFlash(t *testing.T) {
 func TestAutoRestore_MissingNonVirtualDevice_FlashWarning(t *testing.T) {
 	dir := t.TempDir()
 	writeServerPresetsFile(t, dir, map[string]recent.DevicePreset{
-		"normal": {Devices: []recent.PresetDevice{{ID: 99, Name: "USB Headset"}}},
+		"normal": {Devices: []recent.PresetDevice{{ID: 99, Name: "USB Headset", IsInput: true}}},
 	})
 
 	// USB Headset is NOT in the available devices
@@ -677,7 +678,7 @@ func TestAutoRestore_MixedFoundAndMissing_FlashBoth(t *testing.T) {
 	writeServerPresetsFile(t, dir, map[string]recent.DevicePreset{
 		"normal": {Devices: []recent.PresetDevice{
 			{ID: 1, Name: "Mic", IsInput: true},
-			{ID: 99, Name: "Missing Speaker"},
+			{ID: 99, Name: "Missing Speaker", IsInput: true},
 		}},
 	})
 
@@ -716,8 +717,8 @@ func TestAutoRestore_EmptyPreset_NoAction(t *testing.T) {
 	assert.Empty(t, m.flashMsg, "no flash with empty preset")
 }
 
-// TestVirtualRestoreOverlay_OnlyMissingVirtual verifies that when only virtual devices
-// are missing, the overlay is VirtualOnly and lists the missing virtual devices.
+// TestVirtualRestoreOverlay_OnlyMissingVirtual verifies that missing virtual devices
+// are ignored at startup instead of opening a recreate prompt.
 func TestVirtualRestoreOverlay_OnlyMissingVirtual(t *testing.T) {
 	dir := t.TempDir()
 	writeServerPresetsFile(t, dir, map[string]recent.DevicePreset{
@@ -732,17 +733,9 @@ func TestVirtualRestoreOverlay_OnlyMissingVirtual(t *testing.T) {
 		{name: "Built-in Mic", id: 1, isInput: true},
 	})
 
-	assert.Equal(t, SetupOverlayRestore, m.overlay, "overlay should be shown for missing virtual devices")
-	require.NotNil(t, m.restoreOverlay)
-	assert.True(t, m.restoreOverlay.VirtualOnly, "overlay should be VirtualOnly mode")
-
-	names := make([]string, 0, len(m.restoreOverlay.MissingVirtual))
-	for _, d := range m.restoreOverlay.MissingVirtual {
-		names = append(names, d.Name)
-	}
-	assert.Contains(t, names, "BlackHole 2ch")
-	assert.Contains(t, names, "VirtualAudio")
-	assert.Len(t, m.restoreOverlay.MissingVirtual, 2)
+	assert.Equal(t, SetupOverlayNone, m.overlay, "no prompt for missing virtual devices")
+	assert.Nil(t, m.restoreOverlay)
+	assert.Empty(t, m.flashMsg)
 }
 
 // TestVirtualRestoreOverlay_CreateButton verifies that pressing Enter on the "Create"

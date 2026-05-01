@@ -639,13 +639,15 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			action := m.virtualDeviceOverlay.Update(msg)
 			switch action {
 			case VirtualActionCreate:
-				moduleID, err := createPulseAudioSink("EchoWarp")
+				moduleID, err := createPulseAudioSinkFn(echowarpSinkName)
 				if err != nil {
 					m.virtualDeviceOverlay.Error = err.Error()
 					return m, nil
 				}
 				m.virtualMicCreated = true
 				m.virtualMicModule = moduleID
+				m.virtualMicManageable = true
+				m.virtualMicManagedModule = moduleID
 				m.virtualDeviceOverlay = nil
 				// Update field label
 				m.updateVirtualMicField(true)
@@ -654,17 +656,16 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				m.refreshDevicesFromOS()
 				// Refresh device list and auto-select
 				m.rebuildDeviceGroups()
-				m.autoSelectVirtualDevice("EchoWarp")
+				m.autoSelectVirtualDevice(echowarpSinkName)
 				// Show lifecycle options overlay
 				m.virtualSinkLifecycleOverlay = NewVirtualSinkLifecycleOverlay()
 				m.overlay = SetupOverlayVirtualSinkLifecycle
 				return m, nil
 			case VirtualActionRemove:
-				if m.virtualMicModule != "" {
-					_ = RemovePulseAudioSink(m.virtualMicModule)
+				if err := m.removeManagedVirtualMic(); err != nil {
+					m.virtualDeviceOverlay.Error = err.Error()
+					return m, nil
 				}
-				m.virtualMicCreated = false
-				m.virtualMicModule = ""
 				m.overlay = SetupOverlayNone
 				m.virtualDeviceOverlay = nil
 				m.updateVirtualMicField(false)
@@ -951,9 +952,7 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 			return m, nil
 		}
 		if f.Key == "virtual_mic" {
-			m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicCreated, "EchoWarp")
-			m.overlay = SetupOverlayVirtualDevice
-			return m, nil
+			return m.openVirtualMicOverlay()
 		}
 		return m, nil
 	}

@@ -277,20 +277,13 @@ func (m SetupModel) renderSettingsPanel(width int) string {
 // deviceStatusHint returns the device selection status shown under "Audio Devices" header.
 func (m SetupModel) deviceStatusHint() string {
 	if m.isDuplexMode {
-		capCount, playCount := 0, 0
-		for key := range m.multiSelect {
-			if strings.HasPrefix(key, "I:") {
-				capCount++
-			} else {
-				playCount++
-			}
-		}
+		capCount, playCount := m.selectedVisibleCounts()
 		if capCount > 0 && playCount > 0 {
 			return styles.SetupReadyHint.Render("  " + i18n.Tf("setup_capture_playback_count", capCount, playCount))
 		}
 		// Conference server: hub mode — devices optional; participant mode — any combo
 		if m.isConferenceMode && m.cfg.Mode == config.ModeServer {
-			if len(m.multiSelect) == 0 {
+			if capCount == 0 && playCount == 0 {
 				return styles.SetupReadyHint.Render("  " + i18n.T("setup_hub_mode_no_devices"))
 			}
 			return styles.SetupReadyHint.Render("  " + i18n.Tf("setup_capture_playback_count", capCount, playCount))
@@ -300,8 +293,9 @@ func (m SetupModel) deviceStatusHint() string {
 		}
 		return styles.SetupErrorHint.Render("  " + i18n.T("setup_select_capture_playback"))
 	}
-	if len(m.multiSelect) > 0 {
-		return styles.SetupReadyHint.Render("  " + i18n.Tf("setup_n_selected", len(m.multiSelect)))
+	selectedCount := len(m.selectedVisibleRows())
+	if selectedCount > 0 {
+		return styles.SetupReadyHint.Render("  " + i18n.Tf("setup_n_selected", selectedCount))
 	}
 	return styles.SetupErrorHint.Render("  " + i18n.T("setup_select_at_least_one"))
 }
