@@ -77,7 +77,11 @@ type StreamingParams struct {
 
 	// SourcePaused indicates the remote audio source has paused its capture.
 	SourcePaused bool
-	// ServerMuted indicates we have muted the incoming server audio.
+	// IncomingMuted indicates the local side refuses incoming peer audio.
+	IncomingMuted bool
+	// PeerMutedYou indicates the remote side refuses our outgoing audio.
+	PeerMutedYou bool
+	// ServerMuted is kept as a compatibility alias for IncomingMuted.
 	ServerMuted bool
 
 	// FocusedArea indicates which area has keyboard focus (0=ClientList, 1=Chat, 2=Logs).
@@ -99,7 +103,7 @@ func StreamingView(p StreamingParams) string {
 	var sections []string
 
 	// Summary line: direction + device
-	sections = append(sections, renderSummaryLine(p.Reverse, p.Duplex, p.Paused, p.SourcePaused, p.ServerMuted, p.DeviceName, p.Nickname, p.Width))
+	sections = append(sections, renderSummaryLine(p, p.DeviceName, p.Nickname, p.Width))
 
 	// Duplex warning + latency estimation
 	if p.Duplex {
@@ -225,40 +229,13 @@ func joinSidebarAndStats(sidebar, statsContent string) string {
 	return strings.Join(combined, "\n")
 }
 
-func renderSummaryLine(reverse, duplex, paused, sourcePaused, serverMuted bool, deviceName, nickname string, width int) string {
-	var dirText string
-	var style lipgloss.Style
-
-	if paused {
-		if duplex {
-			dirText = i18n.T("streaming_dir_duplex_paused")
-		} else if reverse {
-			dirText = i18n.T("streaming_dir_reverse_paused")
-		} else {
-			dirText = i18n.T("streaming_dir_normal_paused")
-		}
-		style = styles.Paused
-	} else if duplex {
-		dirText = i18n.T("streaming_dir_duplex")
-		style = styles.Direction
-	} else if reverse {
-		dirText = i18n.T("streaming_dir_reverse")
-		style = styles.DirectionReverse
-	} else {
-		dirText = i18n.T("streaming_dir_normal")
-		style = styles.Direction
-	}
-
-	if sourcePaused && !paused {
-		dirText += " " + i18n.T("streaming_badge_source_paused")
+func renderSummaryLine(p StreamingParams, deviceName, nickname string, width int) string {
+	dirText, style := summaryDirection(p.Reverse, p.Duplex)
+	badges := summaryBadges(p)
+	if len(badges) > 0 {
+		dirText += " " + strings.Join(badges, " ")
 		style = styles.Paused
 	}
-
-	if serverMuted {
-		dirText += " " + i18n.T("streaming_badge_muted")
-		style = styles.Paused
-	}
-
 	if nickname != "" {
 		dirText += "  " + nickname
 	}
@@ -274,6 +251,33 @@ func renderSummaryLine(reverse, duplex, paused, sourcePaused, serverMuted bool, 
 		return left + strings.Repeat(" ", spacing) + styles.StatLabel.Render(deviceName)
 	}
 	return left
+}
+
+func summaryDirection(reverse, duplex bool) (string, lipgloss.Style) {
+	if duplex {
+		return i18n.T("streaming_dir_duplex"), styles.Direction
+	}
+	if reverse {
+		return i18n.T("streaming_dir_reverse"), styles.DirectionReverse
+	}
+	return i18n.T("streaming_dir_normal"), styles.Direction
+}
+
+func summaryBadges(p StreamingParams) []string {
+	badges := make([]string, 0, 4)
+	if p.Paused {
+		badges = append(badges, i18n.T("streaming_badge_paused"))
+	}
+	if p.SourcePaused {
+		badges = append(badges, i18n.T("streaming_badge_source_paused"))
+	}
+	if p.IncomingMuted || p.ServerMuted {
+		badges = append(badges, i18n.T("streaming_badge_incoming_muted"))
+	}
+	if p.PeerMutedYou {
+		badges = append(badges, i18n.T("streaming_badge_peer_muted_you"))
+	}
+	return badges
 }
 
 func renderRemoteLine(remoteAddr string, _ int) string {

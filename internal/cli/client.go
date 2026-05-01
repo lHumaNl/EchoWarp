@@ -232,6 +232,7 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 	recordingCmdCh := make(chan tui.RecordingCommand, 4)
 	appRecordingCmdCh := make(chan app.RecordingCommand, 4)
 	serverMuteCh := make(chan bool, 4)
+	peerMuteCh := make(chan bool, 4)
 	pauseCh := make(chan bool, 4)
 	deviceCmdCh := make(chan tui.DeviceCommand, 16)
 	// Playback (decode/incoming) spectrum and level meter.
@@ -336,6 +337,7 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 				WithChatNicknameChannel(chatNicknameCh).
 				WithParticipantsChannel(participantsCh).
 				WithServerStoppedChannel(serverStoppedCh).
+				WithServerPeerMuteChannel(peerMuteCh).
 				WithParticipantPauseChannel(participantPauseCh).
 				WithConferenceParticipantsChannel(conferencePartsCh)
 			// Wire pause only for modes with capture (reverse/duplex/conference).
@@ -413,6 +415,7 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 		WithChatNicknameChannel(chatNicknameCh).
 		WithParticipantsChannel(participantsCh).
 		WithServerStoppedChannel(serverStoppedCh).
+		WithPeerMuteChannel(peerMuteCh).
 		WithParticipantPauseChannel(participantPauseCh).
 		WithConferenceParticipantsChannel(conferencePartsCh).
 		WithDeviceCommandChannel(deviceCmdCh)

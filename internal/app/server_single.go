@@ -912,23 +912,45 @@ func (s *ServerApp) handleDCControl(raw []byte, connStart time.Time, nickname st
 		return true
 	case transport.ActionPeerMute:
 		s.clientMuted.Store(true)
+		s.setSingleClientMuted(true)
 		s.logger.Info(nickname + " muted server audio")
 		return false
 	case transport.ActionPeerUnmute:
 		s.clientMuted.Store(false)
+		s.setSingleClientMuted(false)
 		s.logger.Info(nickname + " unmuted server audio")
 		return false
 	case transport.ActionPause, transport.ActionPauseAll:
 		s.clientPaused.Store(true)
+		s.setSingleClientPaused(true)
 		s.logger.Info(nickname + " paused capture")
 		return false
 	case transport.ActionResume, transport.ActionResumeAll:
 		s.clientPaused.Store(false)
+		s.setSingleClientPaused(false)
 		s.logger.Info(nickname + " resumed capture")
 		return false
 	}
 
 	return false
+}
+
+func (s *ServerApp) setSingleClientMuted(muted bool) {
+	s.mu.RLock()
+	mc := s.clients["client-1"]
+	s.mu.RUnlock()
+	if mc != nil {
+		mc.muted.Store(muted)
+	}
+}
+
+func (s *ServerApp) setSingleClientPaused(paused bool) {
+	s.mu.RLock()
+	mc := s.clients["client-1"]
+	s.mu.RUnlock()
+	if mc != nil {
+		mc.paused.Store(paused)
+	}
 }
 
 type capturePipelineOptions struct {

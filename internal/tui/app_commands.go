@@ -181,6 +181,20 @@ func waitForParticipantPause(ch <-chan ParticipantPauseMsg) tea.Cmd {
 	}
 }
 
+// waitForPeerMute waits for server-initiated outgoing mute state changes.
+func waitForPeerMute(ch <-chan bool) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		muted, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return PeerMuteMsg(muted)
+	}
+}
+
 // waitForConferenceParticipants waits for a full participants list update.
 func waitForConferenceParticipants(ch <-chan ConferenceParticipantsMsg) tea.Cmd {
 	if ch == nil {

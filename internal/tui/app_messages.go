@@ -167,6 +167,9 @@ type ConferenceParticipantsMsg = app.ConferenceParticipantsMsg
 // ConferenceParticipantInfo holds participant data from a participants_update message.
 type ConferenceParticipantInfo = app.ConferenceParticipantInfo
 
+// PeerMuteMsg reports whether the remote side muted this client's outgoing audio.
+type PeerMuteMsg bool
+
 // KickedByServerMsg is sent when the server kicks this client.
 type KickedByServerMsg struct {
 	Reason string

@@ -586,8 +586,9 @@ func (m Model) viewStreaming() string {
 		Participants:    m.participants,
 		MaxClients:      m.maxClients,
 		MyNickname:      m.chatPanel.MyNickname(),
-		SourcePaused:    m.pausedParticipants["server"],
-		ServerMuted:     m.serverMuted,
+		SourcePaused:    m.singleClientSourcePaused(),
+		IncomingMuted:   m.singleClientIncomingMuted(),
+		PeerMutedYou:    m.singleClientPeerMutedYou(),
 		FocusedArea:     int(m.focusedArea),
 	}
 
@@ -604,6 +605,37 @@ func (m Model) viewStreaming() string {
 		body = m.recordingOverlay.Render(m.width, m.height-2)
 	}
 	return body
+}
+
+func (m Model) singleClient() (transport.ClientInfo, bool) {
+	if m.multiClient || len(m.multiStats.Clients) != 1 {
+		return transport.ClientInfo{}, false
+	}
+	return m.multiStats.Clients[0], true
+}
+
+func (m Model) singleClientSourcePaused() bool {
+	client, ok := m.singleClient()
+	if m.config.Mode == config.ModeServer && ok {
+		return (m.config.Reverse || m.config.Duplex) && client.Paused
+	}
+	return (!m.config.Reverse || m.config.Duplex) && m.pausedParticipants["server"]
+}
+
+func (m Model) singleClientIncomingMuted() bool {
+	client, ok := m.singleClient()
+	if m.config.Mode == config.ModeServer && ok {
+		return (m.config.Reverse || m.config.Duplex) && client.MutedIncoming
+	}
+	return (!m.config.Reverse || m.config.Duplex) && m.serverMuted
+}
+
+func (m Model) singleClientPeerMutedYou() bool {
+	client, ok := m.singleClient()
+	if m.config.Mode == config.ModeServer && ok {
+		return (!m.config.Reverse || m.config.Duplex) && client.Muted
+	}
+	return (m.config.Reverse || m.config.Duplex) && m.peerMutedByServer
 }
 
 // isCaptureOnlyMode returns true when the local side only captures audio (no playback).
