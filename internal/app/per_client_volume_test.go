@@ -1,11 +1,15 @@
 package app
 
 import (
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"testing"
 
 	"github.com/lHumaNl/echowarp/internal/config"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestAdjustClientVolume_NonConference_AppliesGain — when a multiClient has a
@@ -38,6 +42,36 @@ func TestAdjustClientVolume_NonConference_AppliesGain(t *testing.T) {
 	// Clamp high: +10 → 1.5
 	app.adjustClientVolume("c1", 10)
 	assert.Equal(t, float32(1.5), gain.Gain())
+}
+
+func TestAdjustClientVolume_LogsRoundedVolumeWithoutChangingGain(t *testing.T) {
+	t.Parallel()
+	var logs bytes.Buffer
+	app := NewServerApp(testServerConfig(), slog.New(slog.NewJSONHandler(&logs, nil)), nil, nil, nil)
+	gain := NewDeviceGainControl(1.0)
+	mc := &multiClient{id: "c1", nickname: "C1"}
+	mc.setClientGain(gain)
+	app.mu.Lock()
+	app.clients["c1"] = mc
+	app.mu.Unlock()
+
+	app.adjustClientVolume("c1", -0.1)
+
+	actualGain := gain.Gain()
+	record := decodeSlogJSONRecord(t, logs.Bytes())
+	loggedVolume, ok := record["volume"].(float64)
+	require.True(t, ok, "volume should be logged as a JSON number")
+	assert.Equal(t, float32(0.9), actualGain)
+	assert.NotEqual(t, 0.9, float64(actualGain))
+	assert.Equal(t, 0.9, loggedVolume)
+	assert.NotEqual(t, float64(actualGain), loggedVolume)
+}
+
+func decodeSlogJSONRecord(t *testing.T, data []byte) map[string]any {
+	t.Helper()
+	var record map[string]any
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(data), &record))
+	return record
 }
 
 // TestAdjustClientVolume_NoGain_DoesNotPanic — clients without clientGain

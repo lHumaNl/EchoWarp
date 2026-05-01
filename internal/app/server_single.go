@@ -582,7 +582,7 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 	}()
 
 	readyCh := make(chan struct{})
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil, playbackGainCtl, playbackAGC, readyCh)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil, playbackGainCtl, playbackAGC, readyCh, nil)
 	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone, readyCh)
 
 	s.logger.Info("Jitter buffer enabled (intercept path)",

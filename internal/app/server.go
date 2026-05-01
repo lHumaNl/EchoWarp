@@ -214,18 +214,11 @@ type multiClient struct {
 	// that still uses runCapturePipelineWithOptions per client.
 	clientGainMu sync.RWMutex
 	clientGain   *DeviceGainControl
-}
 
-func (mc *multiClient) setClientGain(gain *DeviceGainControl) {
-	mc.clientGainMu.Lock()
-	defer mc.clientGainMu.Unlock()
-	mc.clientGain = gain
-}
-
-func (mc *multiClient) getClientGain() *DeviceGainControl {
-	mc.clientGainMu.RLock()
-	defer mc.clientGainMu.RUnlock()
-	return mc.clientGain
+	// incomingGain controls per-client input volume for reverse receive paths.
+	// It is separate from clientGain so normal outgoing volume remains unchanged.
+	incomingGainMu sync.RWMutex
+	incomingGain   *DeviceGainControl
 }
 
 // NewServerApp creates a new server application with the given configuration.

@@ -3,11 +3,17 @@ package app
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
+)
+
+const (
+	minPerClientVolume = float32(0)
+	maxPerClientVolume = float32(1.5)
 )
 
 // reportStats periodically sends connection statistics to the TUI stats channel
@@ -331,7 +337,7 @@ func (s *ServerApp) adjustClientVolume(clientID string, delta float64) {
 				newVol = 0
 			}
 			s.conference.mixer.SetParticipantVolume(clientID, newVol)
-			s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", newVol)
+			s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", roundedLogVolume(float64(newVol)))
 			return
 		}
 		s.logger.Warn("AdjustVolume: participant not found in conference", "clientID", clientID)
@@ -343,20 +349,39 @@ func (s *ServerApp) adjustClientVolume(clientID string, delta float64) {
 	// startSharedCaptureClient when the per-client encoder starts.
 	clientGain := mc.getClientGain()
 	if clientGain != nil {
-		cur := clientGain.Gain()
-		newVol := cur + float32(delta)
-		if newVol > 1.5 {
-			newVol = 1.5
-		}
-		if newVol < 0 {
-			newVol = 0
-		}
+		newVol := clampPerClientVolume(clientGain.Gain() + float32(delta))
 		clientGain.SetGain(newVol)
-		s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", newVol)
+		s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", roundedLogVolume(float64(newVol)))
 		return
 	}
 
-	s.logger.Info("Client volume adjusted (no per-client gain wired)", "clientID", clientID, "nickname", nick, "delta", delta)
+	incomingGain := mc.getIncomingGain()
+	if incomingGain != nil {
+		newVol := clampPerClientVolume(incomingGain.Gain() + float32(delta))
+		incomingGain.SetGain(newVol)
+		s.logger.Info("Client incoming volume adjusted", "clientID", clientID, "nickname", nick, "volume", roundedLogVolume(float64(newVol)))
+		return
+	}
+
+	s.logger.Info("Client volume adjusted (no per-client gain wired)", "clientID", clientID, "nickname", nick, "delta", roundedLogVolume(delta))
+}
+
+func roundedLogVolume(value float64) float64 {
+	rounded := math.Round(value*10) / 10
+	if rounded == 0 {
+		return 0
+	}
+	return rounded
+}
+
+func clampPerClientVolume(volume float32) float32 {
+	if volume > maxPerClientVolume {
+		return maxPerClientVolume
+	}
+	if volume < minPerClientVolume {
+		return minPerClientVolume
+	}
+	return volume
 }
 
 // processRecordingCommands handles recording start/stop commands from TUI.

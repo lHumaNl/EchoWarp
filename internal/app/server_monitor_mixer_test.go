@@ -158,6 +158,27 @@ func TestSetupAudioPipelineMultiDuplex_RemovesMonitorSourceOnDisconnect(t *testi
 	}, 500*time.Millisecond, 10*time.Millisecond)
 }
 
+func TestServerMonitorMixer_SourceContextCancelsOnMonitorCancel(t *testing.T) {
+	t.Parallel()
+	serverCtx, cancelServer := context.WithCancel(context.Background())
+	defer cancelServer()
+	monitorCtx, cancelMonitor := context.WithCancel(serverCtx)
+	clientCtx, cancelClient := context.WithCancel(serverCtx)
+	defer cancelClient()
+	mixer := newTestServerMonitorMixer()
+	mixer.setMonitorContext(monitorCtx)
+	sourceCtx := mixer.sourceContext(clientCtx)
+
+	cancelMonitor()
+
+	select {
+	case <-sourceCtx.Done():
+		assert.NoError(t, clientCtx.Err())
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("source context was not canceled by monitor context")
+	}
+}
+
 func TestEnsureServerMonitorMixer_PlayerStartupFailureResetsAndCancels(t *testing.T) {
 	t.Parallel()
 	app, starts := newTestDuplexMultiServer(t, nil)
@@ -214,6 +235,8 @@ func TestEnsureServerMonitorMixer_PlayerRuntimeErrorAfterStartupResetsAndCancels
 	require.NoError(t, err)
 	require.NotNil(t, mixer)
 	require.NotNil(t, playerCtx)
+	mixer.AddSource("client-1")
+	require.Equal(t, 1, mixer.SourceCount())
 	assert.Equal(t, int32(1), starts.Load())
 
 	monitorState := func() (hasMixer, hasGain, hasAGC bool) {
@@ -240,7 +263,7 @@ func TestEnsureServerMonitorMixer_PlayerRuntimeErrorAfterStartupResetsAndCancels
 
 	require.Eventually(t, func() bool {
 		hasMixer, hasGain, hasAGC := monitorState()
-		return !hasMixer && !hasGain && !hasAGC
+		return !hasMixer && !hasGain && !hasAGC && mixer.SourceCount() == 0
 	}, 500*time.Millisecond, 10*time.Millisecond)
 	assert.ErrorIs(t, playerCtx.Err(), context.Canceled)
 }

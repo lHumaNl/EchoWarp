@@ -43,6 +43,21 @@ func TestJitterBuffer_Overflow(t *testing.T) {
 	}
 
 	assert.LessOrEqual(t, jb.Depth(), 5)
+	assert.Equal(t, uint64(5), jb.DropCount())
+}
+
+func TestJitterBuffer_DropCountOnlyIncrementsOnOverflow(t *testing.T) {
+	jb := NewJitterBuffer(1, 3)
+
+	jb.Write([]float32{1})
+	jb.Write([]float32{2})
+	jb.Write([]float32{3})
+	assert.Zero(t, jb.DropCount())
+
+	jb.Write([]float32{4})
+	jb.Write([]float32{5})
+
+	assert.Equal(t, uint64(2), jb.DropCount())
 }
 
 func TestJitterBuffer_AdaptiveAdjust(t *testing.T) {

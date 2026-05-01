@@ -2,6 +2,7 @@ package audio
 
 import (
 	"sync"
+	"sync/atomic"
 )
 
 // maxPooledFrameSize is the maximum frame size that will be pooled for reuse.
@@ -29,6 +30,7 @@ type JitterBuffer struct {
 	maxDepth    int
 	minDepth    int
 	initialized bool
+	dropCount   atomic.Uint64
 }
 
 // NewJitterBuffer creates a jitter buffer with the specified depth parameters.
@@ -72,11 +74,17 @@ func (j *JitterBuffer) Write(frame []float32) {
 		}
 		j.read = (j.read + 1) % j.maxDepth
 		j.count--
+		j.dropCount.Add(1)
 	}
 
 	j.ring[j.write] = frameCopy
 	j.write = (j.write + 1) % j.maxDepth
 	j.count++
+}
+
+// DropCount returns how many oldest frames were dropped due to buffer overflow.
+func (j *JitterBuffer) DropCount() uint64 {
+	return j.dropCount.Load()
 }
 
 // Read retrieves the oldest frame from the buffer. Returns nil if the buffer

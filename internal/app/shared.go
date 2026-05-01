@@ -150,7 +150,7 @@ func applyPlaybackGainMute(ctx context.Context, frame []float32, gainCtl *Device
 	}
 }
 
-func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl, agcProc *audio.AGCProcessor, readyCh chan<- struct{}) {
+func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh chan<- []float32, frameSize int, sampleRate, channels int, logger *slog.Logger, doneCh <-chan struct{}, muteFlag *atomic.Bool, recordingTap func([]float32), gainCtl *DeviceGainControl, agcProc *audio.AGCProcessor, readyCh chan<- struct{}, diagnostics *clientPlaybackDiagnostics) {
 	defer close(playbackCh)
 	// Ensure readyCh is always closed on exit so the player goroutine can
 	// unblock even if the pump returns before reaching prefill (ctx cancel,
@@ -190,6 +190,7 @@ func jitterPlaybackPump(ctx context.Context, jb *audio.JitterBuffer, playbackCh 
 						recordingTap(f)
 					}
 					applyPlaybackGainMute(ctx, f, gainCtl, muteFlag, agcProc)
+					recordPlaybackDiagnostics(diagnostics, jb, playbackCh, f, channels)
 					select {
 					case playbackCh <- f:
 						return true
@@ -254,6 +255,7 @@ pumpLoop:
 					recordingTap(frame)
 				}
 				applyPlaybackGainMute(ctx, frame, gainCtl, muteFlag, agcProc)
+				recordPlaybackDiagnostics(diagnostics, jb, playbackCh, frame, channels)
 				select {
 				case playbackCh <- frame:
 				case <-ctx.Done():
@@ -261,9 +263,11 @@ pumpLoop:
 				}
 			}
 		case <-ticker.C:
+			recordPumpTick(diagnostics)
 			frame := jb.Read()
 			if frame == nil {
 				underruns++
+				recordJitterUnderrun(diagnostics, jb)
 				// Use PLC to generate a smooth continuation frame instead of silence.
 				var plcFrame []float32
 				if plcDec != nil {
@@ -279,9 +283,11 @@ pumpLoop:
 				if plcFrame == nil {
 					plcFrame = silence
 				}
+				recordPlaybackDiagnostics(diagnostics, jb, playbackCh, plcFrame, channels)
 				select {
 				case playbackCh <- plcFrame:
 				default:
+					recordPlayerDrop(diagnostics)
 				}
 			} else {
 				// Feed the real frame to PLC decoder to keep its state current.
@@ -299,12 +305,14 @@ pumpLoop:
 				// Apply gain/mute in-place. Frame is a freshly-allocated
 				// slice owned by this goroutine, so in-place mutation is safe.
 				applyPlaybackGainMute(ctx, frame, gainCtl, muteFlag, agcProc)
+				recordPlaybackDiagnostics(diagnostics, jb, playbackCh, frame, channels)
 				select {
 				case playbackCh <- frame:
 				default:
 					// Player is not consuming fast enough — channel full.
 					// This causes lost audio frames even though JB has data.
 					playerBackpressure++
+					recordPlayerDrop(diagnostics)
 				}
 			}
 
@@ -347,6 +355,10 @@ func startAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Confi
 }
 
 func startAudioPlayerWithStartup(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}, startupCh chan<- error) {
+	startAudioPlayerWithDiagnostics(ctx, logger, cfg, playbackCh, audioDone, readyCh, startupCh, nil)
+}
+
+func startAudioPlayerWithDiagnostics(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}, startupCh chan<- error, diagnostics *clientPlaybackDiagnostics) {
 	if cfg.DeviceID == nil {
 		logger.Warn("No output device specified, audio will not be played")
 		notifyAudioPlayerStartup(ctx, startupCh, errors.New("no output device specified"))
@@ -370,10 +382,10 @@ func startAudioPlayerWithStartup(ctx context.Context, logger *slog.Logger, cfg c
 		actualPlaybackCh = mixedCh
 	}
 
-	go runAudioPlayer(ctx, logger, cfg, actualPlaybackCh, audioDone, readyCh, startupCh)
+	go runAudioPlayer(ctx, logger, cfg, actualPlaybackCh, audioDone, readyCh, startupCh, diagnostics)
 }
 
-func runAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}, startupCh chan<- error) {
+func runAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Config, playbackCh <-chan []float32, audioDone chan<- error, readyCh <-chan struct{}, startupCh chan<- error, diagnostics *clientPlaybackDiagnostics) {
 	player, err := audio.NewPlayer(cfg.SampleRate, cfg.Channels)
 	if err != nil {
 		logger.Error("Player: NewPlayer failed", "error", err, "deviceID", *cfg.DeviceID)
@@ -391,8 +403,8 @@ func runAudioPlayer(ctx context.Context, logger *slog.Logger, cfg config.Config,
 		return
 	}
 	notifyAudioPlayerStartup(ctx, startupCh, nil)
-	logger.Info("Player started", "deviceID", *cfg.DeviceID, "sampleRate", cfg.SampleRate, "channels", cfg.Channels)
-	go logPlayerSilenceFills(ctx, logger, player)
+	logger.Info("Player started", "deviceID", *cfg.DeviceID, "sampleRate", cfg.SampleRate, "channels", cfg.Channels, "period_ms", audio.PlaybackPeriodMilliseconds)
+	go logPlayerSilenceFills(ctx, logger, player, diagnostics)
 	<-ctx.Done()
 	audioDone <- ctx.Err()
 }
@@ -424,29 +436,6 @@ func notifyAudioPlayerStartup(ctx context.Context, startupCh chan<- error, err e
 	select {
 	case startupCh <- err:
 	case <-ctx.Done():
-	}
-}
-
-func logPlayerSilenceFills(ctx context.Context, logger *slog.Logger, player interface{ SilenceFills() uint64 }) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	var prev uint64
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			logPlayerSilenceDelta(logger, player, &prev)
-		}
-	}
-}
-
-func logPlayerSilenceDelta(logger *slog.Logger, player interface{ SilenceFills() uint64 }, prev *uint64) {
-	cur := player.SilenceFills()
-	delta := cur - *prev
-	*prev = cur
-	if delta > 0 {
-		logger.Info("Player silence-fill events", "in_last_2s", delta, "total", cur)
 	}
 }
 
@@ -562,6 +551,7 @@ func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.
 	// dropping frames on the non-blocking ticker send, while keeping latency
 	// low. JitterBuffer remains the primary jitter absorber.
 	playbackCh := make(chan []float32, 5)
+	diagnostics := newClientPlaybackDiagnostics(cap(playbackCh))
 	doneCh := make(chan struct{})
 	// readyCh is closed by the pump after it has completed prefill (first
 	// frame + a few extras from the warmed JB). The audio player waits on
@@ -571,8 +561,8 @@ func startJitteredPlayback(ctx context.Context, logger *slog.Logger, cfg config.
 	readyCh := make(chan struct{})
 
 	setupAudioDecoderWithJitter(logger, peer, cfg.SampleRate, cfg.Channels, jb, spectrum, level, doneCh)
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap, gainCtl, agcProc, readyCh)
-	startAudioPlayer(ctx, logger, cfg, playbackCh, audioDone, readyCh)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(cfg.SampleRate), int(cfg.Channels), logger, doneCh, muteFlag, recordingTap, gainCtl, agcProc, readyCh, diagnostics)
+	startAudioPlayerWithDiagnostics(ctx, logger, cfg, playbackCh, audioDone, readyCh, nil, diagnostics)
 
 	logger.Info("Jitter buffer enabled",
 		"target", targetFrames,

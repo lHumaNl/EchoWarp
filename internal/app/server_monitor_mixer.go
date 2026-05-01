@@ -21,10 +21,12 @@ const monitorPlayerStartupTimeout = 5 * time.Second
 // It combines decoded client receive sources into one server playback stream;
 // the mixed frame sent to playback is also the AEC far-end reference.
 type ServerMonitorMixer struct {
-	cfg     ServerMonitorMixerConfig
-	mu      sync.RWMutex
-	sources map[string]*monitorSourceBuffer
-	running atomic.Bool
+	cfg         ServerMonitorMixerConfig
+	mu          sync.RWMutex
+	sources     map[string]*monitorSourceBuffer
+	lifecycleMu sync.RWMutex
+	monitorCtx  context.Context
+	running     atomic.Bool
 }
 
 type ServerMonitorMixerConfig struct {
@@ -45,6 +47,8 @@ type monitorSourceBuffer struct {
 	read     int
 	writeIdx int
 	count    int
+	gain     *DeviceGainControl
+	paused   *atomic.Bool
 }
 
 // NewServerMonitorMixer creates the monitor mixer. FrameSize defaults to 20ms.
@@ -58,17 +62,26 @@ func NewServerMonitorMixer(cfg ServerMonitorMixerConfig) *ServerMonitorMixer {
 	return &ServerMonitorMixer{cfg: cfg, sources: make(map[string]*monitorSourceBuffer)}
 }
 
-// AddSource registers or replaces a client source.
-func (m *ServerMonitorMixer) AddSource(clientID string) {
+// AddSource registers or replaces a client source and returns its gain control.
+func (m *ServerMonitorMixer) AddSource(clientID string, paused ...*atomic.Bool) *DeviceGainControl {
 	m.mu.Lock()
-	m.sources[clientID] = newMonitorSourceBuffer(m.cfg.BufferFrames)
+	src := newMonitorSourceBuffer(m.cfg.BufferFrames, firstPauseFlag(paused))
+	m.sources[clientID] = src
 	m.mu.Unlock()
+	return src.gain
 }
 
 // RemoveSource removes a client source from future monitor mixes.
 func (m *ServerMonitorMixer) RemoveSource(clientID string) {
 	m.mu.Lock()
 	delete(m.sources, clientID)
+	m.mu.Unlock()
+}
+
+// ClearSources removes every client source from future monitor mixes.
+func (m *ServerMonitorMixer) ClearSources() {
+	m.mu.Lock()
+	m.sources = make(map[string]*monitorSourceBuffer)
 	m.mu.Unlock()
 }
 
@@ -79,12 +92,24 @@ func (m *ServerMonitorMixer) SourceCount() int {
 	return len(m.sources)
 }
 
+// SetSourceGain updates a registered source gain and reports whether it exists.
+func (m *ServerMonitorMixer) SetSourceGain(clientID string, gain float32) bool {
+	m.mu.RLock()
+	src := m.sources[clientID]
+	m.mu.RUnlock()
+	if src == nil {
+		return false
+	}
+	src.gain.SetGain(clampPerClientVolume(gain))
+	return true
+}
+
 // SubmitSourceFrame queues one decoded/jittered frame for a source.
 func (m *ServerMonitorMixer) SubmitSourceFrame(clientID string, frame []float32) {
 	m.mu.RLock()
 	src := m.sources[clientID]
 	m.mu.RUnlock()
-	if src != nil {
+	if src != nil && !src.isPaused() {
 		src.write(frame)
 	}
 }
@@ -122,8 +147,19 @@ func (m *ServerMonitorMixer) mixSources(mixed []float32) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, src := range m.sources {
+		if src.isPaused() {
+			src.clear()
+			continue
+		}
 		frame := src.readFrame()
 		if frame != nil {
+			gain := src.gain.Gain()
+			if gain <= 0 {
+				continue
+			}
+			if gain != 1.0 {
+				audio.MixGain(frame, gain)
+			}
 			audio.MixAccumulate(mixed, frame)
 		}
 	}
@@ -162,45 +198,25 @@ func (m *ServerMonitorMixer) sendMixedFrame(ctx context.Context, out chan<- []fl
 	}
 }
 
-func newMonitorSourceBuffer(capacity int) *monitorSourceBuffer {
-	return &monitorSourceBuffer{buf: make([][]float32, capacity)}
-}
-
-func (b *monitorSourceBuffer) write(frame []float32) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	copyFrame := append([]float32(nil), frame...)
-	if b.count == len(b.buf) {
-		b.read = (b.read + 1) % len(b.buf)
-		b.count--
-	}
-	b.buf[b.writeIdx] = copyFrame
-	b.writeIdx = (b.writeIdx + 1) % len(b.buf)
-	b.count++
-}
-
-func (b *monitorSourceBuffer) readFrame() []float32 {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.count == 0 {
-		return nil
-	}
-	frame := b.buf[b.read]
-	b.buf[b.read] = nil
-	b.read = (b.read + 1) % len(b.buf)
-	b.count--
-	return frame
-}
-
-func (s *ServerApp) setupServerMonitorSource(serverCtx, clientCtx context.Context, peer transport.PeerManager, clientID string, muteIncoming *atomic.Bool, audioDone chan<- error) error {
+func (s *ServerApp) setupServerMonitorSource(serverCtx, clientCtx context.Context, peer transport.PeerManager, clientID string, muteIncoming, paused *atomic.Bool, audioDone chan<- error) error {
 	mixer, err := s.ensureServerMonitorMixer(serverCtx)
 	if err != nil {
 		return err
 	}
-	mixer.AddSource(clientID)
-	go s.removeMonitorSourceOnDone(clientCtx, mixer, clientID)
-	s.startMonitorDecodeSource(clientCtx, peer, mixer, clientID, muteIncoming, audioDone)
+	sourceCtx := mixer.sourceContext(clientCtx)
+	gain := mixer.AddSource(clientID, paused)
+	if mc := s.clientByID(clientID); mc != nil {
+		mc.setIncomingGain(gain)
+	}
+	go s.removeMonitorSourceOnDone(sourceCtx, mixer, clientID)
+	s.startMonitorDecodeSource(sourceCtx, peer, mixer, clientID, muteIncoming, audioDone)
 	return nil
+}
+
+func (s *ServerApp) clientByID(clientID string) *multiClient {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.clients[clientID]
 }
 
 func (s *ServerApp) ensureServerMonitorMixer(ctx context.Context) (*ServerMonitorMixer, error) {
@@ -210,6 +226,11 @@ func (s *ServerApp) ensureServerMonitorMixer(ctx context.Context) (*ServerMonito
 		return s.monitorMixer, nil
 	}
 	mixer := NewServerMonitorMixer(s.serverMonitorMixerConfig())
+	if _, ok := s.serverMonitorPlaybackDeviceID(); !ok {
+		mixer.setMonitorContext(ctx)
+		s.monitorMixer = mixer
+		return mixer, nil
+	}
 	if err := s.startServerMonitorPlayback(ctx, mixer); err != nil {
 		s.monitorPlaybackGain = nil
 		s.monitorPlaybackAGC = nil
@@ -275,6 +296,10 @@ func (s *ServerApp) startServerMonitorPlayback(ctx context.Context, mixer *Serve
 		cancel()
 		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "start server monitor playback")
 	}
+	mixer.setMonitorContext(monitorCtx)
+	if !s.cfg.Duplex {
+		go HandleDeviceCommands(monitorCtx, s.deviceCmdCh, s.monitorPlaybackGain, s.monitorPlaybackAGC, s.logger)
+	}
 	go s.runServerMonitorMixer(monitorCtx, mixer, playbackCh, monitorDone)
 	go s.reportServerMonitorErrors(monitorCtx, monitorDone, cancel)
 	return nil
@@ -330,6 +355,7 @@ func (s *ServerApp) resetServerMonitorMixer(mixer *ServerMonitorMixer) {
 	s.monitorMixerMu.Lock()
 	defer s.monitorMixerMu.Unlock()
 	if s.monitorMixer == mixer {
+		mixer.ClearSources()
 		s.monitorMixer = nil
 		s.monitorPlaybackGain = nil
 		s.monitorPlaybackAGC = nil

@@ -392,6 +392,10 @@ func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context
 	if muteIncomingFlag == nil {
 		muteIncomingFlag = &atomic.Bool{}
 	}
+	var pausedFlag *atomic.Bool
+	if mc != nil {
+		pausedFlag = &mc.paused
+	}
 
 	switch direction {
 	case transport.DirectionDuplex:
@@ -409,7 +413,7 @@ func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context
 		} else if err := s.startSharedCaptureClient(serverCtx, clientCtx, clientID, mc, filteredSendCh, audioDone); err != nil {
 			return nil, err
 		}
-		if err := s.setupServerMonitorSource(serverCtx, clientCtx, peer, clientID, muteIncomingFlag, audioDone); err != nil {
+		if err := s.setupServerMonitorSource(serverCtx, clientCtx, peer, clientID, muteIncomingFlag, pausedFlag, audioDone); err != nil {
 			return nil, err
 		}
 	case transport.DirectionSend:
@@ -430,7 +434,9 @@ func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context
 			return nil, err
 		}
 	default:
-		s.setupReverseAudioMuted(clientCtx, peer, audioDone, "", muteIncomingFlag)
+		if err := s.setupServerMonitorSource(serverCtx, clientCtx, peer, clientID, muteIncomingFlag, pausedFlag, audioDone); err != nil {
+			return nil, err
+		}
 	}
 	return audioDone, nil
 }
@@ -467,6 +473,8 @@ func (s *ServerApp) startSharedCaptureClient(serverCtx, clientCtx context.Contex
 	sub := hub.Subscribe(clientID)
 
 	encCfg := PerClientEncoderConfig{
+		ClientID:   clientID,
+		Nickname:   multiClientNickname(mc, clientID),
 		SampleRate: s.cfg.SampleRate,
 		Channels:   s.cfg.Channels,
 		Encoder: EncoderConfig{
@@ -476,7 +484,11 @@ func (s *ServerApp) startSharedCaptureClient(serverCtx, clientCtx context.Contex
 			FEC:         s.cfg.OpusFEC,
 			Application: s.cfg.OpusApplication,
 		},
-		Gain: gain,
+		Gain:  gain,
+		Muted: multiClientOutgoingMuted(mc),
+		Paused: func() bool {
+			return s.serverPaused.Load()
+		},
 		ConfigureEncoder: func(enc *audio.OpusEncoder) {
 			if err := enc.SetComplexity(s.cfg.OpusComplexity); err != nil {
 				s.logger.Warn("Failed to set opus complexity", "error", err)
@@ -494,6 +506,22 @@ func (s *ServerApp) startSharedCaptureClient(serverCtx, clientCtx context.Contex
 		audioDone <- runPerClientEncoder(clientCtx, sub, encCfg, sendCh, s.logger)
 	}()
 	return nil
+}
+
+func multiClientOutgoingMuted(mc *multiClient) func() bool {
+	if mc == nil {
+		return nil
+	}
+	return func() bool {
+		return mc.muted.Load() || mc.mutedOutgoing.Load()
+	}
+}
+
+func multiClientNickname(mc *multiClient, fallback string) string {
+	if mc == nil || mc.nickname == "" {
+		return fallback
+	}
+	return mc.nickname
 }
 
 // ensureCaptureHub lazily creates and starts the shared capture hub. Thread-safe;

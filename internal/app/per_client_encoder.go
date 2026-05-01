@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
@@ -12,6 +13,8 @@ import (
 // PerClientEncoderConfig configures a per-client encoder goroutine that
 // consumes a SharedCaptureHub subscription.
 type PerClientEncoderConfig struct {
+	ClientID   string
+	Nickname   string
 	SampleRate uint32
 	Channels   uint32
 	Encoder    EncoderConfig
@@ -21,6 +24,20 @@ type PerClientEncoderConfig struct {
 	// ConfigureEncoder is an optional hook to set server-side Opus options
 	// (complexity, DTX, FEC) after the encoder is created and bitrate applied.
 	ConfigureEncoder func(*audio.OpusEncoder)
+	// Stats is optional runtime instrumentation for tests or future metrics export.
+	Stats *PerClientEncoderStats
+	// InstrumentationInterval controls aggregate lag logging. Defaults to 2s.
+	InstrumentationInterval time.Duration
+	// HeartbeatInterval controls debug baseline stats logging. Defaults to 5s.
+	HeartbeatInterval time.Duration
+	// EncodeWarnThreshold logs encode max duration at or above this value.
+	EncodeWarnThreshold time.Duration
+	// SendWaitWarnThreshold logs safeSend wait max duration at or above this value.
+	SendWaitWarnThreshold time.Duration
+	// Muted returns the current per-client outgoing mute state when available.
+	Muted func() bool
+	// Paused returns the current outgoing pause state when available.
+	Paused func() bool
 }
 
 // runPerClientEncoder consumes PCM frames from sub, applies per-client gain,
@@ -52,11 +69,18 @@ func runPerClientEncoder(
 
 	frameSize := int(cfg.SampleRate) / 50 * int(cfg.Channels)
 	acc := audio.NewFrameAccumulator(frameSize)
+	monitor := newPerClientEncoderMonitor(cfg, sub, logger)
+	monitor.LogActive()
+	heartbeat := time.NewTicker(monitor.HeartbeatInterval())
+	defer heartbeat.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-heartbeat.C:
+			monitor.ObserveQueue()
+			monitor.LogHeartbeat()
 		case samples, ok := <-sub.PCM:
 			if !ok {
 				if err := ctx.Err(); err != nil {
@@ -64,18 +88,26 @@ func runPerClientEncoder(
 				}
 				return ewerrors.NewError(ewerrors.ErrInternalState, "per-client encoder: shared capture subscription closed")
 			}
+			monitor.ObserveQueue()
 			samples = applyPerClientGain(samples, cfg.Gain)
 			frames := acc.Write(samples)
 			for _, frame := range frames {
+				encodeStart := time.Now()
 				encoded, err := enc.Encode(frame)
+				monitor.RecordEncode(time.Since(encodeStart))
 				if err != nil {
-					logger.Warn("Per-client Opus encode error", "error", err)
+					logger.Warn("Per-client Opus encode error", "clientID", monitor.clientID, "nickname", monitor.nickname, "error", err)
 					continue
 				}
 				metrics.AudioBytesSent.Add(float64(len(encoded)))
+				sendStart := time.Now()
 				if err := safeSend(ctx, sendCh, encoded); err != nil {
+					monitor.RecordSendWait(time.Since(sendStart))
+					monitor.LogCurrentIfUseful()
 					return err
 				}
+				monitor.RecordSendWait(time.Since(sendStart))
+				monitor.LogIfDue(time.Now())
 			}
 		}
 	}

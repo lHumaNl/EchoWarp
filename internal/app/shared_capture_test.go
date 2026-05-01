@@ -86,6 +86,9 @@ func TestSharedCaptureHub_DropOldestKeepsFreshFrames(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		h.dispatch([]float32{float32(i)})
 	}
+	assert.Equal(t, uint64(1), sub.DropCount())
+	assert.Equal(t, 4, sub.QueueDepth())
+	assert.Equal(t, 4, sub.QueueCapacity())
 
 	for want := 1; want <= 4; want++ {
 		select {
@@ -95,6 +98,58 @@ func TestSharedCaptureHub_DropOldestKeepsFreshFrames(t *testing.T) {
 			t.Fatalf("missing queued frame %d", want)
 		}
 	}
+}
+
+func TestSharedCaptureHub_SlowSubscriberIsolation_FastSubscriberKeepsFreshFrames(t *testing.T) {
+	t.Parallel()
+	h := NewSharedCaptureHub(CapturePipelineConfig{}, testHubLogger())
+
+	slow := h.Subscribe("slow")
+	defer slow.Close()
+	fast := h.Subscribe("fast")
+	defer fast.Close()
+
+	for i := 0; i < 5; i++ {
+		frame := []float32{float32(i)}
+		h.dispatch(frame)
+		assertReceivesFrame(t, fast.PCM, frame)
+	}
+
+	assert.Equal(t, uint64(1), slow.DropCount())
+	assert.Equal(t, uint64(0), fast.DropCount())
+	assert.Equal(t, 4, slow.QueueDepth())
+	assert.Equal(t, 0, fast.QueueDepth())
+
+	for want := 1; want <= 4; want++ {
+		assertReceivesFrame(t, slow.PCM, []float32{float32(want)})
+	}
+	assert.Equal(t, 0, slow.QueueDepth())
+}
+
+func TestSharedCaptureHub_SubscriberDropLoggingIsThrottled(t *testing.T) {
+	t.Parallel()
+
+	logs := &lockedLogBuffer{}
+	h := NewSharedCaptureHub(CapturePipelineConfig{}, slog.New(slog.NewJSONHandler(logs, nil)))
+	sub := h.Subscribe("slow")
+	defer sub.Close()
+	fillSharedCaptureQueue(h)
+
+	h.dispatch([]float32{99})
+	records := decodeSlogJSONRecords(t, logs.Bytes())
+	require.Len(t, records, 1)
+	assertSharedCaptureDropLog(t, records[0], float64(1))
+
+	for i := 0; i < 3; i++ {
+		h.dispatch([]float32{float32(100 + i)})
+	}
+	assert.Len(t, decodeSlogJSONRecords(t, logs.Bytes()), 1)
+
+	h.nextDropLogUnixNano.Store(time.Now().Add(-time.Second).UnixNano())
+	h.dispatch([]float32{200})
+	records = decodeSlogJSONRecords(t, logs.Bytes())
+	require.Len(t, records, 2)
+	assertSharedCaptureDropLog(t, records[1], float64(4))
 }
 
 func TestSharedCaptureHub_RecordingTapOncePerFrameWithSubscribers(t *testing.T) {
@@ -212,6 +267,20 @@ func assertReceivesFrame(t *testing.T, ch <-chan []float32, want []float32) {
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("subscriber did not receive frame")
 	}
+}
+
+func fillSharedCaptureQueue(h *SharedCaptureHub) {
+	for i := 0; i < 4; i++ {
+		h.dispatch([]float32{float32(i)})
+	}
+}
+
+func assertSharedCaptureDropLog(t *testing.T, record map[string]any, drops float64) {
+	t.Helper()
+	assert.Equal(t, "Shared capture subscriber drops", record["msg"])
+	assert.Equal(t, "slow", record["clientID"])
+	assert.Equal(t, drops, record["subscriber_drops"])
+	assert.Equal(t, float64(4), record["sub_queue_cap"])
 }
 
 type fakeSharedCapturer struct {
