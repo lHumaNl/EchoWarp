@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,7 +25,7 @@ func TestExistingEchoWarpSinkIsManageableAndRemovable(t *testing.T) {
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	require.NotNil(t, stub)
-	assert.Equal(t, []string{echowarpSinkName}, stub.findNames)
+	assert.Equal(t, []string{echowarpSinkName, echowarpSinkName, echowarpSinkName}, stub.findNames)
 	assert.Empty(t, stub.createdNames)
 	assert.Equal(t, []string{"42"}, stub.removedIDs)
 	assert.False(t, m.virtualMicManageable)
@@ -37,9 +38,90 @@ func TestExistingEchoWarpExtraDoesNotBecomeManageable(t *testing.T) {
 
 	m.syncVirtualMicState()
 
-	assert.Empty(t, stub.findNames)
+	assert.Equal(t, []string{echowarpSinkName}, stub.findNames)
 	assert.False(t, m.virtualMicManageable)
 	assert.Equal(t, "Create Virtual Audio Device ▸", m.Fields[0].ActionLabel)
+}
+
+func TestAutoRecreateBeforeRefreshThenManualCreateIsIdempotent(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
+		Name: echowarpMonitorName, IsInput: true, Virtual: true,
+		VirtualSink: virtualSinkPreset(recent.SinkRecreate),
+	}}}
+
+	m.autoRestore(preset, "normal")
+	stub.foundModuleID = "99"
+	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(false, echowarpSinkName)
+	m.overlay = SetupOverlayVirtualDevice
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+	assert.Equal(t, "99", m.virtualMicModule)
+	assert.True(t, m.virtualMicManageable)
+}
+
+func TestManualCreateWithExistingModuleAndStaleRowsManagesOnly(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	stub.foundModuleID = "42"
+	m := virtualAudioTestModel(nil)
+	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(false, echowarpSinkName)
+	m.overlay = SetupOverlayVirtualDevice
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Empty(t, stub.createdNames)
+	assert.True(t, m.virtualMicManageable)
+	assert.Equal(t, "42", m.virtualMicManagedModule)
+	assert.False(t, m.virtualMicCreated)
+	assert.Equal(t, SetupOverlayVirtualSinkLifecycle, m.overlay)
+}
+
+func TestRecreateUsesExistingPulseAudioModuleWithoutOutputRow(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	stub.foundModuleID = "42"
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
+		Name: echowarpSinkName, IsInput: false, Virtual: true,
+		VirtualSink: virtualSinkPreset(recent.SinkRecreate),
+	}}}
+
+	m.autoRestore(preset, "normal")
+
+	assert.Empty(t, stub.createdNames)
+	assert.True(t, m.virtualMicManageable)
+	assert.Equal(t, "42", m.virtualMicManagedModule)
+}
+
+func TestDuplicateEchoWarpPresetEntriesCreateSingleSink(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{
+		{Name: echowarpSinkName, IsInput: false, Virtual: true, VirtualSink: virtualSinkPreset(recent.SinkRecreate)},
+		{Name: echowarpMonitorName, IsInput: true, Virtual: true},
+	}}
+
+	m.autoRestore(preset, "normal")
+
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+}
+
+func TestRefreshInjectionAfterAutoRecreateSelectsMonitor(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
+		Name: echowarpMonitorName, IsInput: true, Virtual: true,
+		VirtualSink: virtualSinkPreset(recent.SinkRecreate),
+	}}}
+
+	m.autoRestore(preset, "normal")
+	stub.foundModuleID = "99"
+	m = m.WithDeviceRefreshFunc(refreshedEchoWarpItems)
+
+	assert.Equal(t, echowarpMonitorName, m.SelectedDeviceName())
+	assert.Len(t, m.inputDevices, 1)
+	assert.Len(t, m.outputDevices, 1)
 }
 
 func TestMissingVirtualDevicesDoNotOpenStartupPrompt(t *testing.T) {
@@ -224,7 +306,7 @@ func stubVirtualAudioFuncs(t *testing.T) *virtualAudioStub {
 	oldCreate := createPulseAudioSinkFn
 	oldRemove := removePulseAudioSinkFn
 	oldFind := findPulseAudioModuleFn
-	stub := &virtualAudioStub{foundModuleID: "42"}
+	stub := &virtualAudioStub{}
 
 	isLinuxRuntime = true
 	createPulseAudioSinkFn = func(name string) (string, error) {
@@ -233,6 +315,7 @@ func stubVirtualAudioFuncs(t *testing.T) *virtualAudioStub {
 	}
 	removePulseAudioSinkFn = func(moduleID string) error {
 		stub.removedIDs = append(stub.removedIDs, moduleID)
+		stub.foundModuleID = ""
 		return nil
 	}
 	findPulseAudioModuleFn = func(sinkName string) (string, bool, error) {
@@ -247,4 +330,11 @@ func stubVirtualAudioFuncs(t *testing.T) *virtualAudioStub {
 		findPulseAudioModuleFn = oldFind
 	})
 	return stub
+}
+
+func refreshedEchoWarpItems() ([]list.Item, error) {
+	return []list.Item{
+		mockDeviceItem{name: echowarpMonitorName, id: 11, isInput: true},
+		mockDeviceItem{name: echowarpSinkName, id: 12, isInput: false},
+	}, nil
 }

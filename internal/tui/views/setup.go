@@ -356,7 +356,15 @@ func (m SetupModel) WithUnifiedDeviceList(isDuplex bool) SetupModel {
 // The callback should return list items for all devices (input + output).
 func (m SetupModel) WithDeviceRefreshFunc(fn func() ([]list.Item, error)) SetupModel {
 	m.refreshDevicesFn = fn
+	m.refreshTrackedVirtualSinkAfterEnumeratorInstall()
 	return m
+}
+
+func (m *SetupModel) refreshTrackedVirtualSinkAfterEnumeratorInstall() {
+	if !isLinuxRuntime || !m.hasVirtualMicModuleState() {
+		return
+	}
+	m.refreshDevicesAfterVirtualSinkEnsure(echowarpSinkName)
 }
 
 // WithVirtualSinkLifecycle sets cleanup/startup behavior for the virtual sink.

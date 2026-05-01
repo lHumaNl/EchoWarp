@@ -179,25 +179,27 @@ func (m *SetupModel) syncVirtualMicState() {
 	if !isLinuxRuntime {
 		return
 	}
-	if !m.hasExactEchoWarpOutput() {
-		m.clearVirtualMicManageState()
-		m.updateVirtualMicField(false)
+	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
+	if err == nil && found {
+		m.markVirtualSinkFound(moduleID, *m.defaultVirtualSinkPreset())
 		return
 	}
-	if m.virtualMicManagedModule != "" || m.virtualMicModule != "" {
+	if err != nil && m.hasVirtualMicModuleState() {
 		m.virtualMicManageable = true
 		m.updateVirtualMicField(true)
 		return
 	}
-	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
-	if err != nil || !found {
-		m.virtualMicManageable = false
-		m.updateVirtualMicField(false)
+	if m.hasExactEchoWarpOutput() && m.hasVirtualMicModuleState() {
+		m.virtualMicManageable = true
+		m.updateVirtualMicField(true)
 		return
 	}
-	m.virtualMicManageable = true
-	m.virtualMicManagedModule = moduleID
-	m.updateVirtualMicField(true)
+	m.clearVirtualMicManageState()
+	m.updateVirtualMicField(false)
+}
+
+func (m SetupModel) hasVirtualMicModuleState() bool {
+	return m.virtualMicManagedModule != "" || m.virtualMicModule != ""
 }
 
 func (m SetupModel) hasExactEchoWarpOutput() bool {

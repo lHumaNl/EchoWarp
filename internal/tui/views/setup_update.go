@@ -639,24 +639,11 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			action := m.virtualDeviceOverlay.Update(msg)
 			switch action {
 			case VirtualActionCreate:
-				moduleID, err := createPulseAudioSinkFn(echowarpSinkName)
-				if err != nil {
+				if err := m.ensureVirtualSink(*m.defaultVirtualSinkPreset()); err != nil {
 					m.virtualDeviceOverlay.Error = err.Error()
 					return m, nil
 				}
-				m.virtualMicCreated = true
-				m.virtualMicModule = moduleID
-				m.virtualMicManageable = true
-				m.virtualMicManagedModule = moduleID
 				m.virtualDeviceOverlay = nil
-				// Update field label
-				m.updateVirtualMicField(true)
-				// Re-enumerate devices from OS (PulseAudio needs time to register)
-				time.Sleep(200 * time.Millisecond)
-				m.refreshDevicesFromOS()
-				// Refresh device list and auto-select
-				m.rebuildDeviceGroups()
-				m.autoSelectVirtualDevice(echowarpSinkName)
 				// Show lifecycle options overlay
 				m.virtualSinkLifecycleOverlay = NewVirtualSinkLifecycleOverlay()
 				m.overlay = SetupOverlayVirtualSinkLifecycle

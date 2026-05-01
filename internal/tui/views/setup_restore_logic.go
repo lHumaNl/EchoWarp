@@ -274,15 +274,6 @@ func (m SetupModel) filterPresetForVisibleSections(preset recent.DevicePreset) r
 	return recent.DevicePreset{Devices: filtered}
 }
 
-func (m SetupModel) hasOutputDeviceNamed(name string) bool {
-	for _, d := range m.outputDevices {
-		if d.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
 	seen := make(map[string]bool)
 	for _, pd := range preset.Devices {
@@ -311,20 +302,45 @@ func isEchoWarpMonitorPreset(pd recent.PresetDevice) bool {
 }
 
 func (m *SetupModel) createMissingVirtualSink(vs recent.VirtualSinkPreset) {
-	if !isLinuxRuntime || m.hasTrackedVirtualSink(vs.SinkName) || m.hasOutputDeviceNamed(vs.SinkName) {
+	if !isLinuxRuntime || m.hasTrackedVirtualSink(vs.SinkName) {
 		return
 	}
-	moduleID, err := createPulseAudioSinkFn(vs.SinkName)
-	if err != nil {
+	if err := m.ensureVirtualSink(vs); err != nil {
 		return
 	}
-	m.markVirtualSinkCreated(moduleID, vs)
-	time.Sleep(200 * time.Millisecond)
-	m.refreshDevicesAfterVirtualSinkCreate()
 }
 
 func (m SetupModel) hasTrackedVirtualSink(sinkName string) bool {
 	return sinkName == echowarpSinkName && m.virtualMicCreated
+}
+
+func (m *SetupModel) ensureVirtualSink(vs recent.VirtualSinkPreset) error {
+	moduleID, found, err := findPulseAudioModuleFn(vs.SinkName)
+	if err != nil {
+		return err
+	}
+	if found {
+		m.markVirtualSinkFound(moduleID, vs)
+		m.refreshDevicesAfterVirtualSinkEnsure(vs.SinkName)
+		return nil
+	}
+	return m.createAndTrackVirtualSink(vs)
+}
+
+func (m *SetupModel) createAndTrackVirtualSink(vs recent.VirtualSinkPreset) error {
+	moduleID, err := createPulseAudioSinkFn(vs.SinkName)
+	if err != nil {
+		return err
+	}
+	m.markVirtualSinkCreated(moduleID, vs)
+	time.Sleep(200 * time.Millisecond)
+	m.refreshDevicesAfterVirtualSinkEnsure(vs.SinkName)
+	return nil
+}
+
+func (m *SetupModel) refreshDevicesAfterVirtualSinkEnsure(sinkName string) {
+	m.refreshDevicesAfterVirtualSinkCreate()
+	m.autoSelectVirtualDevice(sinkName)
 }
 
 func (m *SetupModel) refreshDevicesAfterVirtualSinkCreate() {
@@ -342,6 +358,17 @@ func (m *SetupModel) markVirtualSinkCreated(moduleID string, vs recent.VirtualSi
 	m.virtualMicManagedModule = moduleID
 	m.virtualSinkOnStop = vs.OnStop
 	m.virtualSinkOnStart = vs.OnStart
+}
+
+func (m *SetupModel) markVirtualSinkFound(moduleID string, vs recent.VirtualSinkPreset) {
+	if m.virtualMicCreated {
+		m.virtualMicModule = moduleID
+	}
+	m.virtualMicManageable = true
+	m.virtualMicManagedModule = moduleID
+	m.virtualSinkOnStop = vs.OnStop
+	m.virtualSinkOnStart = vs.OnStart
+	m.updateVirtualMicField(true)
 }
 
 // restoreLastMode applies the saved top-level last_mode to the Mode field, if set.
