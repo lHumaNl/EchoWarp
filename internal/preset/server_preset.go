@@ -16,14 +16,15 @@ import (
 // ModePreset captures all per-mode settings including device selection.
 // Fields matching DefaultsFor(mode) are omitted from YAML via pre-marshal zeroing in Save.
 type ModePreset struct {
-	Devices    []recent.PresetDevice `json:"devices,omitempty"     yaml:"devices,omitempty"`
-	Port       int                   `json:"port,omitempty"        yaml:"port,omitempty"`
-	Password   string                `json:"password,omitempty"    yaml:"password,omitempty"`
-	MaxClients int                   `json:"max_clients,omitempty" yaml:"max_clients,omitempty"`
-	TLS        bool                  `json:"tls,omitempty"         yaml:"tls,omitempty"`
-	TLSCert    string                `json:"tls_cert,omitempty"    yaml:"tls_cert,omitempty"`
-	TLSKey     string                `json:"tls_key,omitempty"     yaml:"tls_key,omitempty"`
-	LogLevel   string                `json:"log_level,omitempty"   yaml:"log_level,omitempty"`
+	Devices      []recent.PresetDevice      `json:"devices,omitempty"     yaml:"devices,omitempty"`
+	VirtualSinks []recent.VirtualSinkPreset `json:"virtual_sinks,omitempty" yaml:"virtual_sinks,omitempty"`
+	Port         int                        `json:"port,omitempty"        yaml:"port,omitempty"`
+	Password     string                     `json:"password,omitempty"    yaml:"password,omitempty"`
+	MaxClients   int                        `json:"max_clients,omitempty" yaml:"max_clients,omitempty"`
+	TLS          bool                       `json:"tls,omitempty"         yaml:"tls,omitempty"`
+	TLSCert      string                     `json:"tls_cert,omitempty"    yaml:"tls_cert,omitempty"`
+	TLSKey       string                     `json:"tls_key,omitempty"     yaml:"tls_key,omitempty"`
+	LogLevel     string                     `json:"log_level,omitempty"   yaml:"log_level,omitempty"`
 }
 
 // ServerPresets is the top-level preset container. Each mode is a self-contained snapshot.
@@ -133,7 +134,7 @@ func Load() ServerPresets {
 
 	// Seed each mode with devices from legacy shape + migrate settings block into it.
 	for mode, legacyPreset := range legacy.Presets {
-		mp := ModePreset{Devices: legacyPreset.Devices}
+		mp := ModePreset{Devices: legacyPreset.Devices, VirtualSinks: legacyPreset.VirtualSinks}
 		if hasLegacySettings {
 			if mp.Port == 0 {
 				mp.Port = legacy.Settings.Port
@@ -172,7 +173,13 @@ func Load() ServerPresets {
 	for mode, newMp := range newShape.Presets {
 		existing, ok := sp.Presets[mode]
 		if !ok {
-			existing = ModePreset{Devices: newMp.Devices}
+			existing = ModePreset{Devices: newMp.Devices, VirtualSinks: newMp.VirtualSinks}
+		}
+		if len(newMp.Devices) > 0 {
+			existing.Devices = newMp.Devices
+		}
+		if len(newMp.VirtualSinks) > 0 {
+			existing.VirtualSinks = newMp.VirtualSinks
 		}
 		if newMp.Port != 0 {
 			existing.Port = newMp.Port

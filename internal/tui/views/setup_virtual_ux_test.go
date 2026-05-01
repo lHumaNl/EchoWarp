@@ -78,18 +78,21 @@ func TestVirtualSinkCleanupPlanRespectsKeepLifecycle(t *testing.T) {
 	assert.True(t, plan.AllowNameFallback)
 }
 
-func TestVirtualSinkCleanupPlanDisallowsNameFallbackForPreExistingSink(t *testing.T) {
+func TestVirtualSinkCleanupPlanKeepsPreExistingSinkWithoutLifecycleConfig(t *testing.T) {
 	row := deviceRow{ID: 99, Name: echowarpSinkName, IsVirtual: true}
 	m := SetupModel{
-		outputDevices:      []deviceRow{row},
-		multiSelect:        map[string]DeviceRoleSet{row.selectKey(): {Playback: true}},
-		virtualSinkOnStop:  recent.SinkDelete,
-		virtualSinkOnStart: recent.SinkRecreate,
+		outputDevices:           []deviceRow{row},
+		multiSelect:             map[string]DeviceRoleSet{row.selectKey(): {Playback: true}},
+		virtualMicManagedModule: "42",
+		virtualSinkOnStop:       recent.SinkDelete,
+		virtualSinkOnStart:      recent.SinkRecreate,
+		virtualMicManageable:    true,
 	}
 
 	plan := m.VirtualSinkCleanupPlan()
 
-	assert.True(t, plan.Delete)
+	assert.False(t, plan.Delete)
+	assert.Empty(t, plan.ModuleID)
 	assert.False(t, plan.AllowNameFallback)
 }
 

@@ -110,6 +110,22 @@ func TestCollectPresetDevices_EchoWarpMonitorHasVirtualSinkPreset(t *testing.T) 
 	assert.Equal(t, recent.SinkRecreate, d.VirtualSink.OnStart)
 }
 
+func TestCollectPresetDevices_UncheckedMonitorPersistsVirtualLifecycle(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 10, Name: echowarpMonitorName, IsVirtual: true, IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{},
+	).WithVirtualSinkLifecycle(recent.SinkDelete, recent.SinkRecreate)
+
+	p := m.CollectPresetDevices()
+
+	assert.Empty(t, p.Devices)
+	require.Len(t, p.VirtualSinks, 1)
+	assert.Equal(t, echowarpSinkName, p.VirtualSinks[0].SinkName)
+	assert.Equal(t, recent.SinkDelete, p.VirtualSinks[0].OnStop)
+	assert.Equal(t, recent.SinkRecreate, p.VirtualSinks[0].OnStart)
+}
+
 func TestCollectPresetDevices_OnlySelectedDevicesIncluded(t *testing.T) {
 	m := newSetupModelForPresets(
 		[]deviceRow{
@@ -252,6 +268,21 @@ func TestCollectModePreset_IncludesDevicesAndServerFields(t *testing.T) {
 	assert.True(t, mp.TLS)
 	assert.Equal(t, "/etc/ssl/a.crt", mp.TLSCert)
 	assert.Equal(t, "/etc/ssl/a.key", mp.TLSKey)
+}
+
+func TestCollectModePreset_IncludesVirtualSinkLifecycleWithoutVirtualSelection(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 1, Name: "Mic", IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{selectKeyFor(1, "Mic", true): {Capture: true}},
+	).WithVirtualSinkLifecycle(recent.SinkDelete, recent.SinkRecreate)
+
+	mp := m.CollectModePreset("normal")
+
+	require.Len(t, mp.Devices, 1)
+	assert.Equal(t, "Mic", mp.Devices[0].Name)
+	require.Len(t, mp.VirtualSinks, 1)
+	assert.Equal(t, echowarpSinkName, mp.VirtualSinks[0].SinkName)
 }
 
 func TestMatchPresetDevices_VirtualSinkMatchesByName(t *testing.T) {

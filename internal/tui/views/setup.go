@@ -164,8 +164,9 @@ type SetupModel struct {
 	virtualMicManagedModule string // PulseAudio module ID for explicit user removal
 
 	// Virtual sink lifecycle preferences (set via overlay after creation)
-	virtualSinkOnStop  recent.SinkLifecycle // default: SinkDelete
-	virtualSinkOnStart recent.SinkLifecycle // default: SinkRecreate
+	virtualSinkOnStop              recent.SinkLifecycle // default: SinkDelete
+	virtualSinkOnStart             recent.SinkLifecycle // default: SinkRecreate
+	virtualSinkLifecycleConfigured bool                 // true after app-managed lifecycle setup
 
 	// Mix input: maps virtual output device selectKey → set of input device selectKeys
 	// whose audio should be mixed into that output.
@@ -371,6 +372,7 @@ func (m *SetupModel) refreshTrackedVirtualSinkAfterEnumeratorInstall() {
 func (m SetupModel) WithVirtualSinkLifecycle(onStop, onStart recent.SinkLifecycle) SetupModel {
 	m.virtualSinkOnStop = onStop
 	m.virtualSinkOnStart = onStart
+	m.virtualSinkLifecycleConfigured = true
 	return m
 }
 
@@ -380,6 +382,7 @@ func (m SetupModel) WithVirtualSinkCreatedForSession(moduleID string) SetupModel
 	m.virtualMicModule = moduleID
 	m.virtualMicManageable = true
 	m.virtualMicManagedModule = moduleID
+	m.virtualSinkLifecycleConfigured = true
 	return m
 }
 
@@ -403,7 +406,7 @@ func (m SetupModel) VirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
 	return VirtualSinkCleanupPlan{
 		Delete:            shouldDelete,
 		SinkName:          sinkName,
-		ModuleID:          m.virtualMicModule,
+		ModuleID:          m.virtualSinkCleanupModuleID(),
 		AllowNameFallback: m.virtualMicCreated,
 	}
 }
@@ -416,12 +419,14 @@ func (m *SetupModel) MarkVirtualSinkCleaned() {
 }
 
 func (m SetupModel) virtualSinkCleanupTarget() (string, bool) {
-	for _, vs := range m.SelectedVirtualSinkPresets() {
-		if vs.ModuleType == "module-null-sink" && vs.SinkName == echowarpSinkName {
-			return vs.SinkName, vs.OnStop == recent.SinkDelete
+	if m.virtualSinkLifecycleConfigured || m.virtualMicCreated {
+		for _, vs := range m.SelectedVirtualSinkPresets() {
+			if vs.ModuleType == "module-null-sink" && vs.SinkName == echowarpSinkName {
+				return vs.SinkName, vs.OnStop == recent.SinkDelete
+			}
 		}
 	}
-	if !m.virtualMicCreated && m.virtualMicModule == "" {
+	if !m.hasVirtualSinkCleanupCandidate() {
 		return echowarpSinkName, false
 	}
 	onStop := m.virtualSinkOnStop
@@ -429,6 +434,23 @@ func (m SetupModel) virtualSinkCleanupTarget() (string, bool) {
 		onStop = recent.SinkDelete
 	}
 	return echowarpSinkName, onStop == recent.SinkDelete
+}
+
+func (m SetupModel) virtualSinkCleanupModuleID() string {
+	if m.virtualMicModule != "" {
+		return m.virtualMicModule
+	}
+	if m.virtualSinkLifecycleConfigured {
+		return m.virtualMicManagedModule
+	}
+	return ""
+}
+
+func (m SetupModel) hasVirtualSinkCleanupCandidate() bool {
+	if m.virtualMicCreated || m.virtualMicModule != "" {
+		return true
+	}
+	return m.virtualSinkLifecycleConfigured && m.virtualMicManagedModule != ""
 }
 
 // SelectedVirtualSinkPresets returns VirtualSinkPreset entries for all currently

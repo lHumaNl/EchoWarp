@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
 )
 
@@ -107,6 +108,64 @@ func TestDuplicateEchoWarpPresetEntriesCreateSingleSink(t *testing.T) {
 	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
 }
 
+func TestLifecycleOnlyPresetRecreatesMissingVirtualSink(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{VirtualSinks: []recent.VirtualSinkPreset{
+		*virtualSinkPreset(recent.SinkRecreate),
+	}}
+
+	cmd := m.autoRestore(preset, "normal")
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+	assert.True(t, m.virtualSinkLifecycleConfigured)
+}
+
+func TestLifecycleOnlyPresetExistingSinkCleanupPlanDeletesManagedModule(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	stub.foundModuleID = "42"
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{VirtualSinks: []recent.VirtualSinkPreset{
+		*virtualSinkPreset(recent.SinkRecreate),
+	}}
+
+	cmd := m.autoRestore(preset, "normal")
+	plan := m.VirtualSinkCleanupPlan()
+
+	assert.Nil(t, cmd)
+	assert.Empty(t, stub.createdNames)
+	assert.True(t, plan.Delete)
+	assert.Equal(t, "42", plan.ModuleID)
+	assert.False(t, plan.AllowNameFallback)
+}
+
+func TestClientRestoreWithOnlyVirtualLifecycleBypassesEmptyDeviceReturn(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	preset := recent.DevicePreset{VirtualSinks: []recent.VirtualSinkPreset{
+		*virtualSinkPreset(recent.SinkRecreate),
+	}}
+	m.recentServers = []recent.Server{selectedPresetServer(preset)}
+
+	cmd := m.tryShowRestoreOverlay("127.0.0.1", 4415, "normal")
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+}
+
+func TestServerRestoreWithOnlyVirtualLifecycleBypassesEmptyDeviceReturn(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel()
+	serverPresets := presetServerWithVirtualLifecycle()
+	m.serverPresets = &serverPresets
+
+	cmd := m.tryShowServerRestoreOverlay()
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+}
+
 func TestRefreshInjectionAfterAutoRecreateSelectsMonitor(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	m := newInputOnlyRestoreModel()
@@ -187,6 +246,21 @@ func TestInputOnlyInferredMonitorRecreateCreatesSink(t *testing.T) {
 	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
 	assert.Equal(t, SetupOverlayNone, m.overlay)
 	assert.Nil(t, m.restoreOverlay)
+}
+
+func TestExplicitRemoveClearsVirtualLifecyclePersistence(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	stub.foundModuleID = "42"
+	m := virtualAudioTestModel(nil).WithVirtualSinkLifecycle(recent.SinkDelete, recent.SinkRecreate)
+	m.virtualMicManagedModule = "42"
+	m.virtualMicManageable = true
+
+	require.NoError(t, m.removeManagedVirtualMic())
+	preset := m.CollectPresetDevices()
+
+	assert.Equal(t, []string{"42"}, stub.removedIDs)
+	assert.Empty(t, preset.VirtualSinks)
+	assert.False(t, m.virtualSinkLifecycleConfigured)
 }
 
 func TestHiddenOutputRecreateRunsBeforeSelectionMatchSkip(t *testing.T) {
@@ -281,6 +355,20 @@ func newInputOnlyRestoreModel() SetupModel {
 func virtualAudioTestModel(outputs []deviceRow) SetupModel {
 	field := NewActionField("virtual_mic", "", "Create Virtual Audio Device ▸")
 	return SetupModel{Fields: []SetupField{field}, outputDevices: outputs}
+}
+
+func selectedPresetServer(preset recent.DevicePreset) recent.Server {
+	return recent.Server{
+		Address: "127.0.0.1",
+		Port:    4415,
+		Presets: map[string]recent.DevicePreset{"normal": preset},
+	}
+}
+
+func presetServerWithVirtualLifecycle() preset.ServerPresets {
+	return preset.ServerPresets{Presets: map[string]preset.ModePreset{
+		"normal": {VirtualSinks: []recent.VirtualSinkPreset{*virtualSinkPreset(recent.SinkRecreate)}},
+	}}
 }
 
 func virtualSinkPreset(onStart recent.SinkLifecycle) *recent.VirtualSinkPreset {

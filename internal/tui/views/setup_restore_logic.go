@@ -52,7 +52,7 @@ func (m *SetupModel) tryShowRestoreOverlay(addr string, port int, mode string) t
 			return nil
 		}
 		preset, ok := rs.Presets[mode]
-		if !ok || len(preset.Devices) == 0 {
+		if !ok || presetIsEmpty(preset) {
 			return nil
 		}
 
@@ -92,11 +92,11 @@ func (m *SetupModel) tryShowServerRestoreOverlay() tea.Cmd {
 	}
 
 	p := m.serverPresets.Get(mode)
-	if p == nil || len(p.Devices) == 0 {
+	if p == nil || modePresetIsEmpty(*p) {
 		return nil
 	}
 
-	devPreset := recent.DevicePreset{Devices: p.Devices}
+	devPreset := devicePresetFromModePreset(*p)
 	m.recreateMissingVirtualSinks(devPreset)
 
 	// Skip if current selection already matches the preset
@@ -226,7 +226,7 @@ func (m *SetupModel) applyRestore(preset recent.DevicePreset, skipVirtual bool) 
 				filtered = append(filtered, d)
 			}
 		}
-		filteredPreset = recent.DevicePreset{Devices: filtered}
+		filteredPreset = recent.DevicePreset{Devices: filtered, VirtualSinks: filteredPreset.VirtualSinks}
 	}
 
 	matched, unmatched := matchPresetDevices(filteredPreset, m.inputDevices, m.outputDevices)
@@ -271,18 +271,36 @@ func (m SetupModel) filterPresetForVisibleSections(preset recent.DevicePreset) r
 			filtered = append(filtered, pd)
 		}
 	}
-	return recent.DevicePreset{Devices: filtered}
+	return recent.DevicePreset{Devices: filtered, VirtualSinks: preset.VirtualSinks}
 }
 
 func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
 	seen := make(map[string]bool)
+	for _, vs := range preset.VirtualSinks {
+		m.recreateVirtualSink(vs, seen)
+	}
 	for _, pd := range preset.Devices {
 		vs, ok := recreateVirtualSinkPreset(pd)
-		if !ok || seen[vs.SinkName] {
-			continue
+		if ok {
+			m.recreateVirtualSink(*vs, seen)
 		}
-		seen[vs.SinkName] = true
-		m.createMissingVirtualSink(*vs)
+	}
+}
+
+func (m *SetupModel) recreateVirtualSink(vs recent.VirtualSinkPreset, seen map[string]bool) {
+	m.rememberVirtualSinkLifecycle(vs)
+	if vs.OnStart != recent.SinkRecreate || vs.SinkName == "" || seen[vs.SinkName] {
+		return
+	}
+	seen[vs.SinkName] = true
+	m.createMissingVirtualSink(vs)
+}
+
+func (m *SetupModel) rememberVirtualSinkLifecycle(vs recent.VirtualSinkPreset) {
+	if vs.ModuleType == "module-null-sink" && vs.SinkName == echowarpSinkName {
+		m.virtualSinkOnStop = vs.OnStop
+		m.virtualSinkOnStart = vs.OnStart
+		m.virtualSinkLifecycleConfigured = true
 	}
 }
 
@@ -295,6 +313,18 @@ func recreateVirtualSinkPreset(pd recent.PresetDevice) (*recent.VirtualSinkPrese
 		return nil, false
 	}
 	return vs, true
+}
+
+func presetIsEmpty(preset recent.DevicePreset) bool {
+	return len(preset.Devices) == 0 && len(preset.VirtualSinks) == 0
+}
+
+func modePresetIsEmpty(preset presetpkg.ModePreset) bool {
+	return len(preset.Devices) == 0 && len(preset.VirtualSinks) == 0
+}
+
+func devicePresetFromModePreset(preset presetpkg.ModePreset) recent.DevicePreset {
+	return recent.DevicePreset{Devices: preset.Devices, VirtualSinks: preset.VirtualSinks}
 }
 
 func isEchoWarpMonitorPreset(pd recent.PresetDevice) bool {
@@ -358,6 +388,7 @@ func (m *SetupModel) markVirtualSinkCreated(moduleID string, vs recent.VirtualSi
 	m.virtualMicManagedModule = moduleID
 	m.virtualSinkOnStop = vs.OnStop
 	m.virtualSinkOnStart = vs.OnStart
+	m.virtualSinkLifecycleConfigured = true
 }
 
 func (m *SetupModel) markVirtualSinkFound(moduleID string, vs recent.VirtualSinkPreset) {

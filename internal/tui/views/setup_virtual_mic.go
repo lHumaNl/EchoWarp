@@ -218,6 +218,12 @@ func (m *SetupModel) clearVirtualMicManageState() {
 	m.virtualMicManagedModule = ""
 }
 
+func (m *SetupModel) clearVirtualSinkLifecycleState() {
+	m.virtualSinkOnStop = ""
+	m.virtualSinkOnStart = ""
+	m.virtualSinkLifecycleConfigured = false
+}
+
 func (m *SetupModel) removeManagedVirtualMic() error {
 	moduleID, err := m.resolveVirtualMicModuleForRemoval()
 	if err != nil {
@@ -227,6 +233,7 @@ func (m *SetupModel) removeManagedVirtualMic() error {
 		return err
 	}
 	m.clearVirtualMicManageState()
+	m.clearVirtualSinkLifecycleState()
 	return nil
 }
 

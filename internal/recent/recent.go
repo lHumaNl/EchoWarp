@@ -18,7 +18,8 @@ const MaxEntries = 10
 
 // DevicePreset stores the device selection for a specific audio mode.
 type DevicePreset struct {
-	Devices []PresetDevice `json:"devices" yaml:"devices"`
+	Devices      []PresetDevice      `json:"devices" yaml:"devices"`
+	VirtualSinks []VirtualSinkPreset `json:"virtual_sinks,omitempty" yaml:"virtual_sinks,omitempty"`
 }
 
 // SinkLifecycle controls virtual sink behavior on start/stop.

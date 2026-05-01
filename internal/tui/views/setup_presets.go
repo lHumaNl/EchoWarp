@@ -59,7 +59,21 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 		}
 	}
 
-	return recent.DevicePreset{Devices: devices}
+	return recent.DevicePreset{Devices: devices, VirtualSinks: m.CollectVirtualSinkPresets()}
+}
+
+// CollectVirtualSinkPresets returns app-managed virtual sink lifecycle settings.
+// It is independent from device selection so unchecking EchoWarp does not drop
+// Delete/Recreate lifecycle state from persisted presets.
+func (m SetupModel) CollectVirtualSinkPresets() []recent.VirtualSinkPreset {
+	if !m.shouldPersistVirtualSinkLifecycle() {
+		return nil
+	}
+	return []recent.VirtualSinkPreset{*m.defaultVirtualSinkPreset()}
+}
+
+func (m SetupModel) shouldPersistVirtualSinkLifecycle() bool {
+	return m.virtualSinkLifecycleConfigured || m.virtualMicCreated
 }
 
 func isEchoWarpMonitorDevice(d deviceRow) bool {
@@ -98,7 +112,7 @@ func virtualSinkPresetWithLifecycle(onStop, onStart recent.SinkLifecycle) *recen
 func (m *SetupModel) CollectModePreset(mode string) preset.ModePreset {
 	_ = mode // mode is part of the API surface; default-omission happens in preset.Save.
 	devices := m.CollectPresetDevices().Devices
-	mp := preset.ModePreset{Devices: devices}
+	mp := preset.ModePreset{Devices: devices, VirtualSinks: m.CollectVirtualSinkPresets()}
 
 	for _, f := range m.Fields {
 		switch f.Key {

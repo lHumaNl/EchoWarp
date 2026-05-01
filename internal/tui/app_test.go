@@ -644,6 +644,32 @@ func TestSaveRecentServerCmd_PreservesPresetsForOtherModes(t *testing.T) {
 	assert.Equal(t, "OldDevice", presets["duplex"].Devices[0].Name)
 }
 
+func TestSaveRecentServerCmd_PreservesVirtualLifecycleWithOnlyRealMic(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	cfg := config.Config{Mode: config.ModeClient, Address: "10.0.0.1", Port: 4415}
+	presetWithMic := recent.DevicePreset{
+		Devices: []recent.PresetDevice{{ID: 1, Name: "Mic", IsInput: true}},
+		VirtualSinks: []recent.VirtualSinkPreset{{
+			ModuleType: "module-null-sink",
+			SinkName:   "EchoWarp",
+			OnStop:     recent.SinkDelete,
+			OnStart:    recent.SinkRecreate,
+		}},
+	}
+
+	cmd := saveRecentServerCmd(cfg, nil, nil, presetWithMic, "normal")
+	_ = cmd()
+
+	servers, _ := recent.Load()
+	normal := servers[0].Presets["normal"]
+
+	require.Len(t, normal.Devices, 1)
+	require.Len(t, normal.VirtualSinks, 1)
+	assert.Equal(t, "Mic", normal.Devices[0].Name)
+	assert.Equal(t, "EchoWarp", normal.VirtualSinks[0].SinkName)
+}
+
 func TestSaveServerPresetCmd_PersistsPreset(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)

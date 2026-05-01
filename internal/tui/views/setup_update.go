@@ -754,6 +754,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			case VSLifecycleSave:
 				m.virtualSinkOnStop = m.virtualSinkLifecycleOverlay.OnStop()
 				m.virtualSinkOnStart = m.virtualSinkLifecycleOverlay.OnStart()
+				m.virtualSinkLifecycleConfigured = true
 				m.overlay = SetupOverlayNone
 				m.virtualSinkLifecycleOverlay = nil
 				flashCmd := m.SetFlash("✓ Virtual audio device created — EchoWarp", 3*time.Second)
@@ -762,6 +763,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				// Use defaults
 				m.virtualSinkOnStop = recent.SinkDelete
 				m.virtualSinkOnStart = recent.SinkRecreate
+				m.virtualSinkLifecycleConfigured = true
 				m.overlay = SetupOverlayNone
 				m.virtualSinkLifecycleOverlay = nil
 				flashCmd := m.SetFlash("✓ Virtual audio device created — EchoWarp", 3*time.Second)

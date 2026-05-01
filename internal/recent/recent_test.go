@@ -316,6 +316,39 @@ func TestVirtualSinkPresetYAMLRoundtrip(t *testing.T) {
 	assert.Nil(t, preset.Devices[1].VirtualSink)
 }
 
+func TestTopLevelVirtualSinkPresetYAMLRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	servers := []Server{{
+		Address: "10.0.0.1", Port: 4415, Hostname: "A",
+		LastConnected: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Presets: map[string]DevicePreset{"normal": {
+			Devices:      []PresetDevice{{ID: 1, Name: "Mic", IsInput: true}},
+			VirtualSinks: []VirtualSinkPreset{echoWarpVirtualSinkPreset()},
+		}},
+	}}
+	require.NoError(t, Save(servers))
+
+	loaded, err := Load()
+	require.NoError(t, err)
+	preset := loaded[0].Presets["normal"]
+
+	require.Len(t, preset.Devices, 1)
+	require.Len(t, preset.VirtualSinks, 1)
+	assert.Equal(t, "EchoWarp", preset.VirtualSinks[0].SinkName)
+	assert.Equal(t, SinkRecreate, preset.VirtualSinks[0].OnStart)
+}
+
+func echoWarpVirtualSinkPreset() VirtualSinkPreset {
+	return VirtualSinkPreset{
+		ModuleType: "module-null-sink",
+		SinkName:   "EchoWarp",
+		OnStop:     SinkDelete,
+		OnStart:    SinkRecreate,
+	}
+}
+
 func TestVirtualSinkPresetYAML_BackwardCompat_NoVirtualSink(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ECHOWARP_CONFIG_DIR", dir)

@@ -68,6 +68,55 @@ func TestSaveLoadRoundtrip(t *testing.T) {
 	assert.Equal(t, uint32(42), loaded.Presets["reverse"].Devices[0].ID)
 }
 
+func TestSaveLoadTopLevelVirtualSinksRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	input := ServerPresets{Presets: map[string]ModePreset{"normal": {
+		Devices:      []recent.PresetDevice{{ID: 1, Name: "Mic", IsInput: true}},
+		VirtualSinks: []recent.VirtualSinkPreset{serverTestVirtualSinkPreset()},
+	}}}
+	require.NoError(t, Save(input))
+
+	loaded := Load()
+	normal := loaded.Presets["normal"]
+
+	require.Len(t, normal.Devices, 1)
+	require.Len(t, normal.VirtualSinks, 1)
+	assert.Equal(t, "EchoWarp", normal.VirtualSinks[0].SinkName)
+	assert.Equal(t, recent.SinkRecreate, normal.VirtualSinks[0].OnStart)
+}
+
+func TestLoadLifecycleOnlyModePreset(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+	yamlData := `presets:
+    normal:
+        virtual_sinks:
+            - module_type: module-null-sink
+              sink_name: EchoWarp
+              on_stop: delete
+              on_start: recreate
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "server_presets.yaml"), []byte(yamlData), 0600))
+
+	loaded := Load()
+	normal := loaded.Presets["normal"]
+
+	assert.Empty(t, normal.Devices)
+	require.Len(t, normal.VirtualSinks, 1)
+	assert.Equal(t, "EchoWarp", normal.VirtualSinks[0].SinkName)
+}
+
+func serverTestVirtualSinkPreset() recent.VirtualSinkPreset {
+	return recent.VirtualSinkPreset{
+		ModuleType: "module-null-sink",
+		SinkName:   "EchoWarp",
+		OnStop:     recent.SinkDelete,
+		OnStart:    recent.SinkRecreate,
+	}
+}
+
 func TestSaveCreatesDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "dir")
 	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
