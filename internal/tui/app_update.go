@@ -217,6 +217,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForParticipantPause(m.participantPauseCh)
 
+	case PeerMuteMsg:
+		m.peerMutedByServer = bool(msg)
+		return m, waitForPeerMute(m.peerMuteCh)
+
 	case ConferenceParticipantsMsg:
 		if m.pausedParticipants == nil {
 			m.pausedParticipants = make(map[string]bool)
@@ -312,6 +316,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamingStartedMsg:
 		m.statsCh = msg.statsCh
 		m.errCh = msg.errCh
+		m.peerMutedByServer = false
 		if msg.serverStoppedCh != nil {
 			m.serverStoppedCh = msg.serverStoppedCh
 		}
@@ -366,6 +371,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.participantPauseCh != nil {
 			batchCmds = append(batchCmds, waitForParticipantPause(m.participantPauseCh))
 		}
+		if m.peerMuteCh != nil {
+			batchCmds = append(batchCmds, waitForPeerMute(m.peerMuteCh))
+		}
 		if m.conferencePartsCh != nil {
 			batchCmds = append(batchCmds, waitForConferenceParticipants(m.conferencePartsCh))
 		}
@@ -373,12 +381,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamingEndedMsg:
 		m.cleanupVirtualSinks()
+		m.peerMutedByServer = false
 		m.quitting = true
 		return m, tea.Quit
 
 	case ServerStoppedMsg:
 		// Server sent ActionStop — clean up virtual sinks and transition.
 		m.cleanupVirtualSinks()
+		m.peerMutedByServer = false
 		m.screen = ScreenServerStopped
 		m.autoReconnect = m.config.AutoReconnect
 		m.autoReconnectAttempts = m.config.AutoReconnectAttempts
@@ -693,7 +703,7 @@ func (m Model) proceedWithStart(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		m.conference = true
 		m.serverMuted = m.config.ServerMuted
 		m.muteState = NewMuteState()
-	} else if m.config.MaxClients > 1 && !m.multiClient {
+	} else if m.config.Mode == config.ModeServer && m.config.MaxClients > 1 && !m.multiClient {
 		m.multiClient = true
 	}
 

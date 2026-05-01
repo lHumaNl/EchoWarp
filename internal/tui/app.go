@@ -173,8 +173,10 @@ type Model struct {
 	conferenceStates   []audio.ParticipantState
 	participantCmdCh   chan<- ParticipantCommand
 	serverMuted        bool
+	peerMutedByServer  bool
 	muteState          *MuteState  // per-participant and mute-all tracking
 	serverMuteCh       chan<- bool // sends mute toggle to client app (non-conference mode)
+	peerMuteCh         <-chan bool // receives server-initiated outgoing mute state
 	pauseCh            chan<- bool // sends pause toggle to client app (true=pause, false=resume)
 	pauseState         *PauseState // per-device pause tracking (nil if no capture devices)
 	allPausedNotified  bool        // tracks whether ActionPause was sent (to avoid duplicate sends)
@@ -417,6 +419,12 @@ func (m Model) WithDeviceChanges(ch <-chan DeviceChangeMsg) Model {
 // WithServerMuteChannel sets the channel for sending server mute toggle requests to the client app.
 func (m Model) WithServerMuteChannel(ch chan<- bool) Model {
 	m.serverMuteCh = ch
+	return m
+}
+
+// WithPeerMuteChannel receives server-initiated mute state for this client's outgoing audio.
+func (m Model) WithPeerMuteChannel(ch <-chan bool) Model {
+	m.peerMuteCh = ch
 	return m
 }
 

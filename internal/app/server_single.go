@@ -582,7 +582,7 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 	}()
 
 	readyCh := make(chan struct{})
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil, playbackGainCtl, playbackAGC, readyCh)
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil, playbackGainCtl, playbackAGC, readyCh, nil)
 	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone, readyCh)
 
 	s.logger.Info("Jitter buffer enabled (intercept path)",
@@ -912,18 +912,22 @@ func (s *ServerApp) handleDCControl(raw []byte, connStart time.Time, nickname st
 		return true
 	case transport.ActionPeerMute:
 		s.clientMuted.Store(true)
+		s.setSingleClientMuted(true)
 		s.logger.Info(nickname + " muted server audio")
 		return false
 	case transport.ActionPeerUnmute:
 		s.clientMuted.Store(false)
+		s.setSingleClientMuted(false)
 		s.logger.Info(nickname + " unmuted server audio")
 		return false
 	case transport.ActionPause, transport.ActionPauseAll:
 		s.clientPaused.Store(true)
+		s.setSingleClientPaused(true)
 		s.logger.Info(nickname + " paused capture")
 		return false
 	case transport.ActionResume, transport.ActionResumeAll:
 		s.clientPaused.Store(false)
+		s.setSingleClientPaused(false)
 		s.logger.Info(nickname + " resumed capture")
 		return false
 	}
@@ -931,7 +935,33 @@ func (s *ServerApp) handleDCControl(raw []byte, connStart time.Time, nickname st
 	return false
 }
 
+func (s *ServerApp) setSingleClientMuted(muted bool) {
+	s.mu.RLock()
+	mc := s.clients["client-1"]
+	s.mu.RUnlock()
+	if mc != nil {
+		mc.muted.Store(muted)
+	}
+}
+
+func (s *ServerApp) setSingleClientPaused(paused bool) {
+	s.mu.RLock()
+	mc := s.clients["client-1"]
+	s.mu.RUnlock()
+	if mc != nil {
+		mc.paused.Store(paused)
+	}
+}
+
+type capturePipelineOptions struct {
+	HandleDeviceCommands bool
+}
+
 func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte) error {
+	return s.runCapturePipelineWithOptions(ctx, sendCh, capturePipelineOptions{HandleDeviceCommands: true})
+}
+
+func (s *ServerApp) runCapturePipelineWithOptions(ctx context.Context, sendCh chan<- []byte, opts capturePipelineOptions) error {
 	encCfg := EncoderConfig{
 		Bitrate:     s.cfg.OpusBitrate,
 		Complexity:  s.cfg.OpusComplexity,
@@ -978,7 +1008,9 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
 			RecordingTap:  recTap,
 		}, s.logger)
-		go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
+		if opts.HandleDeviceCommands {
+			go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
+		}
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -1026,6 +1058,8 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		GainControl:          gainCtl,
 	}, s.logger)
 
-	go HandleDeviceCommands(ctx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
+	if opts.HandleDeviceCommands {
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
+	}
 	return pipeline.Run(ctx, sendCh)
 }

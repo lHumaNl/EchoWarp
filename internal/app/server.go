@@ -59,6 +59,15 @@ type ServerApp struct {
 	// AEC processor shared between capture and playback pipelines in duplex mode.
 	aec *audio.AECProcessor
 
+	// monitorMixer owns the single server-side monitor playback mix used by
+	// multi-client duplex. It is intentionally server-level: all client receive
+	// sources feed one local playback stream and one AEC reference.
+	monitorMixer        *ServerMonitorMixer
+	monitorMixerMu      sync.Mutex
+	monitorPlayerStart  monitorPlayerStarter
+	monitorPlaybackGain *DeviceGainControl
+	monitorPlaybackAGC  map[uint32]*audio.AGCProcessor
+
 	// Spectrum analyzer for TUI visualization (optional).
 	// Used for playback/decode path (incoming audio).
 	spectrum *audio.SpectrumAnalyzer
@@ -81,6 +90,18 @@ type ServerApp struct {
 
 	// Recording command channel for receiving start/stop commands from TUI.
 	recordingCmdCh <-chan RecordingCommand
+
+	// captureHub is the single shared capture goroutine for non-conference
+	// multi-client send paths. Created lazily for DirectionSend and DirectionDuplex
+	// unless more than one explicit capture device requires legacy fallback;
+	// per-client encoders subscribe and apply per-client gain before encoding.
+	captureHub     *SharedCaptureHub
+	captureHubMu   sync.Mutex
+	captureHubGain *DeviceGainControl
+	captureHubAGC  map[uint32]*audio.AGCProcessor
+	// newSharedCaptureHub optionally overrides shared hub construction in tests.
+	// Nil uses NewSharedCaptureHub.
+	newSharedCaptureHub func(CapturePipelineConfig, *slog.Logger) *SharedCaptureHub
 
 	// Non-conference recording support (shared with ClientApp via mixin).
 	RecordingMixin
@@ -147,10 +168,10 @@ type ServerApp struct {
 	onClientLeave func(clientID string)
 
 	// deviceCmdCh is the internal channel into which device control commands
-	// (mute/volume) are pushed by HandleDeviceCommand. A consumer goroutine
-	// that actually applies the commands to the mixer is wired up by the CLI
-	// / task 013 — the app layer only owns the buffered channel so the API
-	// layer has a non-blocking place to deliver commands.
+	// (mute/volume) are pushed by HandleDeviceCommand. Active audio paths wire the
+	// HandleDeviceCommands consumer that applies commands to capture, playback, or
+	// shared-capture gain controls, except legacy multi-device fallback which
+	// disables it to avoid multiple consumers; the app owns the buffered channel.
 	deviceCmdCh chan DeviceCommand
 
 	// participantCmdChAPI is the internal channel into which participant
@@ -186,6 +207,18 @@ type multiClient struct {
 	mutedOutgoing atomic.Bool           // Server-initiated mute: server stops sending audio to this client.
 	mutedIncoming atomic.Bool           // Server-initiated mute: server stops receiving audio from this client.
 	paused        atomic.Bool           // Per-client pause: client paused its capture.
+
+	// clientGain controls per-client output volume when the server streams to
+	// this client via SharedCaptureHub. Nil when per-client gain is not
+	// applicable, such as conference mode or the legacy multi-device fallback
+	// that still uses runCapturePipelineWithOptions per client.
+	clientGainMu sync.RWMutex
+	clientGain   *DeviceGainControl
+
+	// incomingGain controls per-client input volume for reverse receive paths.
+	// It is separate from clientGain so normal outgoing volume remains unchanged.
+	incomingGainMu sync.RWMutex
+	incomingGain   *DeviceGainControl
 }
 
 // NewServerApp creates a new server application with the given configuration.

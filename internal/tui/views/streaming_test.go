@@ -1,6 +1,7 @@
 package views
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,27 @@ func TestStreamingView_PausedState(t *testing.T) {
 	})
 
 	assert.Contains(t, result, "PAUSED")
+}
+
+func TestStreamingView_AdditiveStatusBadges(t *testing.T) {
+	result := StreamingView(StreamingParams{
+		Stats:         transport.ConnectionStats{State: "connected"},
+		StartTime:     time.Now(),
+		Paused:        true,
+		SourcePaused:  true,
+		IncomingMuted: true,
+		PeerMutedYou:  true,
+		Width:         80,
+		Height:        24,
+	})
+
+	badges := []string{"[PAUSED]", "[SOURCE PAUSED]", "[INCOMING MUTED]", "[PEER MUTED YOU]"}
+	previous := -1
+	for _, badge := range badges {
+		current := strings.Index(result, badge)
+		assert.Greater(t, current, previous, "badge order: %s", badge)
+		previous = current
+	}
 }
 
 func TestStreamingView_ReverseDirection(t *testing.T) {

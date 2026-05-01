@@ -101,6 +101,8 @@ type ClientApp struct {
 	// serverMutedIncoming is set when server mutes incoming from this client.
 	// The capture pipeline checks this and drops encoded frames when true.
 	serverMutedIncoming atomic.Bool
+	// serverPeerMuteCh notifies TUI that the server muted/unmuted our outgoing audio.
+	serverPeerMuteCh chan<- bool
 
 	// incomingMuted is toggled via MuteController.SetMuted (daemon API
 	// POST /api/v1/mute). When set, the jitter playback pump zeros
@@ -298,6 +300,12 @@ func (c *ClientApp) WithServerMuteChannel(ch <-chan bool) *ClientApp {
 	return c
 }
 
+// WithServerPeerMuteChannel sends server-initiated outgoing mute state to TUI.
+func (c *ClientApp) WithServerPeerMuteChannel(ch chan<- bool) *ClientApp {
+	c.serverPeerMuteCh = ch
+	return c
+}
+
 // WithPauseChannel sets the channel for receiving capture pause toggle requests from TUI.
 func (c *ClientApp) WithPauseChannel(ch <-chan bool) *ClientApp {
 	c.pauseCh = ch
@@ -437,6 +445,10 @@ func (c *ClientApp) Run(ctx context.Context) error {
 	// Reset kick/ban state from any previous session.
 	c.kickedByServer.Store(false)
 	c.bannedByServer.Store(false)
+	c.serverMutedIncoming.Store(false)
+	c.notifyServerPeerMute(false)
+	defer c.serverMutedIncoming.Store(false)
+	defer c.notifyServerPeerMute(false)
 
 	// Probe server to get/refresh audio parameters before connecting.
 	// On reconnect this detects config changes since the last session.
@@ -976,6 +988,16 @@ func (c *ClientApp) handleSignalingMessage(msg transport.SignalingMessage, peer 
 	return false
 }
 
+func (c *ClientApp) notifyServerPeerMute(muted bool) {
+	if c.serverPeerMuteCh == nil {
+		return
+	}
+	select {
+	case c.serverPeerMuteCh <- muted:
+	default:
+	}
+}
+
 // handleDCControl processes a raw control message received via WebRTC DataChannel.
 // Returns true if the session should end (e.g. stop action).
 func (c *ClientApp) handleDCControl(raw []byte) bool {
@@ -1059,11 +1081,13 @@ func (c *ClientApp) handleDCControl(raw []byte) bool {
 	case transport.ActionMuteIncoming:
 		c.logger.Info("[MUTED BY SERVER] incoming — server stopped receiving our audio")
 		c.serverMutedIncoming.Store(true)
+		c.notifyServerPeerMute(true)
 		return false
 
 	case transport.ActionUnmuteIncoming:
 		c.logger.Info("[UNMUTED BY SERVER] incoming — server resumed receiving our audio")
 		c.serverMutedIncoming.Store(false)
+		c.notifyServerPeerMute(false)
 		return false
 
 	case transport.ActionParticipantsUpdate:
