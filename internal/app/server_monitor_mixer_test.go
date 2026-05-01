@@ -378,6 +378,9 @@ func newTestDuplexMultiServer(t *testing.T, logger *slog.Logger) (*ServerApp, *a
 		logger = testAppLogger()
 	}
 	app := NewServerApp(cfg, logger, nil, nil, nil)
+	installFakeSharedCaptureHub(app, func() *fakeSharedCapturer {
+		return &fakeSharedCapturer{}
+	})
 	starts := &atomic.Int32{}
 	app.monitorPlayerStart = func(ctx context.Context, _ *slog.Logger, _ config.Config, ch <-chan []float32, _ chan<- error, _ <-chan struct{}, startupCh chan<- error) {
 		starts.Add(1)

@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-var simdMu sync.Mutex
+var simdMu sync.RWMutex
 
 // mixFunc is the function signature for audio sample accumulation.
 type mixFunc func(dst, src []float32)
@@ -38,6 +38,12 @@ func init() {
 // selectSIMD detects CPU features and assigns the best available implementations.
 // Priority: AVX (8 floats/op) > SSE (4 floats/op) > NEON (4 floats/op) > Pure Go.
 func selectSIMD() {
+	simdMu.Lock()
+	defer simdMu.Unlock()
+	selectSIMDLocked()
+}
+
+func selectSIMDLocked() {
 	// x86_64: AVX (Sandy Bridge+, 256-bit, 8 floats per op)
 	if cpu.X86.HasAVX {
 		mixAccumulateFn = mixAccumulateAVX
@@ -89,34 +95,45 @@ func DisableSIMD() {
 
 // EnableSIMD re-enables hardware SIMD dispatch based on CPU capabilities.
 func EnableSIMD() {
-	simdMu.Lock()
-	defer simdMu.Unlock()
 	selectSIMD()
 }
 
 // MixAccumulate adds src samples to dst samples (dst[i] += src[i]).
 func MixAccumulate(dst, src []float32) {
-	mixAccumulateFn(dst, src)
+	simdMu.RLock()
+	fn := mixAccumulateFn
+	simdMu.RUnlock()
+	fn(dst, src)
 }
 
 // MixGain applies gain to all samples in dst (dst[i] *= gain).
 func MixGain(dst []float32, gain float32) {
-	mixGainFn(dst, gain)
+	simdMu.RLock()
+	fn := mixGainFn
+	simdMu.RUnlock()
+	fn(dst, gain)
 }
 
 // MixTanh applies tanh soft clipping to prevent distortion.
 // Uses Pade approximant with clamping to [-1, 1] fused into each implementation.
 func MixTanh(dst []float32) {
-	mixTanhFn(dst)
+	simdMu.RLock()
+	fn := mixTanhFn
+	simdMu.RUnlock()
+	fn(dst)
 }
 
 // HasSIMDSupport returns true if SIMD optimizations are active.
 func HasSIMDSupport() bool {
+	simdMu.RLock()
+	defer simdMu.RUnlock()
 	return hasSIMDSupport
 }
 
 // SIMDLevel returns the active SIMD level ("AVX", "SSE", "NEON", or "none").
 func SIMDLevel() string {
+	simdMu.RLock()
+	defer simdMu.RUnlock()
 	return simdLevel
 }
 

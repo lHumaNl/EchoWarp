@@ -215,6 +215,12 @@ func newSharedCaptureTestServer(t *testing.T, newCapturer func() *fakeSharedCapt
 	cfg.Devices = []config.DeviceEntry{{ID: 1, Role: config.RoleCapture, Volume: 1.0}}
 
 	app := NewServerApp(cfg, testHubLogger(), nil, nil, nil)
+	created := installFakeSharedCaptureHub(app, newCapturer)
+
+	return app, created
+}
+
+func installFakeSharedCaptureHub(app *ServerApp, newCapturer func() *fakeSharedCapturer) *atomic.Int32 {
 	created := &atomic.Int32{}
 	app.newSharedCaptureHub = func(cfg CapturePipelineConfig, logger *slog.Logger) *SharedCaptureHub {
 		created.Add(1)
@@ -225,8 +231,7 @@ func newSharedCaptureTestServer(t *testing.T, newCapturer func() *fakeSharedCapt
 		}
 		return hub
 	}
-
-	return app, created
+	return created
 }
 
 func fullPCMFrame(sampleRate, channels uint32, sample float32) []float32 {

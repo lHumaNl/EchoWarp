@@ -436,6 +436,9 @@ func TestServerApp_SetupMultiClientAudio_Success(t *testing.T) {
 	t.Parallel()
 	cfg := testMultiClientConfig()
 	app := NewServerApp(cfg, testMultiClientLogger(), nil, nil, nil)
+	installFakeSharedCaptureHub(app, func() *fakeSharedCapturer {
+		return &fakeSharedCapturer{}
+	})
 
 	peer := transport.NewWebRTCPeer(transport.DirectionSend)
 	err := peer.CreatePeerConnection(transport.ICEConfig{})

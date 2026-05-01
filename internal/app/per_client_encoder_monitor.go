@@ -108,16 +108,25 @@ func newPerClientEncoderMonitor(cfg PerClientEncoderConfig, sub *CaptureSubscrip
 	}
 	clientID := nonEmptyString(cfg.ClientID, sub.clientID)
 	nickname := nonEmptyString(cfg.Nickname, clientID)
+	interval := durationOrDefault(cfg.InstrumentationInterval, perClientLagLogInterval)
 	return &perClientEncoderMonitor{
 		clientID: clientID, nickname: nickname, logger: logger, sub: sub, stats: stats,
-		interval:     durationOrDefault(cfg.InstrumentationInterval, perClientLagLogInterval),
+		interval:     interval,
 		heartbeat:    durationOrDefault(cfg.HeartbeatInterval, perClientHeartbeatInterval),
 		encodeWarn:   durationOrDefault(cfg.EncodeWarnThreshold, perClientEncodeWarnThreshold),
 		sendWaitWarn: durationOrDefault(cfg.SendWaitWarnThreshold, perClientSendWaitThreshold),
 		muted:        cfg.Muted,
 		paused:       cfg.Paused,
-		nextLog:      time.Now().Add(durationOrDefault(cfg.InstrumentationInterval, perClientLagLogInterval)),
+		nextLog:      initialPerClientLagLogTime(interval),
 	}
+}
+
+func initialPerClientLagLogTime(interval time.Duration) time.Time {
+	now := time.Now()
+	if interval <= time.Nanosecond {
+		return now
+	}
+	return now.Add(interval)
 }
 
 func (m *perClientEncoderMonitor) HeartbeatInterval() time.Duration {

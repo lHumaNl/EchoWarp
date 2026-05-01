@@ -248,15 +248,6 @@ func logPlayerSilenceFills(ctx context.Context, logger *slog.Logger, player sile
 	}
 }
 
-func logPlayerSilenceDelta(logger *slog.Logger, player silenceFillCounter, prev *uint64) {
-	cur := player.SilenceFills()
-	delta := cur - *prev
-	*prev = cur
-	if delta > 0 {
-		logger.Info("Player silence-fill events", "in_last_2s", delta, "total", cur)
-	}
-}
-
 func logPlayerDiagnosticsTick(logger *slog.Logger, player silenceFillCounter, diagnostics *clientPlaybackDiagnostics, previous *playerDiagnosticsPrevious) {
 	playerSnapshot := playerDiagnosticsSnapshot(player)
 	logSilenceFillWarning(logger, playerSnapshot, previous)

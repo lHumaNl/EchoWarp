@@ -117,7 +117,7 @@ func TestPerClientEncoder_AudioLagInstrumentationLogsQueueDepth(t *testing.T) {
 
 	hub := NewSharedCaptureHub(CapturePipelineConfig{}, testHubLogger())
 	sub := hub.Subscribe("client-1")
-	for i := 0; i < 3; i++ {
+	for i := 0; i < sub.QueueCapacity(); i++ {
 		hub.dispatch(fullPCMFrame(48000, 1, 0.25))
 	}
 
@@ -136,6 +136,7 @@ func TestPerClientEncoder_AudioLagInstrumentationLogsQueueDepth(t *testing.T) {
 	packet := waitForPerClientPacket(t, done, sendCh)
 	require.NotEmpty(t, packet)
 	require.Eventually(t, func() bool { return stats.Snapshot().QueueMaxDepth > 0 }, time.Second, time.Millisecond)
+	hub.dispatch(fullPCMFrame(48000, 1, 0.25))
 
 	record := waitForSlogRecord(t, logs, "Per-client audio pipeline lag")
 	assert.Equal(t, "client-1", record["clientID"])

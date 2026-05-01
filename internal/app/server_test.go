@@ -252,6 +252,9 @@ func TestServerApp_SetupAudioPipeline_SendMode(t *testing.T) {
 	cfg := testServerConfig()
 	cfg.Reverse = false
 	app := NewServerApp(cfg, testAppLogger(), nil, nil, nil)
+	installFakeSharedCaptureHub(app, func() *fakeSharedCapturer {
+		return &fakeSharedCapturer{}
+	})
 
 	peer := transport.NewWebRTCPeer(transport.DirectionSend)
 	err := peer.CreatePeerConnection(transport.ICEConfig{})

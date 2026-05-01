@@ -113,6 +113,38 @@ func TestDisableSIMD(t *testing.T) {
 	assert.Equal(t, origHas, HasSIMDSupport())
 }
 
+func TestSIMDStateConcurrentAccess(t *testing.T) {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	defer EnableSIMD()
+	go func() {
+		defer close(stopped)
+		toggleSIMDUntilDone(done)
+	}()
+
+	for i := 0; i < 1000; i++ {
+		_ = SIMDLevel()
+		_ = HasSIMDSupport()
+		dst := []float32{1, 2, 3, 4}
+		MixGain(dst, 0.5)
+		MixTanh(dst)
+	}
+	close(done)
+	<-stopped
+}
+
+func toggleSIMDUntilDone(done <-chan struct{}) {
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			DisableSIMD()
+			EnableSIMD()
+		}
+	}
+}
+
 func BenchmarkMixAccumulate_Pure(b *testing.B) {
 	dst := make([]float32, 1920)
 	src := make([]float32, 1920)

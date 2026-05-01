@@ -102,15 +102,23 @@ func runPerClientEncoder(
 				metrics.AudioBytesSent.Add(float64(len(encoded)))
 				sendStart := time.Now()
 				if err := safeSend(ctx, sendCh, encoded); err != nil {
-					monitor.RecordSendWait(time.Since(sendStart))
+					monitor.RecordSendWait(elapsedSince(sendStart))
 					monitor.LogCurrentIfUseful()
 					return err
 				}
-				monitor.RecordSendWait(time.Since(sendStart))
+				monitor.RecordSendWait(elapsedSince(sendStart))
 				monitor.LogIfDue(time.Now())
 			}
 		}
 	}
+}
+
+func elapsedSince(start time.Time) time.Duration {
+	duration := time.Since(start)
+	if duration <= 0 {
+		return time.Nanosecond
+	}
+	return duration
 }
 
 // applyPerClientGain returns samples with per-client volume applied. Returns
