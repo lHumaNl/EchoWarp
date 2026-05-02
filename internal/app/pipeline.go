@@ -34,10 +34,20 @@ type CapturePipelineConfig struct {
 	// AEC: acoustic echo cancellation processor (optional, injected externally).
 	AEC *audio.AECProcessor
 
+	// AGC: automatic gain control processor (optional, injected externally).
+	AGC *audio.AGCProcessor
+
 	// Spectrum analyzer fed from capture PCM (optional).
 	Spectrum *audio.SpectrumAnalyzer
 	// Level meter fed from capture PCM (optional).
 	LevelMeter *audio.LevelMeter
+
+	// RecordingTap is called with each captured PCM frame (after AEC/AGC)
+	// for non-conference recording. May be nil.
+	RecordingTap func([]float32)
+
+	// GainControl provides atomic volume/mute for single-device mode (no mixer).
+	GainControl *DeviceGainControl
 }
 
 // CapturePipeline captures PCM audio from a device, accumulates frames to the
@@ -121,6 +131,34 @@ func (p *CapturePipeline) Run(ctx context.Context, sendCh chan<- []byte) error {
 				if aecErr == nil {
 					samples = processed
 				}
+			}
+			// Apply AGC if enabled: normalize volume levels.
+			if p.cfg.AGC != nil {
+				processed, agcErr := p.cfg.AGC.Process(ctx, samples)
+				if agcErr == nil {
+					samples = processed
+				}
+			}
+			// Apply device gain/mute (single-device mode without mixer).
+			if p.cfg.GainControl != nil {
+				if p.cfg.GainControl.IsMuted() {
+					for i := range samples {
+						samples[i] = 0
+					}
+				} else if gain := p.cfg.GainControl.Gain(); gain != 1.0 {
+					audio.MixGain(samples, gain)
+					// Soft-clip when amplifying to avoid hard-clip distortion.
+					if gain > 1.0 {
+						audio.MixTanh(samples)
+					}
+				}
+			}
+			// Recording tap: feed post-AEC/AGC/gain PCM to the recorder.
+			// Tap must consume synchronously without retaining the slice,
+			// so no defensive copy is needed — the frame is then handed
+			// off to the accumulator below which copies into its own buffers.
+			if p.cfg.RecordingTap != nil {
+				p.cfg.RecordingTap(samples)
 			}
 			if p.cfg.Spectrum != nil {
 				p.cfg.Spectrum.Feed(samples)

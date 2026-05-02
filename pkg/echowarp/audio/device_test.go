@@ -3,6 +3,7 @@ package audio
 import (
 	"testing"
 
+	"github.com/gen2brain/malgo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -106,4 +107,19 @@ func TestDeviceManager_Context_AfterClose(t *testing.T) {
 
 	ctx := dm.Context()
 	assert.Nil(t, ctx)
+}
+
+func TestMalgoDeviceBackendID_UsesPrintableNativeID(t *testing.T) {
+	var id malgo.DeviceID
+	copy(id[:], "sink_echo.monitor")
+
+	assert.Equal(t, "sink_echo.monitor", malgoDeviceBackendID(id))
+}
+
+func TestMalgoDeviceBackendID_FallsBackToHexForBinaryID(t *testing.T) {
+	var id malgo.DeviceID
+	id[0] = 0x01
+	id[1] = 0xff
+
+	assert.Equal(t, "01ff", malgoDeviceBackendID(id))
 }

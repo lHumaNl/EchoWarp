@@ -72,12 +72,14 @@ func TestApplyProbeToConfig_ZeroValues(t *testing.T) {
 		SampleRate:  48000,
 		Channels:    2,
 		OpusBitrate: 64000,
+		MaxClients:  3,
 	}
 	probe := &ProbeServerResult{
 		Mode:        "normal",
 		SampleRate:  0,
 		Channels:    0,
 		OpusBitrate: 0,
+		MaxClients:  0,
 	}
 
 	err := ApplyProbeToConfig(cfg, probe)
@@ -86,6 +88,16 @@ func TestApplyProbeToConfig_ZeroValues(t *testing.T) {
 	assert.Equal(t, uint32(48000), cfg.SampleRate)
 	assert.Equal(t, uint32(2), cfg.Channels)
 	assert.Equal(t, 64000, cfg.OpusBitrate)
+	assert.Equal(t, 3, cfg.MaxClients)
+}
+
+func TestApplyProbeToConfig_MaxClients(t *testing.T) {
+	cfg := &config.Config{MaxClients: 1}
+	probe := &ProbeServerResult{Mode: "normal", MaxClients: 4}
+
+	err := ApplyProbeToConfig(cfg, probe)
+	require.NoError(t, err)
+	assert.Equal(t, 4, cfg.MaxClients)
 }
 
 func TestApplyProbeToConfig_PasswordRequired(t *testing.T) {

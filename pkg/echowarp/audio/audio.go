@@ -8,6 +8,7 @@ import "context"
 type AudioDevice struct {
 	ID         uint32
 	Name       string
+	BackendID  string // Native backend identifier (for example PulseAudio sink/source name), if available.
 	IsInput    bool
 	Channels   uint32
 	SampleRate uint32

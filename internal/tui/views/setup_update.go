@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/recent"
 )
 
 // Update handles input for the setup screen.
@@ -102,10 +102,10 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 	case ServerSelectedMsg:
 		// Fill Address/Port from selected server (SourceDefault so no ✓ until probe succeeds)
 		for i := range m.Fields {
-			switch m.Fields[i].Label {
-			case "Server address":
+			switch m.Fields[i].Key {
+			case "server_address":
 				m.Fields[i].SetValue(msg.Entry.Address, SourceDefault)
-			case "Port":
+			case "port":
 				m.Fields[i].SetValue(fmt.Sprintf("%d", msg.Entry.Port), SourceDefault)
 			}
 		}
@@ -113,6 +113,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		// force a fresh probe to pick up server-side changes.
 		if msg.Entry.ProbeResult != nil {
 			// Apply cached result for now (UI stays responsive)
+			m.resetClientSelectionOnProbeChange(msg.Entry.Address, msg.Entry.Port, msg.Entry.ProbeResult)
 			m.probeResult = msg.Entry.ProbeResult
 			m.probeStatus = "probing"
 			m.probeError = ""
@@ -149,6 +150,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		if selectedEntry != nil {
 			if selectedEntry.ProbeResult != nil {
 				// This is the currently selected server — apply probe result to fields
+				m.resetClientSelectionOnProbeChange(selectedEntry.Address, selectedEntry.Port, selectedEntry.ProbeResult)
 				m.probeResult = selectedEntry.ProbeResult
 				m.probeStatus = "ok"
 				m.probeError = ""
@@ -167,7 +169,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 				m.probeStatus = "error"
 				m.probeError = "⚠ server went offline"
 				for i := range m.Fields {
-					if m.Fields[i].Label == "Server address" {
+					if m.Fields[i].Key == "server_address" {
 						m.Fields[i].Hint = "⚠ server went offline"
 						break
 					}
@@ -195,6 +197,8 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 		m.serverList.UpdateProbeResult(msg.Addr, msg.Result, msg.Err)
 
 		if msg.Result != nil {
+			probeHost, probedPort := probeAddressFromFields(m.Fields, msg.Addr)
+			m.resetClientSelectionOnProbeChange(probeHost, probedPort, msg.Result)
 			m.probeStatus = "ok"
 			m.probeError = ""
 			m.probeResult = msg.Result
@@ -209,7 +213,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			m.applyFieldDependencies()
 			// Update address hint
 			for i := range m.Fields {
-				if m.Fields[i].Label == "Server address" {
+				if m.Fields[i].Key == "server_address" {
 					hint := "✓ Server reachable"
 					if msg.Result.ServerName != "" {
 						hint += " (" + msg.Result.ServerName + ")"
@@ -223,10 +227,10 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			// Try to show restore overlay for manually entered server
 			var probeAddr, probePort string
 			for _, f := range m.Fields {
-				if f.Label == "Server address" {
+				if f.Key == "server_address" {
 					probeAddr = f.Value
 				}
-				if f.Label == "Port" {
+				if f.Key == "port" {
 					probePort = f.Value
 				}
 			}
@@ -240,7 +244,7 @@ func (m SetupModel) Update(msg tea.Msg) (SetupModel, tea.Cmd) {
 			m.probeError = "⚠ Server unavailable"
 			m.probeResult = nil
 			for i := range m.Fields {
-				if m.Fields[i].Label == "Server address" {
+				if m.Fields[i].Key == "server_address" {
 					m.Fields[i].Hint = m.probeError
 				}
 			}
@@ -298,7 +302,7 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	}
 
 	// Priority 4: global shortcuts that should always work regardless of server list focus
-	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlL || msg.Type == tea.KeyCtrlH || msg.Type == tea.KeyCtrlY || msg.Type == tea.KeyCtrlE {
+	if msg.Type == tea.KeyCtrlS || msg.Type == tea.KeyCtrlL || msg.Type == tea.KeyCtrlH || msg.Type == tea.KeyCtrlY || msg.Type == tea.KeyCtrlE || msg.Type == tea.KeyCtrlW {
 		// Fall through to Priority 5 where these are handled
 		return m.handleGlobalShortcut(msg)
 	}
@@ -444,6 +448,11 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 
 	case tea.KeyLeft:
+		// In Devices column with AGC focus: go back to device select column
+		if m.activeColumn == ColumnDevices && m.unifiedDuplex && m.deviceColumn == 1 {
+			m.deviceColumn = 0
+			return m, nil
+		}
 		// In Settings column: switch to Devices column
 		if m.activeColumn == ColumnSettings {
 			// For client mode: block if no server ready
@@ -465,7 +474,32 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 
 	case tea.KeyRight:
-		// In Devices column: switch to Settings column
+		// In Devices column (unified): switch to AGC column if device is selected
+		if m.activeColumn == ColumnDevices && m.unifiedDuplex && m.deviceColumn == 0 {
+			dev := m.currentCursorDevice()
+			if dev != nil {
+				if _, ok := m.multiSelect[dev.selectKey()]; ok {
+					m.deviceColumn = 1
+					return m, nil
+				}
+			}
+			// Not selected — go to settings
+			m.activeColumn = ColumnSettings
+			if m.cfg.Mode == config.ModeClient && m.serverList.HasEntries() {
+				m.serverListFocused = true
+			}
+			return m, nil
+		}
+		// In Devices column AGC: switch to Settings column
+		if m.activeColumn == ColumnDevices && m.unifiedDuplex && m.deviceColumn == 1 {
+			m.deviceColumn = 0
+			m.activeColumn = ColumnSettings
+			if m.cfg.Mode == config.ModeClient && m.serverList.HasEntries() {
+				m.serverListFocused = true
+			}
+			return m, nil
+		}
+		// In Devices column (non-unified): switch to Settings column
 		if m.activeColumn == ColumnDevices {
 			m.activeColumn = ColumnSettings
 			if m.cfg.Mode == config.ModeClient && m.serverList.HasEntries() {
@@ -477,8 +511,21 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 	case tea.KeySpace, tea.KeyRunes:
 		// On Windows, Space arrives as KeyRunes with rune ' ' instead of KeySpace.
 		isSpace := msg.Type == tea.KeySpace || (msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == ' ')
+
+		// +/- volume adjustment in unified device column
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && m.activeColumn == ColumnDevices && m.unifiedDuplex {
+			r := msg.Runes[0]
+			if r == '+' || r == '=' || r == '-' {
+				return m.handleVolumeAdjust(r == '-')
+			}
+		}
+
 		if isSpace {
 			if m.activeColumn == ColumnDevices && m.unifiedDuplex {
+				// AGC column: toggle AGC
+				if m.deviceColumn == 1 {
+					return m.handleAGCToggle()
+				}
 				return m.handleMultiSelectToggle()
 			}
 			if m.activeColumn == ColumnSettings {
@@ -506,6 +553,12 @@ func (m SetupModel) handleKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 
 	case tea.KeyCtrlE:
 		return m.openVirtualMicOverlay()
+
+	case tea.KeyCtrlW:
+		langOverlay := NewLanguageOverlay()
+		m.languageOverlay = langOverlay
+		m.overlay = SetupOverlayLanguage
+		return m, nil
 
 	case tea.KeyCtrlY:
 		clipCmd := BuildCLICommand(m.BuildConfig(), true)
@@ -554,6 +607,11 @@ func (m SetupModel) handleGlobalShortcut(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		return m, flashCmd
 	case tea.KeyCtrlE:
 		return m.openVirtualMicOverlay()
+	case tea.KeyCtrlW:
+		langOverlay := NewLanguageOverlay()
+		m.languageOverlay = langOverlay
+		m.overlay = SetupOverlayLanguage
+		return m, nil
 	}
 	return m, nil
 }
@@ -585,33 +643,31 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			action := m.virtualDeviceOverlay.Update(msg)
 			switch action {
 			case VirtualActionCreate:
-				moduleID, err := createPulseAudioSink("EchoWarp")
-				if err != nil {
-					m.virtualDeviceOverlay.Error = err.Error()
+				vs := m.virtualDeviceOverlayPreset()
+				options := virtualSinkEnsureOptions{explicitCreate: true}
+				if err := m.ensureVirtualSink(vs, options); err != nil {
+					m.virtualDeviceOverlay.SetError(err)
 					return m, nil
 				}
-				m.virtualMicCreated = true
-				m.virtualMicModule = moduleID
-				m.overlay = SetupOverlayNone
+				m.pendingLifecycleSink = vs
 				m.virtualDeviceOverlay = nil
-				// Update field label
-				m.updateVirtualMicField(true)
-				// Refresh device list and auto-select
-				m.rebuildDeviceGroups()
-				m.autoSelectVirtualDevice("EchoWarp")
-				flashCmd := m.SetFlash("✓ Virtual mic created — EchoWarp", 3*time.Second)
-				return m, flashCmd
+				// Show lifecycle options overlay
+				m.virtualSinkLifecycleOverlay = NewVirtualSinkLifecycleOverlay()
+				m.overlay = SetupOverlayVirtualSinkLifecycle
+				return m, nil
 			case VirtualActionRemove:
-				if m.virtualMicModule != "" {
-					_ = removePulseAudioSink(m.virtualMicModule)
+				if err := m.removeManagedVirtualSink(m.virtualDeviceOverlay.SinkName); err != nil {
+					m.virtualDeviceOverlay.SetError(err)
+					return m, nil
 				}
-				m.virtualMicCreated = false
-				m.virtualMicModule = ""
 				m.overlay = SetupOverlayNone
 				m.virtualDeviceOverlay = nil
-				m.updateVirtualMicField(false)
+				m.updateVirtualMicField(m.virtualMicManageable)
+				// Re-enumerate devices from OS after sink removal
+				time.Sleep(200 * time.Millisecond)
+				m.refreshDevicesFromOS()
 				m.rebuildDeviceGroups()
-				flashCmd := m.SetFlash("Virtual mic removed", 3*time.Second)
+				flashCmd := m.SetFlash("Virtual audio device removed", 3*time.Second)
 				return m, flashCmd
 			case VirtualActionCancel:
 				m.overlay = SetupOverlayNone
@@ -698,6 +754,57 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			}
 		}
 
+	case SetupOverlayVirtualSinkLifecycle:
+		if m.virtualSinkLifecycleOverlay != nil {
+			action := m.virtualSinkLifecycleOverlay.Update(msg)
+			switch action {
+			case VSLifecycleSave:
+				m.virtualSinkOnStop = m.virtualSinkLifecycleOverlay.OnStop()
+				m.virtualSinkOnStart = m.virtualSinkLifecycleOverlay.OnStart()
+				m.virtualSinkLifecycleConfigured = true
+				m.applyPendingVirtualSinkLifecycle()
+				if err := m.persistVirtualSinkPolicy(); err != nil {
+					flashCmd := m.SetFlash("Save failed: "+err.Error(), 5*time.Second)
+					return m, flashCmd
+				}
+				m.overlay = SetupOverlayNone
+				m.virtualSinkLifecycleOverlay = nil
+				flashCmd := m.SetFlash(m.virtualSinkCreatedFlashMessage(), 3*time.Second)
+				return m, flashCmd
+			case VSLifecycleCancel:
+				// Use defaults
+				m.virtualSinkOnStop = recent.SinkDelete
+				m.virtualSinkOnStart = recent.SinkRecreate
+				m.virtualSinkLifecycleConfigured = true
+				m.applyPendingVirtualSinkLifecycle()
+				if err := m.persistVirtualSinkPolicy(); err != nil {
+					flashCmd := m.SetFlash("Save failed: "+err.Error(), 5*time.Second)
+					return m, flashCmd
+				}
+				m.overlay = SetupOverlayNone
+				m.virtualSinkLifecycleOverlay = nil
+				flashCmd := m.SetFlash(m.virtualSinkCreatedFlashMessage(), 3*time.Second)
+				return m, flashCmd
+			}
+		}
+
+	case SetupOverlayLanguage:
+		if m.languageOverlay != nil {
+			action := m.languageOverlay.Update(msg)
+			switch action {
+			case LanguageActionSelected:
+				m.overlay = SetupOverlayNone
+				m.languageOverlay = nil
+				// Fields use i18n.T() labels — rebuild to pick up new translations
+				m.Fields = buildMainFields(m.cfg)
+				m.AdvancedFields = buildAdvancedFields(m.cfg)
+				return m, nil
+			case LanguageActionCancel:
+				m.overlay = SetupOverlayNone
+				m.languageOverlay = nil
+			}
+		}
+
 	case SetupOverlayRestore:
 		if m.restoreOverlay != nil {
 			action := m.restoreOverlay.Update(msg)
@@ -746,7 +853,7 @@ func (m SetupModel) handleEditingKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 		}
 		m.writeBackFields(fields)
 		// Trigger server probe on address or port change (client mode)
-		if m.cfg.Mode == config.ModeClient && (f.Label == "Server address" || f.Label == "Port") {
+		if m.cfg.Mode == config.ModeClient && (f.Key == "server_address" || f.Key == "port") {
 			cmd := m.startProbeIfReady()
 			return m, cmd
 		}
@@ -782,12 +889,12 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 	// Client mode: server-driven fields are locked until probe succeeds
 	if m.cfg.Mode == config.ModeClient && m.probeResult == nil {
 		clientLocalFields := map[string]bool{
-			"Server address": true, "Port": true,
-			"Max reconnect": true,
-			"Log level":     true, "Echo cancellation": true,
-			"Use SIMD": true,
+			"server_address": true, "port": true,
+			"max_reconnect": true, "auto_reconnect": true, "reconnect_limit": true,
+			"log_level": true, "echo_cancellation": true,
+			"use_simd": true, "nickname": true,
 		}
-		if !clientLocalFields[f.Label] && f.Type != FieldAction {
+		if !clientLocalFields[f.Key] && f.Type != FieldAction {
 			return m, nil
 		}
 	}
@@ -795,11 +902,11 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 	switch f.Type {
 	case FieldText, FieldNumber:
 		// Block editing for fields locked by server probe
-		if f.Source == SourceAuto && f.Label != "Server address" {
+		if f.Source == SourceAuto && f.Key != "server_address" {
 			return m, nil
 		}
 		// Password not required by server — block editing
-		if f.Label == "Password" && f.Hint == "(not required)" {
+		if f.Key == "password" && f.Hint == "(not required)" {
 			return m, nil
 		}
 		f.StartEditing()
@@ -815,13 +922,16 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 		f.Toggle()
 		m.writeBackFields(fields)
 		m.applyFieldDependencies()
-		// Server mode: clear device selection and restore preset after mode change
-		if f.Label == "Mode" && m.cfg.Mode == config.ModeServer {
+		// Server mode: clear device selection, load per-mode preset / defaults, then
+		// try to auto-restore devices from the preset.
+		if f.Key == "mode" && m.cfg.Mode == config.ModeServer {
 			// Always clear device selections when switching modes —
 			// carrying over devices from another mode is incorrect.
 			m.multiSelect = make(map[string]DeviceRoleSet)
 			// Clear stale flash from previous mode's preset restore
 			m.flashMsg = ""
+			newMode := modeKeyFromValue(f.Value)
+			m.loadPresetForMode(newMode)
 			if restoreCmd := m.tryShowServerRestoreOverlay(); restoreCmd != nil {
 				return m, restoreCmd
 			}
@@ -841,16 +951,14 @@ func (m SetupModel) handleFieldActivation() (SetupModel, tea.Cmd) {
 		return m, nil
 
 	case FieldAction:
-		if strings.Contains(f.ActionLabel, "Advanced") {
+		if f.Key == "advanced" {
 			m.advancedOpen = !m.advancedOpen
 			f.ActionExpanded = m.advancedOpen
 			m.writeBackFields(fields)
 			return m, nil
 		}
-		if f.Label == "Virtual mic" {
-			m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicCreated, "EchoWarp")
-			m.overlay = SetupOverlayVirtualDevice
-			return m, nil
+		if f.Key == "virtual_mic" {
+			return m.openVirtualMicOverlay()
 		}
 		return m, nil
 	}

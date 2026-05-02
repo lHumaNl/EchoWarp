@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -34,6 +34,45 @@
 ---
 
 Audio auf einem Rechner aufnehmen und in Echtzeit über das Netzwerk auf einem anderen wiedergeben. EchoWarp nutzt WebRTC für den Transport und Opus für die Komprimierung und liefert latenzarmes Audio mit Ende-zu-Ende-Verschlüsselung.
+
+## Inhaltsverzeichnis
+
+- [Funktionen](#funktionen)
+- [Schnellstart](#schnellstart)
+- [Interaktives TUI](#interaktives-tui)
+  - [Einrichtungsbildschirm](#einrichtungsbildschirm)
+  - [LAN-Erkennung](#lan-erkennung)
+  - [Geräteprofile](#geräteprofile)
+  - [Streaming-Bildschirm](#streaming-bildschirm)
+  - [TUI-Tastaturkürzel](#tui-tastaturkürzel)
+- [Streaming-Modi](#streaming-modi)
+  - [Normal — Einweg: Server zu Clients](#normal-einweg-server-zu-clients)
+  - [Umgekehrt — Einweg: Clients zu Server](#umgekehrt-einweg-clients-zu-server)
+  - [Duplex — Bidirektional](#duplex-bidirektional)
+  - [Konferenz — Mehrbenutzer-Mixing (N:N)](#konferenz-mehrbenutzer-mixing-nn)
+  - [Modusübersicht](#modusübersicht)
+- [Audio-Routing-Leitfaden](#audio-routing-leitfaden)
+  - [Anwendungsfälle](#anwendungsfälle)
+  - [Loopback — Systemaudio aufnehmen](#loopback-systemaudio-aufnehmen)
+  - [Virtuelles Mikrofon — Audio an andere Apps weiterleiten](#virtuelles-mikrofon-audio-an-andere-apps-weiterleiten)
+  - [Lokales Mikrofon in die virtuelle Ausgabe mischen](#lokales-mikrofon-in-die-virtuelle-ausgabe-mischen)
+  - [Geräteabschnitte](#geräteabschnitte)
+  - [Diagnose](#diagnose)
+  - [FAQ](#faq)
+- [CLI-Modus](#cli-modus)
+  - [Modi](#modi)
+  - [Allgemeine Flags](#allgemeine-flags)
+  - [Konfigurationsdateien](#konfigurationsdateien)
+- [Installation](#installation)
+  - [Vorgefertigte Binaries](#vorgefertigte-binaries)
+  - [Aus dem Quellcode bauen](#aus-dem-quellcode-bauen)
+- [Systemanforderungen](#systemanforderungen)
+- [Netzwerk & Firewall](#netzwerk-firewall)
+  - [Server — zu öffnende Ports](#server-zu-öffnende-ports)
+  - [Client — keine eingehenden Ports erforderlich](#client-keine-eingehenden-ports-erforderlich)
+  - [LAN-Erkennung](#lan-erkennung-1)
+  - [NAT-Traversal (STUN / TURN)](#nat-traversal-stun-turn)
+- [Lizenz](#lizenz)
 
 ## Funktionen
 
@@ -342,6 +381,9 @@ Wenn kein virtueller Audiotreiber gefunden wird, zeigt der Doctor Installationsa
 **Ich möchte einen Gruppenanruf mit 3+ Geräten.**
 → Conference-Modus verwenden. Der Server fungiert als Hub (keine Geräte erforderlich). Jeder Client wählt ein Mikrofon und Lautsprecher. Alle hören alle anderen, abzüglich der eigenen Stimme.
 
+**Ich verwende Moonlight/Sunshine (oder NVIDIA GameStream) und möchte, dass mein Mikrofon in Spielen auf dem Host funktioniert.**
+→ Starten Sie `EchoWarp server` im Reverse-Modus auf dem Spiele-Host (Sunshine/GameStream-Rechner). Starten Sie `EchoWarp client` auf dem Moonlight-Rechner und wählen Sie Ihr Mikrofon unter Input. Auf dem Server wählen Sie ein virtuelles Audiogerät (BlackHole/VB-Cable) unter Output oder aktivieren Sie `--virtual-mic` zur automatischen Erstellung. Wählen Sie in Ihrem Spiel oder Voice-Chat auf dem Host dieses virtuelle Gerät als Mikrofon aus. Ihre Stimme vom Moonlight-Client erscheint als Mikrofoneingang auf dem Spiele-Host.
+
 **Ich möchte, dass Discord sowohl den Remote-Stream ALS AUCH meine Stimme über ein virtuelles Mikrofon hört.**
 → Auf dem Client ein virtuelles Gerät (BlackHole/VB-Cable) unter Output auswählen. Darunter erscheint eine Liste der Eingabegeräte — das eigene Mikrofon aktivieren. EchoWarp mischt den Stream und das Mikrofon in die virtuelle Ausgabe. In Discord das virtuelle Gerät als Mikrofon auswählen.
 
@@ -353,6 +395,20 @@ Wenn kein virtueller Audiotreiber gefunden wird, zeigt der Doctor Installationsa
 
 **Das virtuelle Gerät zeigt „adaptive" statt einer Abtastrate an.**
 → Das ist normal. Virtuelle Audiotreiber (BlackHole, VB-Cable) passen sich an die Abtastrate der verwendenden Anwendung an — die angezeigte Rate ist nicht aussagekräftig.
+
+<details>
+<summary>macOS: „EchoWarp kann nicht geöffnet werden" / Gatekeeper-Warnung</summary>
+
+macOS blockiert unsignierte Anwendungen. Um EchoWarp auszuführen:
+
+```bash
+xattr -cr /path/to/EchoWarp       # für die Binärdatei
+xattr -cr /path/to/EchoWarp.app   # für das .app-Bundle
+```
+
+Alternativ: **Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem erlauben"**
+
+</details>
 
 ## CLI-Modus
 

@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -34,6 +34,45 @@
 ---
 
 Thu âm trên một máy, phát lại trên máy khác — theo thời gian thực qua mạng. EchoWarp sử dụng WebRTC để truyền tải và Opus để nén, cung cấp âm thanh độ trễ thấp với mã hóa đầu cuối.
+
+## Mục lục
+
+- [Tính năng](#tính-năng)
+- [Bắt đầu nhanh](#bắt-đầu-nhanh)
+- [TUI Tương tác](#tui-tương-tác)
+  - [Màn hình thiết lập](#màn-hình-thiết-lập)
+  - [Khám phá LAN](#khám-phá-lan)
+  - [Hồ sơ thiết bị](#hồ-sơ-thiết-bị)
+  - [Màn hình truyền phát](#màn-hình-truyền-phát)
+  - [Phím tắt TUI](#phím-tắt-tui)
+- [Các Chế Độ Truyền Phát](#các-chế-độ-truyền-phát)
+  - [Normal — Một Chiều: Máy Chủ Đến Máy Khách](#normal-một-chiều-máy-chủ-đến-máy-khách)
+  - [Reverse — Một Chiều: Máy Khách Đến Máy Chủ](#reverse-một-chiều-máy-khách-đến-máy-chủ)
+  - [Duplex — Hai Chiều](#duplex-hai-chiều)
+  - [Conference — Trộn Đa Người Dùng (N:N)](#conference-trộn-đa-người-dùng-nn)
+  - [Tóm Tắt Chế Độ](#tóm-tắt-chế-độ)
+- [Hướng Dẫn Định Tuyến Âm Thanh](#hướng-dẫn-định-tuyến-âm-thanh)
+  - [Các Trường Hợp Sử Dụng](#các-trường-hợp-sử-dụng)
+  - [Loopback — Ghi Lại Âm Thanh Hệ Thống](#loopback-ghi-lại-âm-thanh-hệ-thống)
+  - [Microphone Ảo — Định Tuyến Âm Thanh Đến Các Ứng Dụng Khác](#microphone-ảo-định-tuyến-âm-thanh-đến-các-ứng-dụng-khác)
+  - [Trộn Microphone Cục Bộ Vào Đầu Ra Ảo](#trộn-microphone-cục-bộ-vào-đầu-ra-ảo)
+  - [Các Phần Thiết Bị](#các-phần-thiết-bị)
+  - [Chẩn Đoán](#chẩn-đoán)
+  - [Câu Hỏi Thường Gặp](#câu-hỏi-thường-gặp)
+- [Chế độ CLI](#chế-độ-cli)
+  - [Các chế độ](#các-chế-độ)
+  - [Các cờ thông dụng](#các-cờ-thông-dụng)
+  - [File cấu hình](#file-cấu-hình)
+- [Cài đặt](#cài-đặt)
+  - [File nhị phân dựng sẵn](#file-nhị-phân-dựng-sẵn)
+  - [Xây dựng từ mã nguồn](#xây-dựng-từ-mã-nguồn)
+- [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
+- [Mạng & Tường lửa](#mạng-tường-lửa)
+  - [Máy chủ — các cổng cần mở](#máy-chủ-các-cổng-cần-mở)
+  - [Máy khách — không cần mở cổng đến](#máy-khách-không-cần-mở-cổng-đến)
+  - [Khám phá mạng LAN](#khám-phá-mạng-lan)
+  - [Xuyên NAT (STUN / TURN)](#xuyên-nat-stun-turn)
+- [Giấy phép](#giấy-phép)
 
 ## Tính năng
 
@@ -342,6 +381,9 @@ Nếu không tìm thấy driver âm thanh ảo, doctor sẽ hiển thị hướn
 **Tôi muốn cuộc gọi nhóm với 3+ máy.**
 → Dùng chế độ Conference. Máy chủ đóng vai trò hub (không cần thiết bị). Mỗi client chọn mic và loa. Mọi người đều nghe được nhau, trừ giọng của chính mình.
 
+**Tôi sử dụng Moonlight/Sunshine (hoặc NVIDIA GameStream) và muốn microphone hoạt động trong game trên máy host.**
+→ Chạy `EchoWarp server` ở chế độ Reverse trên máy host game (máy Sunshine/GameStream). Chạy `EchoWarp client` trên máy Moonlight, chọn microphone của bạn trong Input. Trên server, chọn thiết bị âm thanh ảo (BlackHole/VB-Cable) trong Output, hoặc bật `--virtual-mic` để tạo tự động. Trong game hoặc voice chat trên máy host, chọn thiết bị ảo đó làm microphone. Giọng nói của bạn từ client Moonlight sẽ xuất hiện như đầu vào mic trên máy host game.
+
 **Tôi muốn Discord nghe cả luồng từ xa VÀ giọng nói của tôi qua một mic ảo.**
 → Trên máy khách, chọn thiết bị ảo (BlackHole/VB-Cable) trong Output. Danh sách thiết bị đầu vào sẽ xuất hiện bên dưới — đánh dấu microphone của bạn. EchoWarp sẽ trộn luồng từ xa và mic của bạn vào đầu ra ảo. Trong Discord, chọn thiết bị ảo đó làm microphone.
 
@@ -353,6 +395,20 @@ Nếu không tìm thấy driver âm thanh ảo, doctor sẽ hiển thị hướn
 
 **Thiết bị ảo hiển thị "adaptive" thay vì tần số lấy mẫu.**
 → Đây là bình thường. Driver âm thanh ảo (BlackHole, VB-Cable) tự thích nghi với tần số lấy mẫu mà ứng dụng sử dụng — tốc độ hiển thị không có ý nghĩa thực tế.
+
+<details>
+<summary>macOS: "Không thể mở EchoWarp" / cảnh báo Gatekeeper</summary>
+
+macOS chặn các ứng dụng chưa được ký. Để cho phép EchoWarp chạy:
+
+```bash
+xattr -cr /path/to/EchoWarp       # cho tệp nhị phân
+xattr -cr /path/to/EchoWarp.app   # cho gói .app
+```
+
+Hoặc: **Cài đặt Hệ thống → Quyền riêng tư & Bảo mật → "Cho phép"**
+
+</details>
 
 ## Chế độ CLI
 

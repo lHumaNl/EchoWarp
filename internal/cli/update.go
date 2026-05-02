@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/updater"
 )
 
@@ -24,7 +25,7 @@ func newUpdateCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Update EchoWarp to the latest version",
+		Short: i18n.T("cli_update_short"),
 		Long: `Update EchoWarp to the latest or a specific version from GitHub releases.
 
 Examples:

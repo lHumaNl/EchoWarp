@@ -288,6 +288,19 @@ func matchPresetDevices(preset recent.DevicePreset, inputDevices, outputDevices 
 
 	for _, pd := range preset.Devices {
 		found := false
+
+		// Virtual sink: match by sink name (ID is unstable across reboots).
+		if pd.VirtualSink != nil {
+			if d, ok := matchVirtualPresetDevice(pd, allDevices); ok {
+				matched = append(matched, d)
+				found = true
+			}
+			if !found {
+				unmatched = append(unmatched, pd.Name)
+			}
+			continue
+		}
+
 		// 1. Exact match: ID + Name + IsInput
 		for _, d := range allDevices {
 			if d.ID == pd.ID && d.Name == pd.Name && d.IsInput == pd.IsInput {
@@ -316,4 +329,62 @@ func matchPresetDevices(preset recent.DevicePreset, inputDevices, outputDevices 
 		unmatched = append(unmatched, pd.Name)
 	}
 	return matched, unmatched
+}
+
+func matchVirtualPresetDevice(pd recent.PresetDevice, devices []deviceRow) (deviceRow, bool) {
+	for _, d := range devices {
+		if d.IsInput == pd.IsInput && virtualPresetIdentityMatches(pd, d) {
+			return d, true
+		}
+	}
+	targetNames := virtualPresetDeviceNames(pd)
+	for _, d := range devices {
+		if d.IsInput == pd.IsInput && containsString(targetNames, d.Name) {
+			return d, true
+		}
+	}
+	return deviceRow{}, false
+}
+
+func virtualPresetIdentityMatches(pd recent.PresetDevice, d deviceRow) bool {
+	if pd.VirtualSink == nil {
+		return false
+	}
+	vs := *pd.VirtualSink
+	if vs.SinkName != "" && d.VirtualSinkName == vs.SinkName {
+		return true
+	}
+	return virtualSinkBackendIDMatches(d.BackendID, pd.IsInput, vs)
+}
+
+func virtualPresetDeviceNames(pd recent.PresetDevice) []string {
+	if pd.VirtualSink == nil {
+		return []string{pd.Name}
+	}
+	if pd.IsInput {
+		return uniqueStrings(virtualSinkCaptureName(*pd.VirtualSink), "Monitor of "+pd.VirtualSink.SinkName, pd.Name)
+	}
+	return uniqueStrings(virtualSinkPlaybackName(*pd.VirtualSink), pd.VirtualSink.SinkName, pd.Name)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueStrings(values ...string) []string {
+	seen := make(map[string]bool, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }

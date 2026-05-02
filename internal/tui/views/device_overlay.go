@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -18,6 +19,8 @@ type DeviceOverlayItem struct {
 	SampleRate uint32
 	BitDepth   uint32
 	Muted      bool
+	Volume     float64
+	AGC        bool
 }
 
 // DeviceOverlayParams contains the state needed to render the device overlay.
@@ -41,47 +44,50 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 		}
 	}
 
-	title := styles.AppTitle.Render("Devices")
+	title := styles.AppTitle.Render(i18n.T("overlay_device_title"))
 
 	var sections []string
 
-	// Input section
-	inputHeader := "🎤 Input"
-	if p.Section == 0 {
-		inputHeader = styles.SelectedItem.Render(inputHeader)
-	} else {
-		inputHeader = styles.Help.Render(inputHeader)
-	}
-	sections = append(sections, inputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
-
-	if len(inputs) == 0 {
-		sections = append(sections, styles.Help.Render("  (none)"))
-	} else {
+	// Input section (hidden when no input devices)
+	if len(inputs) > 0 {
+		inputHeader := i18n.T("overlay_device_input")
+		if p.Section == 0 {
+			inputHeader = styles.SelectedItem.Render(inputHeader)
+		} else {
+			inputHeader = styles.Help.Render(inputHeader)
+		}
+		sections = append(sections, inputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
 		for i, d := range inputs {
 			sections = append(sections, renderDeviceOverlayRow(d, p.Section == 0 && i == p.Selected))
 		}
 	}
 
-	sections = append(sections, "")
-
-	// Output section
-	outputHeader := "🔊 Output"
-	if p.Section == 1 {
-		outputHeader = styles.SelectedItem.Render(outputHeader)
-	} else {
-		outputHeader = styles.Help.Render(outputHeader)
+	// Spacer between sections when both are present.
+	if len(inputs) > 0 && len(outputs) > 0 {
+		sections = append(sections, "")
 	}
-	sections = append(sections, outputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
 
-	if len(outputs) == 0 {
-		sections = append(sections, styles.Help.Render("  (none)"))
-	} else {
+	// Output section (hidden when no output devices)
+	if len(outputs) > 0 {
+		outputHeader := i18n.T("overlay_device_output")
+		if p.Section == 1 {
+			outputHeader = styles.SelectedItem.Render(outputHeader)
+		} else {
+			outputHeader = styles.Help.Render(outputHeader)
+		}
+		sections = append(sections, outputHeader, styles.Help.Render("  "+strings.Repeat("─", 40)))
 		for i, d := range outputs {
 			sections = append(sections, renderDeviceOverlayRow(d, p.Section == 1 && i == p.Selected))
 		}
 	}
 
-	help := styles.Help.Render("Tab: section   ↑↓: select   Enter: mute/unmute   Esc: close")
+	// Build help line — only show Tab when both sections have devices.
+	helpParts := i18n.T("overlay_device_help")
+	if len(inputs) > 0 && len(outputs) > 0 {
+		helpParts += i18n.T("overlay_device_help_tab")
+	}
+	helpParts += i18n.T("overlay_device_help_close")
+	help := styles.Help.Render(helpParts)
 
 	content := title + "\n\n" + strings.Join(sections, "\n") + "\n\n" + help
 
@@ -119,33 +125,36 @@ func RenderDeviceOverlay(p DeviceOverlayParams) string {
 }
 
 func renderDeviceOverlayRow(d DeviceOverlayItem, selected bool) string {
+	// Treat 0% volume the same as explicit mute — both produce silence,
+	// so they should look identical to the user.
+	effectivelyMuted := d.Muted || d.Volume == 0
+
 	icon := "🔊"
-	if d.Muted {
+	if effectivelyMuted {
 		icon = "🔇"
 	}
-
-	info := formatDeviceOverlayInfo(d)
 
 	prefix := "  "
 	if selected {
 		prefix = styles.SelectedItem.Render(styles.CursorGlyph + " ")
 	}
 
-	return prefix + icon + " " + d.Name + "  " + styles.Help.Render(info)
-}
+	maxNameW := 20
+	name := TruncateToWidth(d.Name, maxNameW)
 
-func formatDeviceOverlayInfo(d DeviceOverlayItem) string {
-	ch := ""
-	if d.Channels > 0 {
-		ch = FormatChannels(d.Channels)
+	// Volume bar + percentage
+	volBar := renderVolumeBar(d.Volume)
+	volPct := fmt.Sprintf("%3d%%", int(d.Volume*100))
+	if effectivelyMuted {
+		volBar = styles.Help.Render("░░░░░░░░░░")
+		volPct = styles.Help.Render(i18n.T("overlay_device_mute_label"))
 	}
-	bd := ""
-	if d.BitDepth > 0 {
-		bd = formatBitDepth(d.BitDepth)
+
+	// AGC indicator
+	agcIndicator := "◇AGC"
+	if d.AGC {
+		agcIndicator = "◆AGC"
 	}
-	sr := ""
-	if d.SampleRate > 0 {
-		sr = formatSampleRate(d.SampleRate)
-	}
-	return fmt.Sprintf("%s %s %s", ch, bd, sr)
+
+	return prefix + icon + " " + name + "  " + volBar + " " + volPct + "  " + styles.Help.Render(agcIndicator)
 }

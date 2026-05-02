@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -10,18 +11,22 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
-// reportStats periodically sends connection statistics to the TUI stats channel.
-// Started immediately when the signaling loop begins (before DC ready), so the TUI
-// transitions to the streaming screen as soon as PeerConnection reaches "connected".
+const (
+	minPerClientVolume = float32(0)
+	maxPerClientVolume = float32(1.5)
+)
+
+// reportStats periodically sends connection statistics to the TUI stats channel
+// and/or the API stats hook (whichever sinks are configured). Started
+// immediately when the signaling loop begins (before DC ready), so the TUI
+// transitions to the streaming screen as soon as PeerConnection reaches
+// "connected" and the daemon's Node.Stats() reflects live bytes.
 func (s *ServerApp) reportStats(ctx context.Context, peer transport.PeerManager) {
-	if s.statsCh == nil {
+	if s.statsCh == nil && s.statsHook == nil {
 		return
 	}
 	// Send initial stat immediately.
-	select {
-	case s.statsCh <- peer.GetStats():
-	default:
-	}
+	s.publishStats(peer.GetStats())
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -29,28 +34,42 @@ func (s *ServerApp) reportStats(ctx context.Context, peer transport.PeerManager)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			select {
-			case s.statsCh <- peer.GetStats():
-			default:
-			}
+			s.publishStats(peer.GetStats())
 		}
 	}
 }
 
-// sendDisconnected sends a final "disconnected" stats update to the TUI.
-func (s *ServerApp) sendDisconnected() {
-	if s.statsCh == nil {
-		return
+// aggregateMultiStats folds per-client stats into a single ConnectionStats
+// suitable for the single-value statsHook sink. Sums BytesSent / BytesRecv /
+// PacketsLost across all connected clients and picks the max RTT/jitter to
+// give the API caller a conservative upper bound. The State field is set to
+// "connected" when at least one client is in a non-disconnected state.
+func (s *ServerApp) aggregateMultiStats(stats transport.MultiClientStats) transport.ConnectionStats {
+	agg := transport.ConnectionStats{}
+	for _, ci := range stats.Clients {
+		agg.BytesSent += ci.BytesSent
+		agg.BytesRecv += ci.BytesRecv
+		agg.PacketsLost += ci.PacketsLost
+		if ci.Jitter > agg.Jitter {
+			agg.Jitter = ci.Jitter
+		}
+		if ci.RoundTrip > agg.RoundTrip {
+			agg.RoundTrip = ci.RoundTrip
+		}
+		if ci.State != "" && ci.State != "disconnected" {
+			agg.State = "connected"
+		}
 	}
-	select {
-	case s.statsCh <- transport.ConnectionStats{State: "disconnected"}:
-	default:
-	}
+	return agg
 }
 
-// reportMultiStats periodically sends multi-client stats to the TUI.
+// reportMultiStats periodically sends multi-client stats to the TUI and/or
+// the API stats hook. In API-hook mode the per-client snapshot is folded
+// into a single ConnectionStats via aggregateMultiStats so the daemon's
+// Node.Stats() continues to expose a single number for
+// GET /api/v1/stats even in multi-client mode.
 func (s *ServerApp) reportMultiStats(ctx context.Context) {
-	if s.multiStatsCh == nil {
+	if s.multiStatsCh == nil && s.statsHook == nil {
 		return
 	}
 	ticker := time.NewTicker(time.Second)
@@ -61,9 +80,14 @@ func (s *ServerApp) reportMultiStats(ctx context.Context) {
 			return
 		case <-ticker.C:
 			stats := s.collectMultiClientStats()
-			select {
-			case s.multiStatsCh <- stats:
-			default:
+			if s.multiStatsCh != nil {
+				select {
+				case s.multiStatsCh <- stats:
+				default:
+				}
+			}
+			if s.statsHook != nil {
+				s.statsHook(s.aggregateMultiStats(stats))
 			}
 		}
 	}
@@ -144,6 +168,10 @@ func (s *ServerApp) processCommands(ctx context.Context) {
 				s.toggleMuteOutgoing(cmd.ClientID)
 			case ActionMuteIncoming:
 				s.toggleMuteIncoming(cmd.ClientID)
+			case ActionVolumeUp:
+				s.adjustClientVolume(cmd.ClientID, 0.1)
+			case ActionVolumeDown:
+				s.adjustClientVolume(cmd.ClientID, -0.1)
 			}
 		}
 	}
@@ -279,6 +307,83 @@ func (s *ServerApp) toggleMuteIncoming(clientID string) {
 	s.logger.Info("Toggled incoming mute", "clientID", clientID, "nickname", nick, "mutedIncoming", newVal)
 }
 
+// adjustClientVolume adjusts the per-client volume in the conference mixer by delta (±0.1).
+// In conference mode, uses the ConferenceMixer's per-participant volume control.
+func (s *ServerApp) adjustClientVolume(clientID string, delta float64) {
+	s.mu.RLock()
+	mc, ok := s.clients[clientID]
+	s.mu.RUnlock()
+	if !ok {
+		s.logger.Warn("AdjustVolume: client not found", "clientID", clientID)
+		return
+	}
+	nick := mc.nickname
+	if nick == "" {
+		nick = clientID
+	}
+
+	if s.conference != nil {
+		// Use conference mixer per-participant volume.
+		states := s.conference.GetParticipantStates()
+		for _, st := range states {
+			if st.ID != clientID {
+				continue
+			}
+			newVol := st.Volume + float32(delta)
+			if newVol > 2.0 {
+				newVol = 2.0
+			}
+			if newVol < 0 {
+				newVol = 0
+			}
+			s.conference.mixer.SetParticipantVolume(clientID, newVol)
+			s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", roundedLogVolume(float64(newVol)))
+			return
+		}
+		s.logger.Warn("AdjustVolume: participant not found in conference", "clientID", clientID)
+		return
+	}
+
+	// Non-conference multi-client: route to the per-client gain on the
+	// SharedCaptureHub subscriber. The gain pointer is guarded because it is set by
+	// startSharedCaptureClient when the per-client encoder starts.
+	clientGain := mc.getClientGain()
+	if clientGain != nil {
+		newVol := clampPerClientVolume(clientGain.Gain() + float32(delta))
+		clientGain.SetGain(newVol)
+		s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", roundedLogVolume(float64(newVol)))
+		return
+	}
+
+	incomingGain := mc.getIncomingGain()
+	if incomingGain != nil {
+		newVol := clampPerClientVolume(incomingGain.Gain() + float32(delta))
+		incomingGain.SetGain(newVol)
+		s.logger.Info("Client incoming volume adjusted", "clientID", clientID, "nickname", nick, "volume", roundedLogVolume(float64(newVol)))
+		return
+	}
+
+	s.logger.Info("Client volume adjusted (no per-client gain wired)", "clientID", clientID, "nickname", nick, "delta", roundedLogVolume(delta))
+}
+
+func roundedLogVolume(value float64) float64 {
+	rounded := math.Round(value*10) / 10
+	if rounded == 0 {
+		return 0
+	}
+	return rounded
+}
+
+func clampPerClientVolume(volume float32) float32 {
+	if volume > maxPerClientVolume {
+		return maxPerClientVolume
+	}
+	if volume < minPerClientVolume {
+		return minPerClientVolume
+	}
+	return volume
+}
+
 // processRecordingCommands handles recording start/stop commands from TUI.
 func (s *ServerApp) processRecordingCommands(ctx context.Context) {
 	if s.recordingCmdCh == nil {
@@ -293,13 +398,29 @@ func (s *ServerApp) processRecordingCommands(ctx context.Context) {
 				return
 			}
 			if cmd.Start {
-				if err := s.conference.StartRecording(cmd.Mode, s.cfg.SampleRate); err != nil {
-					s.logger.Error("Failed to start recording", "error", err)
+				if s.conference != nil {
+					if err := s.conference.StartRecording(cmd.Mode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
+						s.logger.Error("Failed to start recording", "error", err)
+					} else {
+						s.logger.Info("Recording started", "mode", cmd.Mode)
+					}
 				} else {
-					s.logger.Info("Recording started", "mode", cmd.Mode)
+					if err := s.startRecordingInternal(cmd.Mode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
+						s.logger.Error("Failed to start recording", "error", err)
+					} else {
+						s.logger.Info("Recording started", "mode", cmd.Mode)
+					}
 				}
 			} else {
-				dur, size, files, err := s.conference.StopRecording()
+				var dur time.Duration
+				var size uint64
+				var files int
+				var err error
+				if s.conference != nil {
+					dur, size, files, err = s.conference.StopRecording()
+				} else {
+					dur, size, files, err = s.stopRecordingInternal()
+				}
 				if err != nil {
 					s.logger.Error("Failed to stop recording", "error", err)
 				} else {
@@ -307,6 +428,18 @@ func (s *ServerApp) processRecordingCommands(ctx context.Context) {
 						"duration", dur.Round(time.Second),
 						"files", files,
 						"size", formatBytes(size))
+					// Send stop notification to TUI via conference stats channel.
+					if s.conferenceStatsCh != nil {
+						select {
+						case s.conferenceStatsCh <- ConferenceStatsPayload{
+							RecordingStopped:   true,
+							RecordingStopDur:   dur,
+							RecordingStopSize:  size,
+							RecordingStopFiles: files,
+						}:
+						default:
+						}
+					}
 				}
 			}
 		}
@@ -324,6 +457,12 @@ func (s *ServerApp) flushRecordingHeaders(ctx context.Context) {
 		case <-ticker.C:
 			if s.conference != nil && s.conference.IsRecording() {
 				s.conference.FlushHeaders()
+			}
+			s.recorderMu.Lock()
+			rec := s.recorder
+			s.recorderMu.Unlock()
+			if rec != nil && rec.IsActive() {
+				rec.FlushHeaders()
 			}
 		}
 	}

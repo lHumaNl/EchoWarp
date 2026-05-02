@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/pkg/echowarp"
 )
 
 func setupLoadTestDir(t *testing.T) string {
@@ -195,4 +196,23 @@ func TestConfigLoadOverlay_HintLoadConfig(t *testing.T) {
 	view := o.View(80)
 	assert.Contains(t, view, "enter: load")
 	assert.NotContains(t, view, "enter: load profile")
+}
+
+func TestApplyDeviceSelection_FallsBackToUniqueNameAndUsesCurrentDeviceKey(t *testing.T) {
+	m := newSetupModelForPresets(
+		nil,
+		[]deviceRow{{ID: 99, Name: "Playback Studio", IsVirtual: true}},
+		map[string]DeviceRoleSet{},
+	)
+	m.unifiedDuplex = true
+
+	m.applyDeviceSelection([]config.DeviceEntry{{
+		ID:   12,
+		Name: "Playback Studio",
+		Type: echowarp.DeviceOutput,
+		Role: echowarp.RolePlayback,
+	}})
+
+	assert.Contains(t, m.multiSelect, selectKeyFor(99, "Playback Studio", false))
+	assert.NotContains(t, m.multiSelect, selectKeyFor(12, "Playback Studio", false))
 }

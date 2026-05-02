@@ -85,6 +85,14 @@ type ConferenceStatsPayload struct {
 	States             []audio.ParticipantState
 	Recording          bool
 	PausedParticipants map[string]bool
+
+	// RecordingStopped is set on the first stats tick after a recording stop.
+	RecordingStopped    bool
+	RecordingStopDur    time.Duration
+	RecordingStopSize   uint64
+	RecordingStopFiles  int
+	RecordingStopDir    string
+	RecordingStopReason string
 }
 
 // ConferenceStatsMsg carries conference participant state updates from the server.
@@ -112,8 +120,16 @@ const (
 type RecordingCommand struct {
 	Start          bool // true=start, false=stop
 	Mode           views.RecordingMode
-	LocalDeviceIDs []string // selected local device IDs
+	LocalDeviceIDs []string // selected capture device IDs
+	PlaybackIDs    []string // selected playback device IDs
 	RemoteIDs      []string // selected remote source IDs
+}
+
+// RecordingStatusUpdate is sent from the app layer to TUI to update recording status.
+type RecordingStatusUpdate struct {
+	Dir      string // recording output directory
+	FileName string // primary file name
+	Size     uint64 // total size in bytes
 }
 
 // DeviceState holds the current display state of a capture/playback device.
@@ -121,8 +137,9 @@ type DeviceState struct {
 	ID           uint32
 	Name         string
 	Role         string  // "capture" or "playback"
-	Volume       float64 // 0.0–2.0
+	Volume       float64 // 0.0–1.5
 	Muted        bool
+	AGC          bool
 	Disconnected bool
 }
 
@@ -149,6 +166,9 @@ type ConferenceParticipantsMsg = app.ConferenceParticipantsMsg
 
 // ConferenceParticipantInfo holds participant data from a participants_update message.
 type ConferenceParticipantInfo = app.ConferenceParticipantInfo
+
+// PeerMuteMsg reports whether the remote side muted this client's outgoing audio.
+type PeerMuteMsg bool
 
 // KickedByServerMsg is sent when the server kicks this client.
 type KickedByServerMsg struct {

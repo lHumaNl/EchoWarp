@@ -252,6 +252,9 @@ func TestServerApp_SetupAudioPipeline_SendMode(t *testing.T) {
 	cfg := testServerConfig()
 	cfg.Reverse = false
 	app := NewServerApp(cfg, testAppLogger(), nil, nil, nil)
+	installFakeSharedCaptureHub(app, func() *fakeSharedCapturer {
+		return &fakeSharedCapturer{}
+	})
 
 	peer := transport.NewWebRTCPeer(transport.DirectionSend)
 	err := peer.CreatePeerConnection(transport.ICEConfig{})
@@ -1252,8 +1255,9 @@ func TestServerApp_SetupMultiClientAudio_ReceiveMode(t *testing.T) {
 	require.NoError(t, err)
 	defer peer.Close()
 
-	ctx := context.Background()
-	audioDone, ok := app.setupMultiClientAudio(ctx, peer, transport.DirectionReceive, "test-client")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	audioDone, ok := app.setupMultiClientAudio(ctx, ctx, peer, transport.DirectionReceive, "test-client")
 
 	assert.True(t, ok)
 	assert.NotNil(t, audioDone)
@@ -1264,14 +1268,18 @@ func TestServerApp_SetupMultiClientAudio_SendMode(t *testing.T) {
 	cfg := testServerConfig()
 	cfg.Reverse = false
 	app := NewServerApp(cfg, testAppLogger(), nil, nil, nil)
+	installFakeSharedCaptureHub(app, func() *fakeSharedCapturer {
+		return &fakeSharedCapturer{}
+	})
 
 	peer := transport.NewWebRTCPeer(transport.DirectionSend)
 	err := peer.CreatePeerConnection(transport.ICEConfig{})
 	require.NoError(t, err)
 	defer peer.Close()
 
-	ctx := context.Background()
-	audioDone, ok := app.setupMultiClientAudio(ctx, peer, transport.DirectionSend, "test-client")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	audioDone, ok := app.setupMultiClientAudio(ctx, ctx, peer, transport.DirectionSend, "test-client")
 
 	assert.True(t, ok)
 	assert.NotNil(t, audioDone)

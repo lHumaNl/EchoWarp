@@ -34,7 +34,7 @@ func (m SetupModel) tryStart() (SetupModel, tea.Cmd) {
 			// Find the field in activeFields, opening advanced if needed
 			isAdvanced := false
 			for _, af := range m.AdvancedFields {
-				if af.Label == f.Label {
+				if af.Key == f.Key {
 					isAdvanced = true
 					break
 				}
@@ -43,7 +43,7 @@ func (m SetupModel) tryStart() (SetupModel, tea.Cmd) {
 				m.advancedOpen = true
 			}
 			for idx, af := range m.activeFields() {
-				if af.Label == f.Label {
+				if af.Key == f.Key {
 					m.FieldCursor = idx
 					break
 				}
@@ -87,7 +87,7 @@ func (m SetupModel) tryStart() (SetupModel, tea.Cmd) {
 				role = config.RoleCapture
 			}
 			finalCfg.Devices = append(finalCfg.Devices, config.DeviceEntry{
-				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: 1.0,
+				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: dev.Volume, AGC: dev.AGC,
 			})
 		}
 
@@ -131,30 +131,30 @@ func (m SetupModel) tryStart() (SetupModel, tea.Cmd) {
 func (m SetupModel) BuildConfig() config.Config {
 	cfg := m.cfg
 	for _, f := range m.Fields {
-		switch f.Label {
-		case "Server address":
+		switch f.Key {
+		case "server_address":
 			cfg.Address = f.Value
-		case "Port":
+		case "port":
 			cfg.Port = f.IntValue()
-		case "Password":
+		case "password":
 			cfg.Password = f.Value
-		case "Max clients":
+		case "max_clients":
 			cfg.MaxClients = f.IntValue()
-		case "Mode":
-			modeKey := strings.SplitN(f.Value, " ", 2)[0]
+		case "mode":
+			modeKey := modeKeyFromValue(f.Value)
 			cfg.StreamMode = config.AudioMode(modeKey)
 			cfg.SyncFromStreamMode()
-		case "Max reconnect":
+		case "max_reconnect":
 			cfg.MaxReconnectAttempts = f.IntValue()
-		case "Max auth fail":
+		case "max_auth_fail":
 			cfg.MaxFailedAttempts = f.IntValue()
-		case "Nickname":
+		case "nickname":
 			cfg.Nickname = f.Value
-		case "Echo cancellation":
+		case "echo_cancellation":
 			cfg.AEC = f.Value == "on"
-		case "Auto reconnect":
+		case "auto_reconnect":
 			cfg.AutoReconnect = f.Value == "on"
-		case "Reconnect limit":
+		case "reconnect_limit":
 			cfg.AutoReconnectAttempts = f.IntValue()
 		}
 	}
@@ -188,7 +188,7 @@ func (m SetupModel) BuildConfig() config.Config {
 				role = config.RoleCapture
 			}
 			entry := config.DeviceEntry{
-				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: 1.0,
+				ID: dev.ID, Name: dev.Name, Type: devType, Role: role, Volume: dev.Volume, AGC: dev.AGC,
 			}
 			// Attach mix input for virtual output devices.
 			if !dev.IsInput && dev.IsVirtual {
@@ -208,38 +208,40 @@ func (m SetupModel) BuildConfig() config.Config {
 	}
 
 	for _, f := range m.AdvancedFields {
-		switch f.Label {
-		case "Log level":
+		switch f.Key {
+		case "log_level":
 			cfg.LogLevel = f.Value
-		case "TLS":
+		case "tls":
 			switch f.Value {
 			case "on":
 				cfg.TLS = true
 			default:
 				cfg.TLS = false
 			}
-		case "Sample rate":
+		case "sample_rate":
 			if v := parseSampleRate(f.Value); v > 0 {
 				cfg.SampleRate = v
 			}
-		case "Channels":
+		case "channels":
 			if f.Value == "mono" {
 				cfg.Channels = 1
 			} else {
 				cfg.Channels = 2
 			}
-		case "Opus bitrate":
+		case "opus_bitrate":
 			if v := parseBitrate(f.Value); v > 0 {
 				cfg.OpusBitrate = v
 			}
-		case "TLS Cert":
+		case "tls_cert":
 			cfg.TLSCert = f.Value
-		case "TLS Key":
+		case "tls_key":
 			cfg.TLSKey = f.Value
-		case "Use SIMD":
+		case "use_simd":
 			cfg.NoSIMDOptimization = f.Value == "off"
-		case "HWID collection":
+		case "hwid_collection":
 			cfg.HWIDRequired = f.Value == "on"
+		case "rate_limit":
+			cfg.RateLimit = f.IntValue()
 		}
 	}
 	return cfg
@@ -253,9 +255,9 @@ func (m *SetupModel) applyLoadedConfig(cfg config.Config) {
 	defaults := config.DefaultConfig()
 
 	// Helper: set field value with SourceConfig if different from default value, else SourceDefault.
-	setField := func(fields []SetupField, label, value, defaultValue string) {
+	setField := func(fields []SetupField, key, value, defaultValue string) {
 		for i := range fields {
-			if fields[i].Label == label {
+			if fields[i].Key == key {
 				if value != defaultValue {
 					fields[i].SetValue(value, SourceConfig)
 				} else {
@@ -275,10 +277,10 @@ func (m *SetupModel) applyLoadedConfig(cfg config.Config) {
 	}
 
 	// Base fields (always applied)
-	setField(m.Fields, "Server address", cfg.Address, defaults.Address)
-	setField(m.Fields, "Port", fmt.Sprintf("%d", cfg.Port), fmt.Sprintf("%d", defaults.Port))
-	setField(m.Fields, "Password", cfg.Password, defaults.Password)
-	setField(m.Fields, "Nickname", cfg.Nickname, defaults.Nickname)
+	setField(m.Fields, "server_address", cfg.Address, defaults.Address)
+	setField(m.Fields, "port", fmt.Sprintf("%d", cfg.Port), fmt.Sprintf("%d", defaults.Port))
+	setField(m.Fields, "password", cfg.Password, defaults.Password)
+	setField(m.Fields, "nickname", cfg.Nickname, defaults.Nickname)
 
 	// For client with modes: map, skip mode-specific fields (applied after probe)
 	if !hasClientModes {
@@ -290,9 +292,9 @@ func (m *SetupModel) applyLoadedConfig(cfg config.Config) {
 
 // applyAllConfigFields applies all config fields (used for server mode and legacy client configs).
 func (m *SetupModel) applyAllConfigFields(cfg config.Config, defaults config.Config, setField func([]SetupField, string, string, string)) {
-	setField(m.Fields, "Max clients", fmt.Sprintf("%d", cfg.MaxClients), fmt.Sprintf("%d", defaults.MaxClients))
-	setField(m.Fields, "Max reconnect", fmt.Sprintf("%d", cfg.MaxReconnectAttempts), fmt.Sprintf("%d", defaults.MaxReconnectAttempts))
-	setField(m.Fields, "Max auth fail", fmt.Sprintf("%d", cfg.MaxFailedAttempts), fmt.Sprintf("%d", defaults.MaxFailedAttempts))
+	setField(m.Fields, "max_clients", fmt.Sprintf("%d", cfg.MaxClients), fmt.Sprintf("%d", defaults.MaxClients))
+	setField(m.Fields, "max_reconnect", fmt.Sprintf("%d", cfg.MaxReconnectAttempts), fmt.Sprintf("%d", defaults.MaxReconnectAttempts))
+	setField(m.Fields, "max_auth_fail", fmt.Sprintf("%d", cfg.MaxFailedAttempts), fmt.Sprintf("%d", defaults.MaxFailedAttempts))
 
 	arVal := "off"
 	if cfg.AutoReconnect {
@@ -302,14 +304,14 @@ func (m *SetupModel) applyAllConfigFields(cfg config.Config, defaults config.Con
 	if defaults.AutoReconnect {
 		arDef = "on"
 	}
-	setField(m.Fields, "Auto reconnect", arVal, arDef)
-	setField(m.Fields, "Reconnect limit", fmt.Sprintf("%d", cfg.AutoReconnectAttempts), fmt.Sprintf("%d", defaults.AutoReconnectAttempts))
+	setField(m.Fields, "auto_reconnect", arVal, arDef)
+	setField(m.Fields, "reconnect_limit", fmt.Sprintf("%d", cfg.AutoReconnectAttempts), fmt.Sprintf("%d", defaults.AutoReconnectAttempts))
 
 	aecVal := "off"
 	if cfg.AEC {
 		aecVal = "on"
 	}
-	setField(m.Fields, "Echo cancellation", aecVal, "off")
+	setField(m.Fields, "echo_cancellation", aecVal, "off")
 
 	// Mode field (server only)
 	modeVal := "normal (server → client)"
@@ -321,19 +323,19 @@ func (m *SetupModel) applyAllConfigFields(cfg config.Config, defaults config.Con
 		modeVal = "reverse (client → server)"
 	}
 	modeDef := "normal (server → client)"
-	setField(m.Fields, "Mode", modeVal, modeDef)
+	setField(m.Fields, "mode", modeVal, modeDef)
 
 	// Advanced fields
-	setField(m.AdvancedFields, "Log level", cfg.LogLevel, defaults.LogLevel)
+	setField(m.AdvancedFields, "log_level", cfg.LogLevel, defaults.LogLevel)
 
 	tlsVal := "off"
 	if cfg.TLS {
 		tlsVal = "on"
 	}
-	setField(m.AdvancedFields, "TLS", tlsVal, "off")
-	setField(m.AdvancedFields, "TLS Cert", cfg.TLSCert, defaults.TLSCert)
-	setField(m.AdvancedFields, "TLS Key", cfg.TLSKey, defaults.TLSKey)
-	setField(m.AdvancedFields, "Sample rate", FormatSampleRate(cfg.SampleRate), FormatSampleRate(defaults.SampleRate))
+	setField(m.AdvancedFields, "tls", tlsVal, "off")
+	setField(m.AdvancedFields, "tls_cert", cfg.TLSCert, defaults.TLSCert)
+	setField(m.AdvancedFields, "tls_key", cfg.TLSKey, defaults.TLSKey)
+	setField(m.AdvancedFields, "sample_rate", FormatSampleRate(cfg.SampleRate), FormatSampleRate(defaults.SampleRate))
 
 	chVal := "mono"
 	if cfg.Channels >= 2 {
@@ -343,20 +345,22 @@ func (m *SetupModel) applyAllConfigFields(cfg config.Config, defaults config.Con
 	if defaults.Channels >= 2 {
 		chDef = "stereo"
 	}
-	setField(m.AdvancedFields, "Channels", chVal, chDef)
-	setField(m.AdvancedFields, "Opus bitrate", FormatBitrate(cfg.OpusBitrate), FormatBitrate(defaults.OpusBitrate))
+	setField(m.AdvancedFields, "channels", chVal, chDef)
+	setField(m.AdvancedFields, "opus_bitrate", FormatBitrate(cfg.OpusBitrate), FormatBitrate(defaults.OpusBitrate))
 
 	simdVal := "on"
 	if cfg.NoSIMDOptimization {
 		simdVal = "off"
 	}
-	setField(m.AdvancedFields, "Use SIMD", simdVal, "on")
+	setField(m.AdvancedFields, "use_simd", simdVal, "on")
 
 	hwidVal := "off"
 	if cfg.HWIDRequired {
 		hwidVal = "on"
 	}
-	setField(m.AdvancedFields, "HWID collection", hwidVal, "off")
+	setField(m.AdvancedFields, "hwid_collection", hwidVal, "off")
+
+	setField(m.AdvancedFields, "rate_limit", fmt.Sprintf("%d", cfg.RateLimit), fmt.Sprintf("%d", defaults.RateLimit))
 
 	// Apply device selection from loaded config.
 	m.applyDeviceSelection(cfg.Devices)
@@ -379,9 +383,9 @@ func (m *SetupModel) applyClientModeSettings(serverMode string) {
 	modeCfg.ApplyClientModeData(modeData)
 	defaults := config.DefaultConfig()
 
-	setField := func(fields []SetupField, label, value, defaultValue string) {
+	setField := func(fields []SetupField, key, value, defaultValue string) {
 		for i := range fields {
-			if fields[i].Label == label {
+			if fields[i].Key == key {
 				if value != defaultValue {
 					fields[i].SetValue(value, SourceConfig)
 				} else {
@@ -397,12 +401,12 @@ func (m *SetupModel) applyClientModeSettings(serverMode string) {
 	if modeCfg.AutoReconnect {
 		arVal = "on"
 	}
-	setField(m.Fields, "Auto reconnect", arVal, "off")
+	setField(m.Fields, "auto_reconnect", arVal, "off")
 	if modeCfg.AutoReconnectAttempts != defaults.AutoReconnectAttempts {
-		setField(m.Fields, "Reconnect limit", fmt.Sprintf("%d", modeCfg.AutoReconnectAttempts), fmt.Sprintf("%d", defaults.AutoReconnectAttempts))
+		setField(m.Fields, "reconnect_limit", fmt.Sprintf("%d", modeCfg.AutoReconnectAttempts), fmt.Sprintf("%d", defaults.AutoReconnectAttempts))
 	}
 	if modeCfg.MaxReconnectAttempts != defaults.MaxReconnectAttempts {
-		setField(m.Fields, "Max reconnect", fmt.Sprintf("%d", modeCfg.MaxReconnectAttempts), fmt.Sprintf("%d", defaults.MaxReconnectAttempts))
+		setField(m.Fields, "max_reconnect", fmt.Sprintf("%d", modeCfg.MaxReconnectAttempts), fmt.Sprintf("%d", defaults.MaxReconnectAttempts))
 	}
 
 	// AEC
@@ -410,14 +414,14 @@ func (m *SetupModel) applyClientModeSettings(serverMode string) {
 	if modeCfg.AEC {
 		aecVal = "on"
 	}
-	setField(m.Fields, "Echo cancellation", aecVal, "off")
+	setField(m.Fields, "echo_cancellation", aecVal, "off")
 
 	// Advanced fields
 	if modeCfg.LogLevel != defaults.LogLevel {
-		setField(m.AdvancedFields, "Log level", modeCfg.LogLevel, defaults.LogLevel)
+		setField(m.AdvancedFields, "log_level", modeCfg.LogLevel, defaults.LogLevel)
 	}
 	if modeCfg.NoSIMDOptimization {
-		setField(m.AdvancedFields, "Use SIMD", "off", "on")
+		setField(m.AdvancedFields, "use_simd", "off", "on")
 	}
 
 	// Apply device selection
@@ -434,7 +438,7 @@ func (m *SetupModel) applyLoadedProfile(cfg config.Config) {
 	// Apply nickname if set
 	if cfg.Nickname != "" {
 		for i := range m.Fields {
-			if m.Fields[i].Label == "Nickname" {
+			if m.Fields[i].Key == "nickname" {
 				m.Fields[i].SetValue(cfg.Nickname, SourceConfig)
 				break
 			}
@@ -464,25 +468,25 @@ func (m *SetupModel) applyDeviceSelection(devices []config.DeviceEntry) {
 	m.multiSelect = make(map[string]DeviceRoleSet)
 	m.mixInputs = make(map[string]map[string]bool)
 	// Build lookups: by ID and by Name, separated by device type.
-	inputByID := make(map[uint32]string, len(m.inputDevices))
+	inputByID := make(map[uint32]deviceRow, len(m.inputDevices))
 	inputByName := make(map[string]int)
 	for _, d := range m.inputDevices {
-		inputByID[d.ID] = d.Name
+		inputByID[d.ID] = d
 		inputByName[d.Name]++
 	}
-	outputByID := make(map[uint32]string, len(m.outputDevices))
+	outputByID := make(map[uint32]deviceRow, len(m.outputDevices))
 	outputByName := make(map[string]int)
 	for _, d := range m.outputDevices {
-		outputByID[d.ID] = d.Name
+		outputByID[d.ID] = d
 		outputByName[d.Name]++
 	}
 
 	for _, de := range devices {
-		var name string
+		var matched deviceRow
 		var ok bool
 		isInput := false
 
-		var byID map[uint32]string
+		var byID map[uint32]deviceRow
 		var byName map[string]int
 		switch de.Type {
 		case config.DeviceInput:
@@ -508,11 +512,11 @@ func (m *SetupModel) applyDeviceSelection(devices []config.DeviceEntry) {
 			}
 		}
 
-		name, ok = byID[de.ID]
+		matched, ok = byID[de.ID]
 		if !ok {
 			if de.Type == "" {
 				if de.Role != config.RoleCapture && de.Role != config.RolePlayback {
-					name, ok = outputByID[de.ID]
+					matched, ok = outputByID[de.ID]
 					if ok {
 						isInput = false
 					}
@@ -522,15 +526,14 @@ func (m *SetupModel) applyDeviceSelection(devices []config.DeviceEntry) {
 
 		if !ok && de.Name != "" {
 			if byName[de.Name] == 1 {
-				name = de.Name
-				ok = true
+				matched, ok = m.findDeviceByName(de.Name, isInput)
 			}
 		}
 
 		if !ok {
 			continue
 		}
-		key := deviceRow{Name: name, ID: de.ID, IsInput: isInput}.selectKey()
+		key := matched.selectKey()
 		roles := m.multiSelect[key]
 		if de.Role == config.RoleCapture {
 			roles.Capture = true
@@ -562,4 +565,17 @@ func (m *SetupModel) restoreMixInput(outputKey string, mixID uint32, mixName str
 			return
 		}
 	}
+}
+
+func (m SetupModel) findDeviceByName(name string, isInput bool) (deviceRow, bool) {
+	devices := m.outputDevices
+	if isInput {
+		devices = m.inputDevices
+	}
+	for _, device := range devices {
+		if device.Name == name {
+			return device, true
+		}
+	}
+	return deviceRow{}, false
 }

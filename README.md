@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -34,6 +34,45 @@
 ---
 
 Capture audio on one machine, play it on another — in real time over the network. EchoWarp uses WebRTC for transport and Opus for compression, delivering low-latency audio with end-to-end encryption.
+
+## Table of Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Interactive TUI](#interactive-tui)
+  - [Setup Screen](#setup-screen)
+  - [LAN Discovery](#lan-discovery)
+  - [Device Profiles](#device-profiles)
+  - [Streaming Screen](#streaming-screen)
+  - [TUI Keyboard Shortcuts](#tui-keyboard-shortcuts)
+- [Streaming Modes](#streaming-modes)
+  - [Normal — One-Way: Server to Clients](#normal-one-way-server-to-clients)
+  - [Reverse — One-Way: Clients to Server](#reverse-one-way-clients-to-server)
+  - [Duplex — Two-Way](#duplex-two-way)
+  - [Conference — Multi-User Mixing (N:N)](#conference-multi-user-mixing-nn)
+  - [Mode Summary](#mode-summary)
+- [Audio Routing Guide](#audio-routing-guide)
+  - [Use Cases](#use-cases)
+  - [Loopback — Capture System Audio](#loopback-capture-system-audio)
+  - [Virtual Microphone — Route Audio to Other Apps](#virtual-microphone-route-audio-to-other-apps)
+  - [Mixing Local Microphone into Virtual Output](#mixing-local-microphone-into-virtual-output)
+  - [Device Sections](#device-sections)
+  - [Diagnostics](#diagnostics)
+  - [FAQ](#faq)
+- [CLI Mode](#cli-mode)
+  - [Modes](#modes)
+  - [Common Flags](#common-flags)
+  - [Configuration](#configuration)
+- [Installation](#installation)
+  - [Pre-built binaries](#pre-built-binaries)
+  - [Build from source](#build-from-source)
+- [System Requirements](#system-requirements)
+- [Network & Firewall](#network-firewall)
+  - [Server — ports to open](#server-ports-to-open)
+  - [Client — no inbound ports required](#client-no-inbound-ports-required)
+  - [LAN discovery](#lan-discovery-1)
+  - [NAT traversal (STUN / TURN)](#nat-traversal-stun-turn)
+- [License](#license)
 
 ## Features
 
@@ -54,7 +93,7 @@ Capture audio on one machine, play it on another — in real time over the netwo
 2. Run `EchoWarp` — an interactive menu lets you pick Server, Client, Diagnostics, and more. Or jump straight to a mode with `EchoWarp server` / `EchoWarp client`
 3. Configure everything in the interactive TUI and press Enter to start
 
-> **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/main/build/launchers) and place them next to `EchoWarp.exe`. Double-click `EchoWarp.bat` to launch the TUI menu — no need to open cmd.exe manually.
+> **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/master/build/launchers) and place them next to `EchoWarp.exe`. Double-click `EchoWarp.bat` to launch the TUI menu — no need to open cmd.exe manually.
 
 ## Interactive TUI
 
@@ -342,6 +381,9 @@ If no virtual audio driver is found, the doctor will show installation instructi
 **I want a group call with 3+ machines.**
 → Use Conference mode. The server acts as a hub (no devices needed). Each client selects a mic and speakers. Everyone hears everyone else, minus their own voice.
 
+**I use Moonlight/Sunshine (or NVIDIA GameStream) and want my microphone to work in games on the host.**
+→ Run `EchoWarp server` in Reverse mode on the game host (Sunshine/GameStream machine). Run `EchoWarp client` on the Moonlight machine, select your microphone in Input. On the server, select a virtual audio device (BlackHole/VB-Cable) in Output, or enable `--virtual-mic` to create one automatically. In your game or voice chat on the host, select that virtual device as the microphone. Your voice from the Moonlight client will appear as a mic input on the game host.
+
 **I want Discord to hear both the remote stream AND my voice through one virtual mic.**
 → On the client, select a virtual device (BlackHole/VB-Cable) in Output. A list of input devices will appear below it — check your microphone. EchoWarp will mix the stream and your mic into the virtual output. In Discord, select the virtual device as your microphone.
 
@@ -353,6 +395,20 @@ If no virtual audio driver is found, the doctor will show installation instructi
 
 **The virtual device shows "adaptive" instead of a sample rate.**
 → This is normal. Virtual audio drivers (BlackHole, VB-Cable) adapt to whatever sample rate the application uses — the displayed rate is not meaningful.
+
+<details>
+<summary>macOS: "EchoWarp can't be opened" / Gatekeeper warning</summary>
+
+macOS blocks unsigned applications. To allow EchoWarp to run:
+
+```bash
+xattr -cr /path/to/EchoWarp       # for the binary
+xattr -cr /path/to/EchoWarp.app   # for the .app bundle
+```
+
+Alternatively: **System Settings → Privacy & Security → "Allow Anyway"**
+
+</details>
 
 ## CLI Mode
 

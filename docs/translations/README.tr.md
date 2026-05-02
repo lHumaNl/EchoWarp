@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -34,6 +34,45 @@
 ---
 
 Bir makinede sesi yakalayın, başka bir makinede ağ üzerinden gerçek zamanlı olarak oynatın. EchoWarp, taşıma için WebRTC ve sıkıştırma için Opus kullanarak uçtan uca şifreleme ile düşük gecikmeli ses iletimi sağlar.
+
+## İçindekiler
+
+- [Özellikler](#özellikler)
+- [Hızlı Başlangıç](#hızlı-başlangıç)
+- [Etkileşimli TUI](#etkileşimli-tui)
+  - [Kurulum Ekranı](#kurulum-ekranı)
+  - [LAN Keşfi](#lan-keşfi)
+  - [Cihaz Profilleri](#cihaz-profilleri)
+  - [Akış Ekranı](#akış-ekranı)
+  - [TUI Klavye Kısayolları](#tui-klavye-kısayolları)
+- [Akış Modları](#akış-modları)
+  - [Normal — Tek Yön: Sunucudan İstemcilere](#normal-tek-yön-sunucudan-istemcilere)
+  - [Ters — Tek Yön: İstemcilerden Sunucuya](#ters-tek-yön-istemcilerden-sunucuya)
+  - [Çift Yönlü — İki Yönlü](#çift-yönlü-iki-yönlü)
+  - [Konferans — Çok Kullanıcılı Karıştırma (N:N)](#konferans-çok-kullanıcılı-karıştırma-nn)
+  - [Mod Özeti](#mod-özeti)
+- [Ses Yönlendirme Kılavuzu](#ses-yönlendirme-kılavuzu)
+  - [Kullanım Senaryoları](#kullanım-senaryoları)
+  - [Loopback — Sistem Sesini Yakala](#loopback-sistem-sesini-yakala)
+  - [Sanal Mikrofon — Sesi Diğer Uygulamalara Yönlendir](#sanal-mikrofon-sesi-diğer-uygulamalara-yönlendir)
+  - [Yerel Mikrofonu Sanal Çıkışa Karıştırma](#yerel-mikrofonu-sanal-çıkışa-karıştırma)
+  - [Cihaz Bölümleri](#cihaz-bölümleri)
+  - [Tanılama](#tanılama)
+  - [SSS](#sss)
+- [CLI Modu](#cli-modu)
+  - [Modlar](#modlar)
+  - [Yaygın Bayraklar](#yaygın-bayraklar)
+  - [Yapılandırma Dosyaları](#yapılandırma-dosyaları)
+- [Kurulum](#kurulum)
+  - [Önceden Derlenmiş İkililer](#önceden-derlenmiş-ikililer)
+  - [Kaynak Koddan Derleme](#kaynak-koddan-derleme)
+- [Sistem Gereksinimleri](#sistem-gereksinimleri)
+- [Ağ & Güvenlik Duvarı](#ağ-güvenlik-duvarı)
+  - [Sunucu — açılması gereken portlar](#sunucu-açılması-gereken-portlar)
+  - [İstemci — gelen port gerekmez](#istemci-gelen-port-gerekmez)
+  - [Yerel ağ keşfi](#yerel-ağ-keşfi)
+  - [NAT geçişi (STUN / TURN)](#nat-geçişi-stun-turn)
+- [Lisans](#lisans)
 
 ## Özellikler
 
@@ -342,6 +381,9 @@ Sanal ses sürücüsü bulunamazsa, doctor platformunuz için kurulum talimatlar
 **3+ makineyle grup araması yapmak istiyorum.**
 → Conference modunu kullanın. Sunucu hub görevi görür (cihaz gerekmez). Her istemci bir mikrofon ve hoparlör seçer. Herkes kendi sesini duymadan diğerlerini duyar.
 
+**Moonlight/Sunshine (veya NVIDIA GameStream) kullanıyorum ve mikrofonumun ana bilgisayardaki oyunlarda çalışmasını istiyorum.**
+→ Oyun ana bilgisayarında (Sunshine/GameStream makinesi) `EchoWarp server`'ı Reverse modunda çalıştırın. Moonlight makinesinde `EchoWarp client`'ı çalıştırın, Input'ta mikrofonunuzu seçin. Sunucuda, Output'ta bir sanal ses cihazı (BlackHole/VB-Cable) seçin veya otomatik oluşturmak için `--virtual-mic`'i etkinleştirin. Ana bilgisayardaki oyununuzda veya sesli sohbetinizde bu sanal cihazı mikrofon olarak seçin. Moonlight istemcisinden gelen sesiniz, oyun ana bilgisayarında mikrofon girişi olarak görünecektir.
+
 **Discord'un hem uzak akışı HEM DE sesimi tek bir sanal mikrofon üzerinden duymasını istiyorum.**
 → İstemcide Çıkış'ta bir sanal cihaz (BlackHole/VB-Cable) seçin. Altında giriş cihazları listesi görünecektir — mikrofonunuzu işaretleyin. EchoWarp akışı ve mikrofonunuzu sanal çıkışa karıştıracaktır. Discord'da sanal cihazı mikrofon olarak seçin.
 
@@ -353,6 +395,20 @@ Sanal ses sürücüsü bulunamazsa, doctor platformunuz için kurulum talimatlar
 
 **Sanal cihaz örnek hız yerine "adaptive" gösteriyor.**
 → Bu normaldir. Sanal ses sürücüleri (BlackHole, VB-Cable) uygulamanın kullandığı örnek hıza uyum sağlar — görüntülenen hızın bir önemi yoktur.
+
+<details>
+<summary>macOS: "EchoWarp açılamıyor" / Gatekeeper uyarısı</summary>
+
+macOS imzalanmamış uygulamaları engeller. EchoWarp'ın çalışmasına izin vermek için:
+
+```bash
+xattr -cr /path/to/EchoWarp       # ikili dosya için
+xattr -cr /path/to/EchoWarp.app   # .app paketi için
+```
+
+Alternatif olarak: **Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de İzin Ver"**
+
+</details>
 
 ## CLI Modu
 

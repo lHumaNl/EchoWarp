@@ -14,6 +14,10 @@ const (
 	ActionMuteOutgoing
 	// ActionMuteIncoming toggles server-initiated incoming mute for a client.
 	ActionMuteIncoming
+	// ActionVolumeUp increases per-client volume by 10%.
+	ActionVolumeUp
+	// ActionVolumeDown decreases per-client volume by 10%.
+	ActionVolumeDown
 )
 
 // ClientCommand is a command sent from the TUI to the server backend.
@@ -37,6 +41,8 @@ const (
 	DeviceVolumeUp
 	// DeviceVolumeDown decreases device volume by 10%.
 	DeviceVolumeDown
+	// DeviceToggleAGC toggles automatic gain control for a device.
+	DeviceToggleAGC
 )
 
 // DeviceCommand is sent from the TUI to control device volume/mute.

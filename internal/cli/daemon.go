@@ -16,10 +16,12 @@ import (
 	"github.com/lHumaNl/echowarp/internal/app"
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/daemon"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/logging"
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
 // newDaemonCmd creates the "daemon" command group for daemon lifecycle management.
@@ -27,8 +29,8 @@ import (
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
-		Short: "Daemon management commands",
-		Long:  "Commands to start, stop, and check the status of the EchoWarp daemon.",
+		Short: i18n.T("cli_daemon_short"),
+		Long:  i18n.T("cli_daemon_long"),
 	}
 	cmd.AddCommand(
 		newDaemonStartCmd(),
@@ -49,11 +51,18 @@ func newDaemonCmd() *cobra.Command {
 func newDaemonStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start",
-		Short: "Start the EchoWarp daemon",
-		Long:  "Start the EchoWarp daemon in the background as a server.",
+		Short: i18n.T("cli_daemon_start_short"),
+		Long:  i18n.T("cli_daemon_start_long"),
 		RunE:  runDaemonStart,
 	}
 
+	cmd.Flags().String("mode", "server", "Daemon mode: server or client")
+	cmd.Flags().StringP("address", "a", "", "Server address to connect to (client mode)")
+	cmd.Flags().Bool("discover", false, "Auto-discover server via mDNS (client mode)")
+	cmd.Flags().StringP("nickname", "n", "", "Chat display name (client mode)")
+	cmd.Flags().Bool("auto-reconnect", true, "Auto-reconnect after server disconnect (client mode)")
+	cmd.Flags().Int("auto-reconnect-attempts", 5, "Max auto-reconnect attempts (client mode, 0=infinite)")
+	cmd.Flags().Bool("tls-insecure", false, "Accept self-signed TLS certificates (client mode)")
 	cmd.Flags().IntP("port", "p", 4415, "TCP port for signaling")
 	cmd.Flags().UintP("device", "d", 0, "Audio device ID")
 	cmd.Flags().StringP("password", "P", "", "Password for authentication")
@@ -83,6 +92,15 @@ func newDaemonStartCmd() *cobra.Command {
 	cmd.Flags().String("api-token", "", "API authentication token")
 	cmd.Flags().Bool("enable-pprof", false, "Enable pprof profiling endpoints")
 	cmd.Flags().StringSlice("trusted-proxies", nil, "Trusted proxy IPs/CIDRs for X-Forwarded-For processing")
+	// Phase 3 extended flags: flow into cfg via applyFlagOverrides (server_config.go).
+	cmd.Flags().Bool("duplex", false, "Enable duplex mode (bidirectional audio)")
+	cmd.Flags().Bool("conference", false, "Enable conference mode (multi-participant)")
+	cmd.Flags().Bool("loopback", false, "Enable loopback capture of system audio")
+	cmd.Flags().Bool("aec", false, "Enable acoustic echo cancellation (duplex mode)")
+	cmd.Flags().Bool("server-muted", false, "Server does not contribute audio in conference mode")
+	cmd.Flags().String("record", "", "Start recording immediately: mix, tracks, or both (conference mode)")
+	cmd.Flags().String("record-dir", "", "Override recording output directory (default: ~/Documents/EchoWarp_records)")
+	cmd.Flags().Bool("hwid-required", false, "Require clients to send hardware ID (for bans)")
 	return cmd
 }
 
@@ -106,13 +124,45 @@ func runDaemonStart(cmd *cobra.Command, args []string) error {
 	rateLimiter := createDaemonRateLimiter(flags.rateLimit)
 	setupDaemonDiscovery(flags.noDiscovery, flags.serverName, logger)
 
-	node, err := createNode(cfg, logger, rateLimiter)
+	// Wire the ban manager into the Node (server mode only — client-mode
+	// daemons do not own a ban list). The same manager instance is also
+	// passed to the runner factory via Node.banMgr → ServerApp, which
+	// means bans installed through POST /api/v1/bans take effect
+	// immediately on incoming signaling connections (ServerApp calls
+	// banMgr.IsBanned on every connect — see internal/app/server_single.go).
+	// Without this wiring, the daemon's ban manager would be nil and the
+	// API endpoints would persist nothing (Phase 5b gap identified in
+	// implementer notes).
+	var banMgr ban.BanManager
+	if cfg.Mode == config.ModeServer {
+		bm, bmErr := setupBanManager(&cfg, logger)
+		if bmErr != nil {
+			// Failing loudly here prevents a silent "ban API works, but
+			// nothing is actually banned" footgun. If the ban store cannot
+			// be opened (e.g. permission denied on config dir), the daemon
+			// should not start — the operator needs to see this.
+			logger.Error("ban manager setup failed", "error", bmErr)
+			return fmt.Errorf("ban manager setup: %w", bmErr)
+		}
+		if bm != nil {
+			banMgr = bm
+			defer func() { _ = bm.Close() }()
+		}
+	}
+
+	node, err := createNode(cfg, logger, rateLimiter, banMgr)
 	if err != nil {
 		return err
 	}
 
 	apiServer := startAPIServer(ctx, node, flags, logger)
 	defer func() { _ = apiServer.Stop() }()
+
+	// Bridge EventBus lifecycle events to WebSocket clients so API consumers
+	// (Decky plugin, etc.) receive real-time status/connection/error updates.
+	if apiServer != nil && node.EventHandler() != nil {
+		go api.BridgeEventsToWS(ctx, node.EventHandler().Bus(), apiServer.WSHub(), logger)
+	}
 
 	if err := node.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start node: %w", err)
@@ -134,9 +184,32 @@ func setupDaemon(cmd *cobra.Command) (*daemon.Daemon, config.Config, *slog.Logge
 		return nil, config.Config{}, nil, err
 	}
 
-	cfg, err := loadConfig(cmd, config.ModeServer)
+	// Determine daemon mode: --mode flag chooses between server and client loading.
+	modeStr, _ := cmd.Flags().GetString("mode")
+	loadMode := config.ModeServer
+	if modeStr == string(config.ModeClient) {
+		loadMode = config.ModeClient
+	}
+
+	cfg, err := loadConfig(cmd, loadMode)
 	if err != nil {
 		return nil, config.Config{}, nil, err
+	}
+
+	// Apply client-specific overrides when running in client mode. In server
+	// mode these flags are silently ignored (not fail) per phase 2 spec.
+	if loadMode == config.ModeClient {
+		applyDaemonClientOverrides(cmd, &cfg)
+		if cfg.Address == "" {
+			discover, _ := cmd.Flags().GetBool("discover")
+			if !discover {
+				return nil, config.Config{}, nil, fmt.Errorf("client mode requires --address or --discover")
+			}
+		}
+	}
+
+	if rerr := validateDaemonRecordMode(cfg.RecordMode); rerr != nil {
+		return nil, config.Config{}, nil, rerr
 	}
 
 	if errs := cfg.Validate(); len(errs) > 0 {
@@ -242,15 +315,30 @@ func setupDaemonDiscovery(noDiscovery bool, serverName string, logger *slog.Logg
 	}
 }
 
-func createNode(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter) (*echowarp.Node, error) {
+func createNode(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter, banMgr ban.BanManager) (*echowarp.Node, error) {
 	nodeCfg := convertToNodeConfig(cfg)
-	node, err := echowarp.NewNode(nodeCfg,
+	// nodeRef is a forward-capture holder for the *Node: the runner factory
+	// needs access to the node's EventBus to wire the chat-event hook, but
+	// the factory is instantiated before NewNode returns. Populating the
+	// holder immediately after NewNode closes the circular dependency.
+	var nodeRef *echowarp.Node
+	opts := []echowarp.Option{
 		echowarp.WithLogger(logger),
-		echowarp.WithRunnerFactory(createRunnerFactory(cfg, logger, rateLimiter)),
-	)
+		echowarp.WithEventHandler(echowarp.NewEventHandler()),
+		echowarp.WithRunnerFactory(createRunnerFactory(cfg, logger, rateLimiter, &nodeRef)),
+	}
+	// Only inject the ban manager when one is actually available. Client-
+	// mode daemons pass nil so the Node's optional BanManager runner
+	// interface assertion falls through to ErrInternalState on mutation
+	// and to an empty slice on list — matching the documented contract.
+	if banMgr != nil {
+		opts = append(opts, echowarp.WithBanManager(banMgr))
+	}
+	node, err := echowarp.NewNode(nodeCfg, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
 	}
+	nodeRef = node
 	return node, nil
 }
 
@@ -275,8 +363,8 @@ func startAPIServer(ctx context.Context, node *echowarp.Node, flags daemonFlags,
 func newDaemonStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the EchoWarp daemon",
-		Long:  "Stop the running EchoWarp daemon by sending SIGTERM.",
+		Short: i18n.T("cli_daemon_stop_short"),
+		Long:  i18n.T("cli_daemon_stop_long"),
 		RunE:  runDaemonStop,
 	}
 
@@ -308,8 +396,8 @@ func runDaemonStop(cmd *cobra.Command, args []string) error {
 func newDaemonStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Check daemon status",
-		Long:  "Check if the EchoWarp daemon is running and display its PID.",
+		Short: i18n.T("cli_daemon_status_short"),
+		Long:  i18n.T("cli_daemon_status_long"),
 		RunE:  runDaemonStatus,
 	}
 
@@ -347,6 +435,8 @@ func convertToNodeConfig(cfg config.Config) echowarp.NodeConfig {
 		SampleRate:      cfg.SampleRate,
 		Channels:        cfg.Channels,
 		VirtualMic:      cfg.VirtualMic,
+		Loopback:        cfg.Loopback,
+		AEC:             cfg.AEC,
 		OpusBitrate:     cfg.OpusBitrate,
 		OpusComplexity:  cfg.OpusComplexity,
 		OpusApplication: cfg.OpusApplication,
@@ -370,8 +460,102 @@ func convertToNodeConfig(cfg config.Config) echowarp.NodeConfig {
 	return nodeCfg
 }
 
-func createRunnerFactory(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter) echowarp.RunnerFactory {
+func createRunnerFactory(cfg config.Config, logger *slog.Logger, rateLimiter *auth.IPRateLimiter, nodeRef **echowarp.Node) echowarp.RunnerFactory {
 	return func(_ echowarp.NodeConfig, _ *slog.Logger, banMgr ban.BanManager, tlsConf *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
-		return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter), nil
+		// chatHook forwards every ChatHub/ChatClient fan-out onto the Node's
+		// EventBus as an EventChatMessage. The daemon's EventBus→WS bridge
+		// then relays it to any connected WebSocket clients in real time.
+		// Resolved lazily through nodeRef because the runner factory is
+		// constructed before NewNode returns.
+		chatHook := func(msg app.ChatMessage) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			handler := (*nodeRef).EventHandler()
+			if handler == nil {
+				return
+			}
+			handler.Bus().EmitChatMessage(msg.From, msg.To, msg.Text, msg.TS)
+		}
+		// statsHook forwards every stats tick from the runner into
+		// Node.UpdateStats so GET /api/v1/stats returns non-zero bytes
+		// during streaming. Resolved lazily through nodeRef because the
+		// runner factory is constructed before NewNode returns.
+		statsHook := func(stats transport.ConnectionStats) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			(*nodeRef).UpdateStats(stats)
+		}
+		// clientJoinHook / clientLeaveHook mirror the runner's register /
+		// unregister events into Node.AddClient / Node.RemoveClient so
+		// GET /api/v1/clients returns the real live roster.
+		clientJoinHook := func(clientID, remoteAddr string) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			(*nodeRef).AddClient(echowarp.ClientInfo{ID: clientID, Address: remoteAddr})
+		}
+		clientLeaveHook := func(clientID string) {
+			if nodeRef == nil || *nodeRef == nil {
+				return
+			}
+			(*nodeRef).RemoveClient(clientID)
+		}
+		switch cfg.Mode {
+		case config.ModeClient:
+			return app.NewClientApp(cfg, logger, tlsConf).
+				WithChatEventHook(chatHook).
+				WithStatsHook(statsHook), nil
+		default:
+			return app.NewServerApp(cfg, logger, banMgr, tlsConf, rateLimiter).
+				WithChatEventHook(chatHook).
+				WithStatsHook(statsHook).
+				WithClientTrackingHooks(clientJoinHook, clientLeaveHook), nil
+		}
+	}
+}
+
+// validDaemonRecordModes enumerates the accepted values for the --record flag.
+// Kept in sync with the switch in internal/app/server_multi.go so users get a
+// fail-fast error at CLI level instead of a silent fallback to "mix".
+var validDaemonRecordModes = map[string]struct{}{
+	"":       {}, // Empty = recording disabled.
+	"mix":    {},
+	"tracks": {},
+	"both":   {},
+}
+
+// validateDaemonRecordMode rejects unknown --record values before the daemon
+// writes its PID file, matching phase 1 handleStart's fail-fast philosophy.
+func validateDaemonRecordMode(mode string) error {
+	if _, ok := validDaemonRecordModes[mode]; !ok {
+		return fmt.Errorf("invalid --record value %q (must be one of: mix, tracks, both)", mode)
+	}
+	return nil
+}
+
+// applyDaemonClientOverrides applies client-specific CLI flags to the config when
+// the daemon is running in client mode. Called only from setupDaemon; server mode
+// silently skips these overrides so the same binary/flags work for both modes.
+func applyDaemonClientOverrides(cmd *cobra.Command, cfg *config.Config) {
+	cfg.Mode = config.ModeClient
+	if cmd.Flags().Changed("address") {
+		cfg.Address, _ = cmd.Flags().GetString("address")
+	}
+	if cmd.Flags().Changed("nickname") {
+		cfg.Nickname, _ = cmd.Flags().GetString("nickname")
+	}
+	// Only override from CLI when the flag was explicitly passed. Client-mode
+	// defaults (auto-reconnect=true, attempts=5) are seeded in LoadWithViper, so
+	// file/env values are preserved here when no flag was given.
+	if cmd.Flags().Changed("auto-reconnect") {
+		cfg.AutoReconnect, _ = cmd.Flags().GetBool("auto-reconnect")
+	}
+	if cmd.Flags().Changed("auto-reconnect-attempts") {
+		cfg.AutoReconnectAttempts, _ = cmd.Flags().GetInt("auto-reconnect-attempts")
+	}
+	if cmd.Flags().Changed("tls-insecure") {
+		cfg.TLSInsecure, _ = cmd.Flags().GetBool("tls-insecure")
 	}
 }

@@ -181,6 +181,20 @@ func waitForParticipantPause(ch <-chan ParticipantPauseMsg) tea.Cmd {
 	}
 }
 
+// waitForPeerMute waits for server-initiated outgoing mute state changes.
+func waitForPeerMute(ch <-chan bool) tea.Cmd {
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		muted, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return PeerMuteMsg(muted)
+	}
+}
+
 // waitForConferenceParticipants waits for a full participants list update.
 func waitForConferenceParticipants(ch <-chan ConferenceParticipantsMsg) tea.Cmd {
 	if ch == nil {
@@ -223,10 +237,17 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 
 		servers, _ := recent.Load()
 
+		var serverID string
+		if probeRes != nil && probeRes.ServerID != "" {
+			serverID = probeRes.ServerID
+		} else if selServer != nil && selServer.ServerID != "" {
+			serverID = selServer.ServerID
+		}
+
 		// Preserve existing presets for other modes.
 		existingPresets := make(map[string]recent.DevicePreset)
 		for _, s := range servers {
-			if s.Address == cfg.Address && s.Port == cfg.Port {
+			if recent.MatchesServer(s, cfg.Address, cfg.Port, serverID) {
 				for k, v := range s.Presets {
 					existingPresets[k] = v
 				}
@@ -235,13 +256,6 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 		}
 		existingPresets[mode] = devicePreset
 
-		var serverID string
-		if probeRes != nil && probeRes.ServerID != "" {
-			serverID = probeRes.ServerID
-		} else if selServer != nil && selServer.ServerID != "" {
-			serverID = selServer.ServerID
-		}
-
 		servers = recent.Add(servers, recent.Server{
 			Address:       cfg.Address,
 			Port:          cfg.Port,
@@ -249,17 +263,21 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 			ServerID:      serverID,
 			LastConnected: time.Now(),
 			Presets:       existingPresets,
+			LogLevel:      cfg.LogLevel,
 		})
 		_ = recent.Save(servers) //nolint:errcheck
 		return recentServerSavedMsg{}
 	}
 }
 
-// saveServerPresetCmd returns a tea.Cmd that persists the server-side device preset to disk.
-func saveServerPresetCmd(devicePreset recent.DevicePreset, mode string) tea.Cmd {
+// saveServerPresetCmd returns a tea.Cmd that persists the per-mode server preset
+// snapshot (devices + port/password/max_clients/tls*) to disk. The top-level
+// last_mode is also updated to `mode` so the next startup resumes in this mode.
+func saveServerPresetCmd(mp preset.ModePreset, mode string) tea.Cmd {
 	return func() tea.Msg {
 		sp := preset.Load()
-		sp.Set(mode, devicePreset)
+		sp.Set(mode, mp)
+		sp.LastMode = mode
 		_ = preset.Save(sp) //nolint:errcheck
 		return nil
 	}

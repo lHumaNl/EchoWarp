@@ -47,6 +47,38 @@ func TestServerApp_HandleDCControl_PeerMute(t *testing.T) {
 	assert.False(t, s.clientMuted.Load(), "clientMuted should be false after peer_unmute")
 }
 
+func TestServerApp_HandleDCControl_PeerMuteUpdatesSingleClientStats(t *testing.T) {
+	t.Parallel()
+	cfg := config.DefaultConfig()
+	cfg.Mode = config.ModeServer
+	s := NewServerApp(cfg, testClientLogger(), nil, nil, nil)
+	s.clients["client-1"] = &multiClient{id: "client-1"}
+
+	done := s.handleDCControl(buildControlMessage(t, transport.ActionPeerMute), time.Now(), "TestClient")
+	assert.False(t, done)
+	assert.True(t, s.clients["client-1"].muted.Load())
+
+	done = s.handleDCControl(buildControlMessage(t, transport.ActionPeerUnmute), time.Now(), "TestClient")
+	assert.False(t, done)
+	assert.False(t, s.clients["client-1"].muted.Load())
+}
+
+func TestServerApp_HandleDCControl_PauseUpdatesSingleClientStats(t *testing.T) {
+	t.Parallel()
+	cfg := config.DefaultConfig()
+	cfg.Mode = config.ModeServer
+	s := NewServerApp(cfg, testClientLogger(), nil, nil, nil)
+	s.clients["client-1"] = &multiClient{id: "client-1"}
+
+	done := s.handleDCControl(buildControlMessage(t, transport.ActionPause), time.Now(), "TestClient")
+	assert.False(t, done)
+	assert.True(t, s.clients["client-1"].paused.Load())
+
+	done = s.handleDCControl(buildControlMessage(t, transport.ActionResume), time.Now(), "TestClient")
+	assert.False(t, done)
+	assert.False(t, s.clients["client-1"].paused.Load())
+}
+
 func TestServerApp_HandleDCControl_StopStillWorks(t *testing.T) {
 	t.Parallel()
 	cfg := config.DefaultConfig()
@@ -174,6 +206,16 @@ func TestClientApp_WithServerMuteChannel(t *testing.T) {
 	assert.NotNil(t, c.serverMuteCh)
 }
 
+func TestClientApp_WithServerPeerMuteChannel(t *testing.T) {
+	t.Parallel()
+	c := NewClientApp(defaultClientConfig(), testClientLogger(), nil)
+
+	ch := make(chan bool, 4)
+	c2 := c.WithServerPeerMuteChannel(ch)
+	assert.Same(t, c, c2)
+	assert.NotNil(t, c.serverPeerMuteCh)
+}
+
 func TestClientApp_ServerMutedIncoming_DefaultFalse(t *testing.T) {
 	t.Parallel()
 	cfg := defaultClientConfig()
@@ -197,6 +239,19 @@ func TestClientApp_HandleDCControl_MuteIncoming(t *testing.T) {
 	done = c.handleDCControl(unmuteMsg)
 	assert.False(t, done, "unmute_incoming should not end session")
 	assert.False(t, c.serverMutedIncoming.Load(), "serverMutedIncoming should be false after unmute_incoming")
+}
+
+func TestClientApp_HandleDCControl_MuteIncomingNotifiesTUI(t *testing.T) {
+	t.Parallel()
+	c := NewClientApp(defaultClientConfig(), testClientLogger(), nil)
+	peerMuteCh := make(chan bool, 2)
+	c.WithServerPeerMuteChannel(peerMuteCh)
+
+	assert.False(t, c.handleDCControl(buildControlMessage(t, transport.ActionMuteIncoming)))
+	assert.Equal(t, true, <-peerMuteCh)
+
+	assert.False(t, c.handleDCControl(buildControlMessage(t, transport.ActionUnmuteIncoming)))
+	assert.Equal(t, false, <-peerMuteCh)
 }
 
 func TestClientApp_ServerMuteIncomingFilterCh_DropsWhenMuted(t *testing.T) {

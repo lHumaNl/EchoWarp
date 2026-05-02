@@ -63,7 +63,7 @@ func (s *ServerApp) runMulti(ctx context.Context) error {
 			default:
 				recMode = audio.RecordMix
 			}
-			if err := s.conference.StartRecording(recMode, s.cfg.SampleRate); err != nil {
+			if err := s.conference.StartRecording(recMode, s.cfg.SampleRate, s.cfg.EffectiveRecordDir()); err != nil {
 				s.logger.Error("Failed to start recording", "error", err)
 			} else {
 				s.logger.Info("Recording started", "mode", s.cfg.RecordMode)
@@ -178,6 +178,7 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 	}
 
 	// Assign nickname and session ID.
+	isCustomNick := meta.Nickname != ""
 	nickname := s.assignNickname(meta.Nickname)
 	if oldNickname != "" {
 		nickname = oldNickname
@@ -198,7 +199,13 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 	mc.nickname = nickname
 	mc.sessionID = sessionID
 	mc.hwid = meta.HWID
-	defer s.unregisterMultiClient(mc, clientID)
+	mc.isCustomNick = isCustomNick
+
+	// Track whether this client disconnected gracefully.
+	gracefulDisconnect := false
+	defer func() {
+		s.unregisterMultiClient(mc, clientID, gracefulDisconnect)
+	}()
 
 	// Register as conference participant if in conference mode.
 	if s.conference != nil {
@@ -224,7 +231,7 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 		return
 	}
 
-	audioDone, ok := s.setupMultiClientAudio(sigCtx, peer, direction, clientID)
+	audioDone, ok := s.setupMultiClientAudio(ctx, sigCtx, peer, direction, clientID)
 	if !ok {
 		return
 	}
@@ -257,7 +264,7 @@ func (s *ServerApp) handleMultiClient(ctx context.Context, conn net.Conn, client
 	if s.conference != nil {
 		s.broadcastParticipantsUpdate(clientID)
 	}
-	s.runMultiClientLoop(sigCtx, signaler, peer, audioDone, clientID, nickname, connStart, protocol)
+	gracefulDisconnect = s.runMultiClientLoop(sigCtx, signaler, peer, audioDone, clientID, nickname, connStart, protocol)
 }
 
 func (s *ServerApp) checkMultiClientAccess(remoteAddr, clientID string) bool {
@@ -266,10 +273,10 @@ func (s *ServerApp) checkMultiClientAccess(remoteAddr, clientID string) bool {
 
 func (s *ServerApp) registerMultiClient(conn net.Conn, clientID string) (*multiClient, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if len(s.clients) >= s.cfg.MaxClients {
 		s.logger.Warn("Max clients reached, rejecting connection", "clientID", clientID)
+		s.mu.Unlock()
 		return nil, false
 	}
 
@@ -280,18 +287,40 @@ func (s *ServerApp) registerMultiClient(conn net.Conn, clientID string) (*multiC
 	}
 	s.clients[clientID] = mc
 	s.notifyClientCount()
+	remoteAddr := ""
+	if conn != nil && conn.RemoteAddr() != nil {
+		remoteAddr = auth.ExtractIP(conn.RemoteAddr().String())
+	}
+	s.mu.Unlock()
+	if s.onClientJoin != nil {
+		s.onClientJoin(clientID, remoteAddr)
+	}
 	return mc, true
 }
 
-func (s *ServerApp) unregisterMultiClient(mc *multiClient, clientID string) {
+func (s *ServerApp) unregisterMultiClient(mc *multiClient, clientID string, graceful bool) {
 	s.mu.Lock()
 	delete(s.clients, clientID)
+	if graceful {
+		// Graceful disconnect: remove session so it cannot be reused.
+		delete(s.sessions, mc.sessionID)
+	} else {
+		// Abnormal disconnect: preserve session for future reconnect.
+		s.sessions[mc.sessionID] = &sessionEntry{
+			clientID:     clientID,
+			nickname:     mc.nickname,
+			isCustomNick: mc.isCustomNick,
+		}
+	}
 	s.notifyClientCount()
 	s.mu.Unlock()
+	if s.onClientLeave != nil {
+		s.onClientLeave(clientID)
+	}
 	if mc.peer != nil {
 		_ = mc.peer.Close() //nolint:errcheck
 	}
-	s.logger.Info("Client disconnected", "clientID", clientID)
+	s.logger.Info("Client disconnected", "clientID", clientID, "graceful", graceful)
 }
 
 func (s *ServerApp) createMultiClientPeer(mc *multiClient, clientID string) (transport.PeerManager, transport.MediaDirection, bool) {
@@ -304,7 +333,7 @@ func (s *ServerApp) createMultiClientPeer(mc *multiClient, clientID string) (tra
 	return peer, direction, true
 }
 
-func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string) (<-chan error, bool) {
+func (s *ServerApp) setupMultiClientAudio(serverCtx, clientCtx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string) (<-chan error, bool) {
 	if s.conference != nil {
 		s.mu.RLock()
 		mc := s.clients[clientID]
@@ -313,7 +342,7 @@ func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.Pe
 		if mc != nil {
 			muteIncomingFlag = &mc.mutedIncoming
 		}
-		audioDone, err := s.setupConferenceAudioPipeline(ctx, peer, clientID, muteIncomingFlag)
+		audioDone, err := s.setupConferenceAudioPipeline(clientCtx, peer, clientID, muteIncomingFlag)
 		if err != nil {
 			s.logger.Warn("Failed to setup conference audio", "clientID", clientID, "error", err)
 			return nil, false
@@ -332,7 +361,7 @@ func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.Pe
 		muteIncomingFlag = &mc.mutedIncoming
 	}
 
-	audioDone, err := s.setupAudioPipelineMulti(ctx, peer, direction, muteFlag, muteOutgoingFlag, muteIncomingFlag)
+	audioDone, err := s.setupAudioPipelineMulti(serverCtx, clientCtx, peer, direction, clientID, mc, muteFlag, muteOutgoingFlag, muteIncomingFlag)
 	if err != nil {
 		s.logger.Warn("Failed to setup audio", "clientID", clientID, "error", err)
 		return nil, false
@@ -343,7 +372,14 @@ func (s *ServerApp) setupMultiClientAudio(ctx context.Context, peer transport.Pe
 // setupAudioPipelineMulti is like setupAudioPipeline but uses per-client mute flags
 // instead of the shared s.clientMuted. This ensures muting one client doesn't affect others.
 // muteFlag is client-initiated mute, muteOutgoingFlag is server-initiated mute.
-func (s *ServerApp) setupAudioPipelineMulti(ctx context.Context, peer transport.PeerManager, direction transport.MediaDirection, muteFlag, muteOutgoingFlag, muteIncomingFlag *atomic.Bool) (<-chan error, error) {
+//
+// For DirectionSend (normal mode), the server uses a single SharedCaptureHub and
+// a per-client encoder with per-client gain. In multi-client duplex, that same
+// shared capture path is used unless more than one explicit capture device
+// requires the legacy per-client capture fallback. All client receive sources
+// feed one server monitor mixer/player for local playback and AEC reference.
+// Clients are never routed to each other.
+func (s *ServerApp) setupAudioPipelineMulti(serverCtx, clientCtx context.Context, peer transport.PeerManager, direction transport.MediaDirection, clientID string, mc *multiClient, muteFlag, muteOutgoingFlag, muteIncomingFlag *atomic.Bool) (<-chan error, error) {
 	audioDone := make(chan error, 2)
 
 	// Use no-op flags if nil (shouldn't happen, but safe).
@@ -356,6 +392,10 @@ func (s *ServerApp) setupAudioPipelineMulti(ctx context.Context, peer transport.
 	if muteIncomingFlag == nil {
 		muteIncomingFlag = &atomic.Bool{}
 	}
+	var pausedFlag *atomic.Bool
+	if mc != nil {
+		pausedFlag = &mc.paused
+	}
 
 	switch direction {
 	case transport.DirectionDuplex:
@@ -363,26 +403,240 @@ func (s *ServerApp) setupAudioPipelineMulti(ctx context.Context, peer transport.
 		if err != nil {
 			return nil, ewerrors.Wrap(err, ewerrors.ErrConnectionFailed, "add audio track")
 		}
-		filteredSendCh := newCombinedMuteFilterCh(ctx, sendCh, muteFlag, muteOutgoingFlag)
-		filteredSendCh = s.newServerPauseFilterCh(ctx, filteredSendCh)
-		go func() {
-			audioDone <- s.runCapturePipeline(ctx, filteredSendCh)
-		}()
-		s.setupReverseAudioMuted(ctx, peer, audioDone, "", muteIncomingFlag)
+		filteredSendCh := newCombinedMuteFilterCh(clientCtx, sendCh, muteFlag, muteOutgoingFlag)
+		filteredSendCh = s.newServerPauseFilterCh(clientCtx, filteredSendCh)
+		if s.shouldUseLegacyMultiCapture() {
+			s.logger.Warn("Multi-client duplex: multiple capture devices require legacy per-client capture with device command handling disabled; AEC uses the shared server monitor mix reference")
+			go func() {
+				audioDone <- s.runLegacyMultiClientCapture(clientCtx, filteredSendCh)
+			}()
+		} else if err := s.startSharedCaptureClient(serverCtx, clientCtx, clientID, mc, filteredSendCh, audioDone); err != nil {
+			return nil, err
+		}
+		if err := s.setupServerMonitorSource(serverCtx, clientCtx, peer, clientID, muteIncomingFlag, pausedFlag, audioDone); err != nil {
+			return nil, err
+		}
 	case transport.DirectionSend:
 		sendCh, err := peer.AddAudioTrack(s.cfg.SampleRate, s.cfg.Channels)
 		if err != nil {
 			return nil, ewerrors.Wrap(err, ewerrors.ErrConnectionFailed, "add audio track")
 		}
-		filteredSendCh := newCombinedMuteFilterCh(ctx, sendCh, muteFlag, muteOutgoingFlag)
-		filteredSendCh = s.newServerPauseFilterCh(ctx, filteredSendCh)
-		go func() {
-			audioDone <- s.runCapturePipeline(ctx, filteredSendCh)
-		}()
+		filteredSendCh := newCombinedMuteFilterCh(clientCtx, sendCh, muteFlag, muteOutgoingFlag)
+		filteredSendCh = s.newServerPauseFilterCh(clientCtx, filteredSendCh)
+		if s.shouldUseLegacyMultiCapture() {
+			s.logger.Warn("Shared capture hub: multi-device capture not supported; using legacy per-client capture with device command handling disabled")
+			go func() {
+				audioDone <- s.runLegacyMultiClientCapture(clientCtx, filteredSendCh)
+			}()
+			break
+		}
+		if err := s.startSharedCaptureClient(serverCtx, clientCtx, clientID, mc, filteredSendCh, audioDone); err != nil {
+			return nil, err
+		}
 	default:
-		s.setupReverseAudioMuted(ctx, peer, audioDone, "", muteIncomingFlag)
+		if err := s.setupServerMonitorSource(serverCtx, clientCtx, peer, clientID, muteIncomingFlag, pausedFlag, audioDone); err != nil {
+			return nil, err
+		}
 	}
 	return audioDone, nil
+}
+
+func (s *ServerApp) shouldUseLegacyMultiCapture() bool {
+	return len(s.cfg.CaptureDevices()) > 1
+}
+
+func (s *ServerApp) runLegacyMultiClientCapture(ctx context.Context, sendCh chan<- []byte) error {
+	// Multi-device capture still depends on the old per-pipeline mixer. Do not
+	// start a HandleDeviceCommands consumer here: each fallback client would race
+	// on s.deviceCmdCh, so fallback device commands remain disabled until this
+	// path can expose one coordinated device-control owner.
+	return s.runCapturePipelineWithOptions(ctx, sendCh, capturePipelineOptions{
+		HandleDeviceCommands: false,
+	})
+}
+
+// startSharedCaptureClient starts a per-client encoder goroutine backed by the
+// shared capture hub. The hub is created on first call and reused for all
+// subsequent clients in this server run.
+func (s *ServerApp) startSharedCaptureClient(serverCtx, clientCtx context.Context, clientID string, mc *multiClient, sendCh chan<- []byte, audioDone chan<- error) error {
+	hub, err := s.ensureCaptureHub(serverCtx)
+	if err != nil {
+		return err
+	}
+
+	// Per-client volume control, stored on multiClient for adjustClientVolume.
+	gain := NewDeviceGainControl(1.0)
+	if mc != nil {
+		mc.setClientGain(gain)
+	}
+
+	sub := hub.Subscribe(clientID)
+
+	encCfg := PerClientEncoderConfig{
+		ClientID:   clientID,
+		Nickname:   multiClientNickname(mc, clientID),
+		SampleRate: s.cfg.SampleRate,
+		Channels:   s.cfg.Channels,
+		Encoder: EncoderConfig{
+			Bitrate:     s.cfg.OpusBitrate,
+			Complexity:  s.cfg.OpusComplexity,
+			DTX:         s.cfg.OpusDTX,
+			FEC:         s.cfg.OpusFEC,
+			Application: s.cfg.OpusApplication,
+		},
+		Gain:  gain,
+		Muted: multiClientOutgoingMuted(mc),
+		Paused: func() bool {
+			return s.serverPaused.Load()
+		},
+		ConfigureEncoder: func(enc *audio.OpusEncoder) {
+			if err := enc.SetComplexity(s.cfg.OpusComplexity); err != nil {
+				s.logger.Warn("Failed to set opus complexity", "error", err)
+			}
+			if err := enc.SetDTX(s.cfg.OpusDTX); err != nil {
+				s.logger.Warn("Failed to set opus DTX", "error", err)
+			}
+			if err := enc.SetInBandFEC(s.cfg.OpusFEC); err != nil {
+				s.logger.Warn("Failed to set opus FEC", "error", err)
+			}
+		},
+	}
+
+	go func() {
+		audioDone <- runPerClientEncoder(clientCtx, sub, encCfg, sendCh, s.logger)
+	}()
+	return nil
+}
+
+func multiClientOutgoingMuted(mc *multiClient) func() bool {
+	if mc == nil {
+		return nil
+	}
+	return func() bool {
+		return mc.muted.Load() || mc.mutedOutgoing.Load()
+	}
+}
+
+func multiClientNickname(mc *multiClient, fallback string) string {
+	if mc == nil || mc.nickname == "" {
+		return fallback
+	}
+	return mc.nickname
+}
+
+// ensureCaptureHub lazily creates and starts the shared capture hub. Thread-safe;
+// subsequent callers receive the running hub. Hub lifetime is bound to the
+// passed ctx — in practice the server's runMulti ctx.
+func (s *ServerApp) ensureCaptureHub(ctx context.Context) (*SharedCaptureHub, error) {
+	s.captureHubMu.Lock()
+	defer s.captureHubMu.Unlock()
+	if s.captureHub != nil {
+		return s.captureHub, nil
+	}
+
+	captureSpectrum := s.captureSpectrum
+	captureLevel := s.captureLevelMeter
+	if captureSpectrum == nil {
+		captureSpectrum = s.spectrum
+	}
+	if captureLevel == nil {
+		captureLevel = s.levelMeter
+	}
+
+	// Recording tap feeds the non-conference recorder exactly once per frame,
+	// fixing the per-pipeline duplicate writes from the old architecture.
+	recTap := func(samples []float32) {
+		s.recorderMu.Lock()
+		rec := s.recorder
+		s.recorderMu.Unlock()
+		if rec != nil && rec.IsActive() {
+			_ = rec.WriteMix(samples) //nolint:errcheck
+		}
+	}
+
+	captureDevices := s.cfg.CaptureDevices()
+	var deviceID uint32
+	if len(captureDevices) >= 1 {
+		deviceID = captureDevices[0].ID
+		if len(captureDevices) > 1 {
+			return nil, ewerrors.NewError(ewerrors.ErrInternalState, "shared capture hub does not support multiple capture devices")
+		}
+	} else if s.cfg.DeviceID != nil {
+		deviceID = *s.cfg.DeviceID
+	}
+	// deviceID = 0 is tolerated here: hub.Run will fail at capturer.Start,
+	// which surfaces asynchronously via audioDone — matches old
+	// runCapturePipeline behavior that tests rely on.
+
+	var initialVol float32 = 1.0
+	if len(captureDevices) == 1 {
+		initialVol = float32(captureDevices[0].Volume)
+	}
+	gainCtl := NewDeviceGainControl(initialVol)
+
+	agcMap := buildAGCProcessors(captureDevices, s.cfg.SampleRate)
+	var agcProc *audio.AGCProcessor
+	if agcMap != nil {
+		agcProc = agcMap[deviceID]
+	}
+
+	hubCfg := CapturePipelineConfig{
+		SampleRate:           s.cfg.SampleRate,
+		Channels:             s.cfg.Channels,
+		DeviceID:             deviceID,
+		AudioBufferFrames:    s.cfg.EffectiveAudioBufferFrames(),
+		IsLoopback:           s.cfg.Loopback,
+		LoopbackOutputDevice: s.cfg.LoopbackOutputDevice,
+		LoopbackBlackHole:    s.cfg.LoopbackBlackHole,
+		AEC:                  s.aec,
+		AGC:                  agcProc,
+		Spectrum:             captureSpectrum,
+		LevelMeter:           captureLevel,
+		RecordingTap:         recTap,
+		GainControl:          gainCtl,
+	}
+
+	hubFactory := s.newSharedCaptureHub
+	if hubFactory == nil {
+		hubFactory = NewSharedCaptureHub
+	}
+	hub := hubFactory(hubCfg, s.logger)
+	hubCtx, hubCancel := context.WithCancel(ctx)
+
+	go func() {
+		defer hubCancel()
+		err := hub.Run(hubCtx)
+		s.resetCaptureHub(hub)
+		if err != nil && ctx.Err() == nil {
+			s.logger.Error("Shared capture hub exited with error", "error", err)
+		}
+	}()
+	if err := hub.WaitReady(ctx); err != nil {
+		hubCancel()
+		return nil, err
+	}
+
+	// Single HandleDeviceCommands consumer for the server — previously each
+	// per-client pipeline started its own goroutine which raced on the shared
+	// s.deviceCmdCh (commands landed in whichever goroutine won the race).
+	go HandleDeviceCommands(hubCtx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
+
+	s.captureHub = hub
+	s.captureHubGain = gainCtl
+	s.captureHubAGC = agcMap
+
+	return hub, nil
+}
+
+func (s *ServerApp) resetCaptureHub(hub *SharedCaptureHub) {
+	s.captureHubMu.Lock()
+	defer s.captureHubMu.Unlock()
+	if s.captureHub != hub {
+		return
+	}
+	s.captureHub = nil
+	s.captureHubGain = nil
+	s.captureHubAGC = nil
 }
 
 // setupConferenceAudioPipeline creates bidirectional audio for conference mode:
@@ -402,8 +656,9 @@ func (s *ServerApp) setupConferenceAudioPipeline(ctx context.Context, peer trans
 		audioDone <- s.runConferenceMixSender(ctx, sendCh, clientID)
 	}()
 
-	// Receive track: decode → conference mixer submit (+ AEC reference)
-	s.setupReverseAudioMuted(ctx, peer, audioDone, clientID, muteIncomingFlag)
+	// Receive track: decode → conference mixer submit (+ AEC reference).
+	// No local playback — prevents echo/feedback loop on the server.
+	s.setupConferenceReceiver(ctx, peer, audioDone, clientID, muteIncomingFlag)
 
 	return audioDone, nil
 }
@@ -459,7 +714,9 @@ func (s *ServerApp) runConferenceMixSender(ctx context.Context, sendCh chan<- []
 	}
 }
 
-func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.Signaler, peer transport.PeerManager, audioDone <-chan error, clientID, nickname string, connStart time.Time, protocol *transport.ServerSignalingProtocol) {
+// runMultiClientLoop runs the main event loop for a multi-client connection.
+// Returns true if the disconnect was graceful (client sent stop, or server shutdown).
+func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.Signaler, peer transport.PeerManager, audioDone <-chan error, clientID, nickname string, connStart time.Time, protocol *transport.ServerSignalingProtocol) bool {
 	var statsWg sync.WaitGroup
 	chatRegistered := false
 	defer func() {
@@ -476,7 +733,8 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 	var chatCh <-chan []byte
 
 	// Start stats reporting immediately (same rationale as single-client flow).
-	if s.statsCh != nil {
+	// Also runs in daemon mode when only a statsHook is configured.
+	if s.statsCh != nil || s.statsHook != nil {
 		statsWg.Add(1)
 		go func() {
 			defer statsWg.Done()
@@ -554,17 +812,17 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 			_ = signaler.Close() //nolint:errcheck
 		case raw, ok := <-controlCh:
 			if !ok || len(raw) == 0 {
-				// Channel closed (peer disconnected).
-				return
+				// Channel closed (peer disconnected) — abnormal.
+				return false
 			}
 			if s.handleDCControlMulti(raw, connStart, clientID) {
 				_ = peer.Close() //nolint:errcheck
-				return
+				return true      // Client sent stop — graceful.
 			}
 		case raw, ok := <-chatCh:
 			if !ok || len(raw) == 0 {
-				// Channel closed (peer disconnected).
-				return
+				// Channel closed (peer disconnected) — abnormal.
+				return false
 			}
 			if s.chatHub != nil {
 				s.chatHub.HandleIncoming(clientID, raw)
@@ -577,7 +835,7 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 			}
 			time.Sleep(150 * time.Millisecond)
 			_ = peer.Close() //nolint:errcheck
-			return
+			return true      // Server graceful shutdown.
 		case <-ctx.Done():
 			// Context may be canceled because stopCh fired (race between stopCh and ctx.Done).
 			// Check if this is a graceful stop and notify the client.
@@ -589,13 +847,14 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 				}
 				time.Sleep(150 * time.Millisecond)
 				_ = peer.Close() //nolint:errcheck
+				return true      // Server graceful shutdown.
 			default:
 				// Not a graceful stop — context canceled for other reasons.
 			}
-			return
+			return false
 		case msg := <-receiveCh:
 			if s.handleMultiClientMessage(msg, peer, clientID, connStart, protocol) {
-				return
+				return true // Signaling control stop — graceful.
 			}
 		case err := <-audioDone:
 			if err != nil && ctx.Err() == nil {
@@ -603,7 +862,7 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 			}
 			metrics.ConnectionDuration.Observe(time.Since(connStart).Seconds())
 			metrics.ConnectionsTotal.WithLabelValues(metrics.RoleServer, metrics.StatusSuccess).Inc()
-			return
+			return false
 		}
 	}
 }
@@ -724,8 +983,9 @@ func (s *ServerApp) validateNickname(nickname string) string {
 	return ""
 }
 
-// handleReconnectBySession checks if a session UUID matches an existing client.
-// If found, closes the old session and returns true + the old nickname.
+// handleReconnectBySession checks the sessions map for a previous session with the given UUID.
+// If found, returns the old nickname (only if it was server-assigned) and removes the session entry.
+// Also closes any still-connected client with the same session ID.
 func (s *ServerApp) handleReconnectBySession(sessionID string) (oldNickname string, found bool) {
 	if sessionID == "" {
 		return "", false
@@ -734,6 +994,17 @@ func (s *ServerApp) handleReconnectBySession(sessionID string) (oldNickname stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Check sessions map first (covers abnormal disconnects where session was preserved).
+	if entry, ok := s.sessions[sessionID]; ok {
+		delete(s.sessions, sessionID)
+		if !entry.isCustomNick {
+			return entry.nickname, true
+		}
+		// Custom nickname — don't restore it, but acknowledge the session was found.
+		return "", true
+	}
+
+	// Fallback: check if a still-connected client has this session (e.g. stale connection).
 	for id, mc := range s.clients {
 		if mc.sessionID != sessionID {
 			continue

@@ -67,7 +67,8 @@ type Model struct {
 	deviceName      string
 
 	// Setup screen
-	setupModel views.SetupModel
+	setupModel             views.SetupModel
+	virtualSinkCleanupDone bool
 
 	// Error auto-dismiss timer (UX-11)
 	errorTimer time.Time
@@ -128,6 +129,7 @@ type Model struct {
 	perClientBitrateDown   map[string]float64
 	perClientPrevBytesSent map[string]uint64
 	perClientPrevBytesRecv map[string]uint64
+	perClientVolumes       map[string]float64 // per-client volume (0.0–1.5), default 1.0
 
 	// Participants sidebar (client-side, from ChatActionParticipants)
 	participantsCh <-chan app.ChatParticipantsPayload
@@ -149,35 +151,11 @@ type Model struct {
 	popupClientID      string
 	popupClientNick    string
 
-	// Kick overlay
-	kickClientID      string
-	kickClientNick    string
-	kickReasons       []string
-	kickRecentStart   int
-	kickCustomStart   int
-	kickSelectedIndex int
-	kickCustomText    string
-	kickCustomEditing bool
-	kickFocusButton   int // 0=list, 1=[Kick], 2=[Cancel]
+	// Kick overlay state (grouped in sub-struct).
+	kickOverlay KickOverlayState
 
-	// Ban overlay
-	banClientID        string
-	banClientNick      string
-	banClientIP        string
-	banClientHWID      string
-	banCriteriaIP      bool
-	banCriteriaNick    bool
-	banCriteriaHWID    bool
-	banFocusSection    int // 0=criteria, 1=reasons, 2=buttons
-	banCriteriaIndex   int // highlighted criterion (0=IP, 1=Nick, 2=HWID)
-	banReasons         []string
-	banRecentStart     int
-	banCustomStart     int
-	banSelectedReason  int
-	banCustomText      string
-	banCustomEditing   bool
-	banButtonFocus     int // 0=[Confirm], 1=[Cancel]
-	banValidationError string
+	// Ban overlay state (grouped in sub-struct).
+	banOverlay BanOverlayState
 
 	// Device controls (per-device mute/volume in streaming screen)
 	deviceCmdCh     chan<- DeviceCommand
@@ -196,8 +174,10 @@ type Model struct {
 	conferenceStates   []audio.ParticipantState
 	participantCmdCh   chan<- ParticipantCommand
 	serverMuted        bool
+	peerMutedByServer  bool
 	muteState          *MuteState  // per-participant and mute-all tracking
 	serverMuteCh       chan<- bool // sends mute toggle to client app (non-conference mode)
+	peerMuteCh         <-chan bool // receives server-initiated outgoing mute state
 	pauseCh            chan<- bool // sends pause toggle to client app (true=pause, false=resume)
 	pauseState         *PauseState // per-device pause tracking (nil if no capture devices)
 	allPausedNotified  bool        // tracks whether ActionPause was sent (to avoid duplicate sends)
@@ -219,6 +199,9 @@ type Model struct {
 	recordingMode  views.RecordingMode
 	recordingStart time.Time
 	recordingCmdCh chan<- RecordingCommand // sends start/stop commands to app layer
+	recordingDir   string                  // recording output directory
+	recordingFile  string                  // primary recording file name
+	recordingSize  uint64                  // total recording size in bytes
 
 	// Graceful shutdown: closed when user presses Ctrl+Q.
 	stopCh   chan struct{}
@@ -310,6 +293,10 @@ func (d deviceItem) FilterValue() string {
 
 func (d deviceItem) DeviceID() uint32 {
 	return d.device.ID
+}
+
+func (d deviceItem) DeviceBackendID() string {
+	return d.device.BackendID
 }
 
 func (d deviceItem) IsInputDevice() bool {
@@ -440,6 +427,12 @@ func (m Model) WithServerMuteChannel(ch chan<- bool) Model {
 	return m
 }
 
+// WithPeerMuteChannel receives server-initiated mute state for this client's outgoing audio.
+func (m Model) WithPeerMuteChannel(ch <-chan bool) Model {
+	m.peerMuteCh = ch
+	return m
+}
+
 // WithPauseChannel sets the channel for sending pause toggle requests to the client app.
 func (m Model) WithPauseChannel(ch chan<- bool) Model {
 	m.pauseCh = ch
@@ -516,6 +509,30 @@ func (m *Model) SetMultiClientChannels(
 	m.conferenceStatsCh = conferenceStatsCh
 	m.participantCmdCh = participantCmdCh
 	m.recordingCmdCh = recordingCmdCh
+}
+
+// WithDeviceEnumerator sets a device enumerator for refreshing the device list
+// after creating/removing virtual audio sinks.
+func (m Model) WithDeviceEnumerator(enum audio.DeviceEnumerator) Model {
+	m.setupModel = m.setupModel.WithDeviceRefreshFunc(func() ([]list.Item, error) {
+		inputs, err := enum.ListInputDevices()
+		if err != nil {
+			return nil, err
+		}
+		outputs, err := enum.ListOutputDevices()
+		if err != nil {
+			return nil, err
+		}
+		all := make([]list.Item, 0, len(inputs)+len(outputs))
+		for _, dev := range inputs {
+			all = append(all, deviceItem{device: dev})
+		}
+		for _, dev := range outputs {
+			all = append(all, deviceItem{device: dev})
+		}
+		return all, nil
+	})
+	return m
 }
 
 // WithLogFile sets the log file path for display in the exit summary.

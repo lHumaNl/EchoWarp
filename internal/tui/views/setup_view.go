@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -49,6 +50,14 @@ func (m SetupModel) viewOverlay() string {
 		if m.configLoadOverlay != nil {
 			return m.configLoadOverlay.View(m.width)
 		}
+	case SetupOverlayVirtualSinkLifecycle:
+		if m.virtualSinkLifecycleOverlay != nil {
+			return m.virtualSinkLifecycleOverlay.View(m.width)
+		}
+	case SetupOverlayLanguage:
+		if m.languageOverlay != nil {
+			return m.languageOverlay.View(m.width)
+		}
 	}
 	return ""
 }
@@ -60,6 +69,10 @@ func (m SetupModel) compositeOverlay(base, overlay string) string {
 
 	baseLines := strings.Split(base, "\n")
 	overlayLines := strings.Split(overlay, "\n")
+	targetLines := max(len(baseLines), m.bodyHeight(), len(overlayLines))
+	for len(baseLines) < targetLines {
+		baseLines = append(baseLines, "")
+	}
 
 	// Center overlay vertically
 	startY := (len(baseLines) - len(overlayLines)) / 2
@@ -69,15 +82,13 @@ func (m SetupModel) compositeOverlay(base, overlay string) string {
 
 	for i, line := range overlayLines {
 		idx := startY + i
-		if idx < len(baseLines) {
-			// Center horizontally using full screen width
-			overlayW := lipgloss.Width(line)
-			startX := (m.width - overlayW) / 2
-			if startX < 0 {
-				startX = 0
-			}
-			baseLines[idx] = strings.Repeat(" ", startX) + line
+		// Center horizontally using full screen width
+		overlayW := lipgloss.Width(line)
+		startX := (m.width - overlayW) / 2
+		if startX < 0 {
+			startX = 0
 		}
+		baseLines[idx] = strings.Repeat(" ", startX) + line
 	}
 
 	return strings.Join(baseLines, "\n")
@@ -94,9 +105,9 @@ func (m SetupModel) viewTwoColumns() string {
 	} else if m.HasOutputList {
 		leftCol = m.renderDuplexDeviceLists(leftW)
 	} else {
-		leftTitle := "Select Input Device"
+		leftTitle := i18n.T("setup_select_input_device")
 		if !m.IsInput {
-			leftTitle = "Select Output Device"
+			leftTitle = i18n.T("setup_select_output_device")
 		}
 		titleStyle := styles.SetupColumnTitleDim
 		if m.activeColumn == ColumnDevices {
@@ -106,7 +117,7 @@ func (m SetupModel) viewTwoColumns() string {
 
 		m.DeviceList.SetSize(leftW-2, m.bodyHeight()-4)
 		leftBody := m.DeviceList.View()
-		flashLine := m.renderFlashLine()
+		flashLine := m.renderFlashLine(leftW)
 		if flashLine != "" {
 			flashLine += "\n"
 		}
@@ -118,7 +129,7 @@ func (m SetupModel) viewTwoColumns() string {
 	if m.activeColumn == ColumnSettings {
 		rightTitleStyle = styles.SetupColumnTitle
 	}
-	rightHeader := rightTitleStyle.Render("Settings")
+	rightHeader := rightTitleStyle.Render(i18n.T("setup_settings"))
 	rightBody := m.renderSettingsPanel(rightW)
 
 	rightCol := rightHeader + "\n" + styles.Separator.Render(strings.Repeat("─", rightW)) + "\n" + m.readyHint() + "\n\n" + rightBody
@@ -179,13 +190,13 @@ func (m SetupModel) viewSingleColumn() string {
 			}
 			return body
 		}
-		title := "Select Input Device"
+		title := i18n.T("setup_select_input_device")
 		if !m.IsInput {
-			title = "Select Output Device"
+			title = i18n.T("setup_select_output_device")
 		}
 		header := styles.SetupColumnTitle.Render(title)
 		m.DeviceList.SetSize(m.width-2, m.bodyHeight()-4)
-		flashLine := m.renderFlashLine()
+		flashLine := m.renderFlashLine(m.width)
 		if flashLine != "" {
 			flashLine += "\n"
 		}
@@ -196,7 +207,7 @@ func (m SetupModel) viewSingleColumn() string {
 		return body
 	}
 
-	header := styles.SetupColumnTitle.Render("Settings")
+	header := styles.SetupColumnTitle.Render(i18n.T("setup_settings"))
 	body := m.renderSettingsPanel(m.width - 2)
 	result := header + "\n" + styles.Separator.Render(strings.Repeat("─", m.width)) + "\n" + body
 	if tabBar != "" {
@@ -213,11 +224,11 @@ func (m SetupModel) renderNarrowTabBar() string {
 	}
 	var devTab, settTab string
 	if m.activeColumn == ColumnDevices {
-		devTab = styles.SetupColumnTitle.Render("[Devices]")
-		settTab = styles.SetupColumnTitleDim.Render("Settings")
+		devTab = styles.SetupColumnTitle.Render("[" + i18n.T("setup_devices") + "]")
+		settTab = styles.SetupColumnTitleDim.Render(i18n.T("setup_settings"))
 	} else {
-		devTab = styles.SetupColumnTitleDim.Render("Devices")
-		settTab = styles.SetupColumnTitle.Render("[Settings]")
+		devTab = styles.SetupColumnTitleDim.Render(i18n.T("setup_devices"))
+		settTab = styles.SetupColumnTitle.Render("[" + i18n.T("setup_settings") + "]")
 	}
 	sep := styles.SetupSeparator.Render(" | ")
 	return devTab + sep + settTab
@@ -232,12 +243,24 @@ func (m SetupModel) renderSettingsPanel(width int) string {
 	}
 
 	fields := m.activeFields()
+
+	// Compute max label width across visible fields for alignment.
+	maxLabelW := 18
+	for _, f := range fields {
+		if f.Hidden || f.Type == FieldAction {
+			continue
+		}
+		if w := lipgloss.Width(f.Label); w >= maxLabelW {
+			maxLabelW = w + 1
+		}
+	}
+
 	for i, f := range fields {
 		if f.Hidden {
 			continue
 		}
 		focused := m.activeColumn == ColumnSettings && !m.serverListFocused && i == m.FieldCursor
-		lines = append(lines, f.Render(focused, width))
+		lines = append(lines, f.Render(focused, maxLabelW))
 	}
 
 	// Spacer before discovery/profile info
@@ -247,7 +270,7 @@ func (m SetupModel) renderSettingsPanel(width int) string {
 	if m.discoveryScanning {
 		spinnerFrames := []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 		frame := spinnerFrames[m.discoveryFrame%len(spinnerFrames)]
-		lines = append(lines, "", styles.SetupDimValue.Render("  "+string(frame)+" Discovering servers..."))
+		lines = append(lines, "", styles.SetupDimValue.Render("  "+string(frame)+" "+i18n.T("setup_discovering_servers")))
 	}
 
 	return strings.Join(lines, "\n")
@@ -256,46 +279,40 @@ func (m SetupModel) renderSettingsPanel(width int) string {
 // deviceStatusHint returns the device selection status shown under "Audio Devices" header.
 func (m SetupModel) deviceStatusHint() string {
 	if m.isDuplexMode {
-		capCount, playCount := 0, 0
-		for key := range m.multiSelect {
-			if strings.HasPrefix(key, "I:") {
-				capCount++
-			} else {
-				playCount++
-			}
-		}
+		capCount, playCount := m.selectedVisibleCounts()
 		if capCount > 0 && playCount > 0 {
-			return styles.SetupReadyHint.Render(fmt.Sprintf("  ✓ %d capture, %d playback", capCount, playCount))
+			return styles.SetupReadyHint.Render("  " + i18n.Tf("setup_capture_playback_count", capCount, playCount))
 		}
 		// Conference server: hub mode — devices optional; participant mode — any combo
 		if m.isConferenceMode && m.cfg.Mode == config.ModeServer {
-			if len(m.multiSelect) == 0 {
-				return styles.SetupReadyHint.Render("  ✓ Hub mode — no devices needed")
+			if capCount == 0 && playCount == 0 {
+				return styles.SetupReadyHint.Render("  " + i18n.T("setup_hub_mode_no_devices"))
 			}
-			return styles.SetupReadyHint.Render(fmt.Sprintf("  ✓ %d capture, %d playback", capCount, playCount))
+			return styles.SetupReadyHint.Render("  " + i18n.Tf("setup_capture_playback_count", capCount, playCount))
 		}
 		if m.isConferenceMode {
-			return styles.SetupErrorHint.Render("  ✗ Conference — select mic and speaker")
+			return styles.SetupErrorHint.Render("  " + i18n.T("setup_conference_select_mic_speaker"))
 		}
-		return styles.SetupErrorHint.Render("  ✗ Select at least 1 Capture and 1 Playback")
+		return styles.SetupErrorHint.Render("  " + i18n.T("setup_select_capture_playback"))
 	}
-	if len(m.multiSelect) > 0 {
-		return styles.SetupReadyHint.Render(fmt.Sprintf("  ✓ %d selected", len(m.multiSelect)))
+	selectedCount := len(m.selectedVisibleRows())
+	if selectedCount > 0 {
+		return styles.SetupReadyHint.Render("  " + i18n.Tf("setup_n_selected", selectedCount))
 	}
-	return styles.SetupErrorHint.Render("  ✗ Select at least one device")
+	return styles.SetupErrorHint.Render("  " + i18n.T("setup_select_at_least_one"))
 }
 
 // modeIndicator returns a styled mode description shown under the device status hint.
 func (m SetupModel) modeIndicator() string {
 	for _, f := range m.Fields {
-		if f.Label == "Mode" {
+		if f.Key == "mode" {
 			return styles.SetupModeIndicator.Render("  ◆ " + f.Value)
 		}
 	}
 	// Client mode: mode from probe result
 	if m.probeResult != nil {
 		mode := m.probeResult.Mode
-		if desc, ok := modeKeyToDescriptive[mode]; ok {
+		if desc, ok := modeKeyToDescriptiveMap()[mode]; ok {
 			return styles.SetupModeIndicator.Render("  ◆ " + desc)
 		}
 		if mode != "" {
@@ -314,33 +331,38 @@ func (m SetupModel) readyHint() string {
 	if m.cfg.Mode == config.ModeClient {
 		if m.probeResult == nil {
 			if m.probeStatus == "probing" {
-				return styles.SetupDimValue.Render("  ⠋ Probing server...")
+				return styles.SetupDimValue.Render("  " + i18n.T("setup_probing_server"))
 			}
 			if !m.serverList.IsServerSelected() {
-				return styles.SetupDimValue.Render("  Select a server to start")
+				return styles.SetupDimValue.Render("  " + i18n.T("setup_select_server_to_start"))
 			}
-			return styles.SetupErrorHint.Render("  ✗ Server not reachable")
+			return styles.SetupErrorHint.Render("  " + i18n.T("setup_server_not_reachable"))
 		}
 	}
 	// Validate required fields
 	allFields := m.allFieldsFlat()
 	for _, f := range allFields {
 		if f.Required && f.Value == "" {
-			return styles.SetupErrorHint.Render("  ✗ " + f.Label + " is required")
+			return styles.SetupErrorHint.Render("  " + i18n.Tf("setup_field_required", f.Label))
 		}
 		if f.Required && !f.IsValid() {
-			return styles.SetupErrorHint.Render("  ✗ " + f.Label + ": " + f.lastResult.Message)
+			return styles.SetupErrorHint.Render("  " + i18n.Tf("setup_field_invalid", f.Label, f.lastResult.Message))
 		}
 	}
-	return styles.SetupReadyHint.Render("  ✓ Settings OK")
+	return styles.SetupReadyHint.Render("  " + i18n.T("setup_settings_ok"))
 }
 
 // renderFlashLine returns a styled flash notification line (empty string if no flash).
-func (m SetupModel) renderFlashLine() string {
+func (m SetupModel) renderFlashLine(width int) string {
 	if m.flashMsg == "" {
 		return ""
 	}
-	return styles.FlashSuccess.Render("  ⟳ " + m.flashMsg)
+	prefix := "  ⟳ "
+	messageWidth := width - lipgloss.Width(prefix)
+	if messageWidth <= 0 {
+		return styles.FlashSuccess.Render(TruncateToWidth(prefix+m.flashMsg, width))
+	}
+	return styles.FlashSuccess.Render(prefix + TruncateToWidth(m.flashMsg, messageWidth))
 }
 
 // HelpKeys returns the help keys string for the status bar.
@@ -348,33 +370,37 @@ func (m SetupModel) HelpKeys() string {
 	if m.overlay != SetupOverlayNone {
 		switch m.overlay {
 		case SetupOverlaySummary:
-			return "enter: start  esc: back  ^Y: copy cmd"
+			return i18n.T("help_summary_overlay")
 		case SetupOverlayVirtualDevice:
-			return "↑↓: navigate  enter: edit/create  space: toggle  esc: cancel"
+			return i18n.T("help_virtual_device_overlay")
 		case SetupOverlayRestore:
-			return "←→: select  enter: confirm  esc: skip"
+			return i18n.T("help_restore_overlay")
 		case SetupOverlayConfigSave:
-			return "enter: save  esc: cancel"
+			return i18n.T("help_config_save_overlay")
 		case SetupOverlayConfigLoad:
-			return "↑↓: browse  enter: load  ^D: delete  esc: cancel"
+			return i18n.T("help_config_load_overlay")
+		case SetupOverlayVirtualSinkLifecycle:
+			return i18n.T("help_virtual_sink_lifecycle")
+		case SetupOverlayLanguage:
+			return i18n.T("help_language_overlay")
 		}
 	}
 	if m.inputMode == ModeEditing {
-		return "enter: confirm  esc: cancel"
+		return i18n.T("help_editing")
 	}
 	if m.activeColumn == ColumnDevices {
 		if m.unifiedDuplex && m.isDuplexMode {
-			return "↑↓: device  tab: section  space: toggle  ^E: virtual  ↵: start  ^Q: quit"
+			return i18n.T("help_devices_unified_duplex")
 		}
 		if m.unifiedDuplex {
-			return "↑↓: device  tab: section  space: toggle  ^E: virtual  ↵: start  ^Q: quit"
+			return i18n.T("help_devices_unified_duplex")
 		}
 		if m.HasOutputList {
-			return "/: filter  ↑↓: device  ^↑^↓: section  tab: settings  ↵: start  ^Q: quit"
+			return i18n.T("help_devices_duplex")
 		}
-		return "/: filter  ↑↓: device  ^E: virtual  tab: settings  ↵: start  ^Q: quit"
+		return i18n.T("help_devices_normal")
 	}
-	return "↑↓: navigate  enter/space: edit  tab: devices  ^S: save  ^L: load  ^H: summary  ^Q: quit"
+	return i18n.T("help_settings_column")
 }
 
 // renderUnifiedDeviceList renders two device sections (Input/Output) with checkbox columns.
@@ -387,7 +413,7 @@ func (m SetupModel) renderUnifiedDeviceList(width int) string {
 	if m.activeColumn == ColumnDevices {
 		titleStyle = styles.SetupColumnTitle
 	}
-	result.WriteString(titleStyle.Render("Audio Devices"))
+	result.WriteString(titleStyle.Render(i18n.T("setup_audio_devices")))
 	result.WriteString("\n")
 	result.WriteString(styles.Separator.Render(strings.Repeat("─", width)))
 	result.WriteString("\n")
@@ -395,9 +421,9 @@ func (m SetupModel) renderUnifiedDeviceList(width int) string {
 	// Client mode: show placeholder when no server connected
 	if m.cfg.Mode == config.ModeClient && !m.isServerReady() {
 		result.WriteString("\n")
-		result.WriteString(styles.SetupDimValue.Render("   Select a server to configure"))
+		result.WriteString(styles.SetupDimValue.Render("   " + i18n.T("setup_select_server_to_configure")))
 		result.WriteString("\n")
-		result.WriteString(styles.SetupDimValue.Render("   audio devices"))
+		result.WriteString(styles.SetupDimValue.Render("   " + i18n.T("setup_audio_devices_placeholder")))
 		result.WriteString("\n")
 		return result.String()
 	}
@@ -408,7 +434,7 @@ func (m SetupModel) renderUnifiedDeviceList(width int) string {
 		result.WriteString(mi)
 		result.WriteString("\n")
 	}
-	if fl := m.renderFlashLine(); fl != "" {
+	if fl := m.renderFlashLine(width); fl != "" {
 		result.WriteString(fl)
 		result.WriteString("\n")
 	}
@@ -460,14 +486,14 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 	}
 
 	icon := "🎤"
-	title := "Input"
+	title := i18n.T("setup_section_input")
 	if section == SectionOutput {
 		icon = "🔊"
-		title = "Output"
+		title = i18n.T("setup_section_output")
 	}
 
 	// Build column headers right-aligned
-	colHeaders := styles.SetupDimValue.Render("✓ Select")
+	colHeaders := styles.SetupDimValue.Render(i18n.T("setup_col_select"))
 
 	headerLeft := titleStyle.Render(icon + " " + title)
 	// Pad header to right-align column headers
@@ -500,7 +526,7 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 
 	var body strings.Builder
 	if len(flatRows) == 0 {
-		body.WriteString("\n" + styles.SetupDimValue.Render("    (no devices)"))
+		body.WriteString("\n" + styles.SetupDimValue.Render("    "+i18n.T("setup_no_devices")))
 	} else {
 		maxItems := maxRows / 2
 		if maxItems < 1 {
@@ -530,9 +556,10 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 			end = len(flatRows)
 		}
 
+		volAGCAreaW := 22 // "████████░░ 100%  ◇ AGC"
 		checkboxAreaW := 8
 		infoColW := 26
-		nameW := width - 4 - infoColW - checkboxAreaW
+		nameW := width - 4 - infoColW - checkboxAreaW - volAGCAreaW
 		if nameW < 10 {
 			nameW = 10
 		}
@@ -550,15 +577,8 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 				}
 				mixName := "    └─ 🎤 " + dev.Name
 				mixNameW := nameW + infoColW // mix items span both name and info columns
+				mixName = TruncateToWidth(mixName, mixNameW)
 				nameVisible := lipgloss.Width(mixName)
-				if nameVisible > mixNameW {
-					runes := []rune(mixName)
-					for len(runes) > 0 && lipgloss.Width(string(runes)) > mixNameW-1 {
-						runes = runes[:len(runes)-1]
-					}
-					mixName = string(runes) + "…"
-					nameVisible = lipgloss.Width(mixName)
-				}
 				padded := mixName + strings.Repeat(" ", mixNameW-nameVisible)
 				if isCursor && isFocused {
 					padded = styles.SelectedItem.Render(padded)
@@ -580,15 +600,8 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 				} else if dev.IsVirtual {
 					name = "⟡ " + name
 				}
+				name = TruncateToWidth(name, nameW)
 				nameVisible := lipgloss.Width(name)
-				if nameVisible > nameW {
-					runes := []rune(name)
-					for len(runes) > 0 && lipgloss.Width(string(runes)) > nameW-1 {
-						runes = runes[:len(runes)-1]
-					}
-					name = string(runes) + "…"
-					nameVisible = lipgloss.Width(name)
-				}
 				namePadded := name + strings.Repeat(" ", nameW-nameVisible)
 
 				info := formatDeviceInfo(dev)
@@ -608,7 +621,13 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 				selected := roles.Capture || roles.Playback
 				checkboxes := "   " + m.renderCheckbox(selected, isFocused && isCursor)
 
-				body.WriteString(cursorGlyph + namePadded + infoPadded + checkboxes)
+				// Volume bar + AGC indicator (only for selected devices)
+				volAGC := strings.Repeat(" ", volAGCAreaW)
+				if selected {
+					volAGC = m.renderDeviceVolAGC(dev, isFocused && isCursor)
+				}
+
+				body.WriteString(cursorGlyph + namePadded + infoPadded + checkboxes + volAGC)
 			}
 
 			if i < end-1 {
@@ -617,7 +636,7 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 		}
 
 		if len(flatRows) > maxItems {
-			indicator := fmt.Sprintf("  (%d–%d of %d)", scroll+1, end, len(flatRows))
+			indicator := "  " + i18n.Tf("setup_scroll_indicator", scroll+1, end, len(flatRows))
 			body.WriteString("\n" + styles.SetupDimValue.Render(indicator))
 		}
 	}
@@ -635,10 +654,10 @@ func (m SetupModel) renderDeviceSection(section DeviceSection, devices []deviceR
 	if hasVirtual || hasLoopback {
 		var parts []string
 		if hasVirtual {
-			parts = append(parts, "⟡ virtual")
+			parts = append(parts, i18n.T("setup_virtual_legend"))
 		}
 		if hasLoopback {
-			parts = append(parts, "🔄 loopback")
+			parts = append(parts, i18n.T("setup_loopback_legend"))
 		}
 		body.WriteString("\n" + styles.SetupDimValue.Render("  "+strings.Join(parts, "  ")))
 	}
@@ -673,7 +692,7 @@ func (m SetupModel) renderDuplexDeviceLists(width int) string {
 	if m.activeColumn == ColumnDevices && m.DeviceSection == SectionInput {
 		inputTitleStyle = styles.SetupColumnTitle
 	}
-	inputHeader := inputTitleStyle.Render("Input Device (mic)")
+	inputHeader := inputTitleStyle.Render(i18n.T("setup_input_device_mic"))
 	m.DeviceList.SetSize(width-2, devH)
 	inputBody := m.DeviceList.View()
 
@@ -682,15 +701,50 @@ func (m SetupModel) renderDuplexDeviceLists(width int) string {
 	if m.activeColumn == ColumnDevices && m.DeviceSection == SectionOutput {
 		outputTitleStyle = styles.SetupColumnTitle
 	}
-	outputHeader := outputTitleStyle.Render("Output Device (speaker)")
+	outputHeader := outputTitleStyle.Render(i18n.T("setup_output_device_speaker"))
 	m.OutputDeviceList.SetSize(width-2, devH)
 	outputBody := m.OutputDeviceList.View()
 
 	sep := styles.Separator.Render(strings.Repeat("─", width))
-	flashLine := m.renderFlashLine()
+	flashLine := m.renderFlashLine(width)
 	if flashLine != "" {
 		flashLine += "\n"
 	}
 	return inputHeader + "\n" + sep + "\n" + flashLine + inputBody + "\n\n" +
 		outputHeader + "\n" + sep + "\n" + outputBody
+}
+
+// renderDeviceVolAGC renders an inline volume bar + AGC indicator for a selected device row.
+func (m SetupModel) renderDeviceVolAGC(dev deviceRow, isCursor bool) string {
+	const barLen = 10
+	filled := int(dev.Volume / 1.5 * float64(barLen))
+	if filled > barLen {
+		filled = barLen
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
+	pct := int(dev.Volume*100 + 0.5)
+
+	var volStr string
+	if dev.Volume > 1.0 {
+		volStr = styles.StatValueWarn.Render(bar) + styles.StatValueWarn.Render(fmt.Sprintf(" %3d%%", pct))
+	} else {
+		volStr = styles.StatValueGood.Render(bar) + fmt.Sprintf(" %3d%%", pct)
+	}
+
+	// AGC indicator
+	agcGlyph := "◇ AGC"
+	agcStyle := styles.SetupDimValue
+	if dev.AGC {
+		agcGlyph = "◆ AGC"
+		agcStyle = styles.StatValueGood
+	}
+	// Highlight AGC when cursor is on AGC column
+	if isCursor && m.deviceColumn == 1 {
+		agcStyle = styles.SetupColumnTitle
+		if dev.AGC {
+			agcStyle = styles.StatValueGood.Bold(true)
+		}
+	}
+
+	return " " + volStr + "  " + agcStyle.Render(agcGlyph)
 }

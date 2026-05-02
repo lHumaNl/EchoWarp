@@ -83,3 +83,7 @@ __debug_bin*
 *.pprof
 cpu.prof
 mem.prof
+
+# Task specifications
+.tasks/
+EchoWarp.app/

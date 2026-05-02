@@ -37,7 +37,11 @@ func newServerModel(t *testing.T, tempDir string, devices []mockDeviceItem, isDu
 // writePresets writes server_presets.json to tempDir.
 func writePresets(t *testing.T, tempDir string, presets map[string]recent.DevicePreset) {
 	t.Helper()
-	sp := preset.ServerPresets{Presets: presets}
+	modePresets := make(map[string]preset.ModePreset, len(presets))
+	for mode, dp := range presets {
+		modePresets[mode] = preset.ModePreset{Devices: dp.Devices}
+	}
+	sp := preset.ServerPresets{Presets: modePresets}
 	data, err := json.MarshalIndent(sp, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(tempDir, 0700))
@@ -163,9 +167,9 @@ func TestIntegration_PresetDismissed_NotShownAgain(t *testing.T) {
 	assert.Empty(t, m.multiSelect, "devices should not be re-restored after dismiss")
 }
 
-// --- Scenario 5: Virtual device not found → overlay shown ---
+// --- Scenario 5: Virtual device not found → no startup prompt ---
 
-func TestIntegration_VirtualDeviceNotFound_OverlayShown(t *testing.T) {
+func TestIntegration_VirtualDeviceNotFound_NoOverlay(t *testing.T) {
 	dir := t.TempDir()
 
 	// Preset contains a virtual device + a real device
@@ -183,19 +187,16 @@ func TestIntegration_VirtualDeviceNotFound_OverlayShown(t *testing.T) {
 
 	m := newServerModel(t, dir, devices, false)
 
-	// Non-virtual device auto-restored, virtual device triggers overlay
+	// Non-virtual device auto-restored, virtual device is silently ignored.
 	_, micSelected := m.multiSelect[selectKeyFor(1, "Built-in Mic", true)]
 	assert.True(t, micSelected, "Built-in Mic should be auto-restored")
-	assert.Equal(t, SetupOverlayRestore, m.overlay, "overlay should show for missing virtual devices")
-	require.NotNil(t, m.restoreOverlay)
-	assert.True(t, m.restoreOverlay.VirtualOnly)
-	assert.Len(t, m.restoreOverlay.MissingVirtual, 1)
-	assert.Equal(t, "BlackHole 2ch", m.restoreOverlay.MissingVirtual[0].Name)
+	assert.Equal(t, SetupOverlayNone, m.overlay, "no prompt for missing virtual devices")
+	assert.Nil(t, m.restoreOverlay)
 }
 
-// --- Scenario 5b: Virtual device not found, no real devices match → no overlay, just flash ---
+// --- Scenario 5b: Only virtual device not found → no startup prompt ---
 
-func TestIntegration_OnlyVirtualDeviceNotFound_OverlayShown(t *testing.T) {
+func TestIntegration_OnlyVirtualDeviceNotFound_NoOverlay(t *testing.T) {
 	dir := t.TempDir()
 
 	// Preset contains only a virtual device
@@ -212,10 +213,10 @@ func TestIntegration_OnlyVirtualDeviceNotFound_OverlayShown(t *testing.T) {
 
 	m := newServerModel(t, dir, devices, false)
 
-	// Virtual device missing → overlay shown
-	assert.Equal(t, SetupOverlayRestore, m.overlay, "overlay should show for missing virtual device")
-	require.NotNil(t, m.restoreOverlay)
-	assert.True(t, m.restoreOverlay.VirtualOnly)
+	// Virtual device missing → no overlay or flash.
+	assert.Equal(t, SetupOverlayNone, m.overlay, "no prompt for missing virtual device")
+	assert.Nil(t, m.restoreOverlay)
+	assert.Empty(t, m.flashMsg)
 }
 
 // --- Scenario 6: Nickname → hostname migration ---
@@ -251,15 +252,15 @@ func TestIntegration_MultiplePresetSaves_LastWins(t *testing.T) {
 	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
 
 	// First save: normal with 1 device
-	sp := preset.ServerPresets{Presets: make(map[string]recent.DevicePreset)}
-	sp.Set("normal", recent.DevicePreset{
+	sp := preset.ServerPresets{Presets: make(map[string]preset.ModePreset)}
+	sp.Set("normal", preset.ModePreset{
 		Devices: []recent.PresetDevice{{ID: 1, Name: "Mic"}},
 	})
 	require.NoError(t, preset.Save(sp))
 
 	// Second save: normal with 2 devices (overwrite)
 	sp2 := preset.Load()
-	sp2.Set("normal", recent.DevicePreset{
+	sp2.Set("normal", preset.ModePreset{
 		Devices: []recent.PresetDevice{
 			{ID: 1, Name: "Mic"},
 			{ID: 2, Name: "Speaker"},

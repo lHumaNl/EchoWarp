@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"nhooyr.io/websocket"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
 )
 
 func createTestNode(t *testing.T) *echowarp.Node {
@@ -24,7 +27,10 @@ func createTestNode(t *testing.T) *echowarp.Node {
 		SampleRate: 48000,
 		Channels:   1,
 	}
-	node, err := echowarp.NewNode(cfg)
+	factory := func(_ echowarp.NodeConfig, _ *slog.Logger, _ ban.BanManager, _ *tls.Config, _ *auth.IPRateLimiter) (echowarp.Runner, error) {
+		return &noopTestRunner{}, nil
+	}
+	node, err := echowarp.NewNode(cfg, echowarp.WithRunnerFactory(factory))
 	require.NoError(t, err)
 	return node
 }

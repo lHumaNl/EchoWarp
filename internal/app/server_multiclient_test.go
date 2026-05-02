@@ -17,6 +17,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
@@ -86,14 +87,30 @@ func (m *mockBanManager) Close() error {
 	return nil
 }
 
-func (m *mockBanManager) IsHWIDBanned(_ string) bool     { return false }
-func (m *mockBanManager) BanHWID(_ string)               {}
-func (m *mockBanManager) UnbanHWID(_ string)             {}
-func (m *mockBanManager) BannedHWIDList() []string       { return nil }
-func (m *mockBanManager) IsNicknameBanned(_ string) bool { return false }
-func (m *mockBanManager) BanNickname(_ string)           {}
-func (m *mockBanManager) UnbanNickname(_ string)         {}
-func (m *mockBanManager) BannedNicknameList() []string   { return nil }
+func (m *mockBanManager) BanWithReason(addr, _ string) error { m.Ban(addr); return nil }
+func (m *mockBanManager) BannedEntries() []ban.BanEntry {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]ban.BanEntry, 0, len(m.banned))
+	for addr, b := range m.banned {
+		if b {
+			out = append(out, ban.BanEntry{Address: addr, Banned: true})
+		}
+	}
+	return out
+}
+func (m *mockBanManager) IsHWIDBanned(_ string) bool              { return false }
+func (m *mockBanManager) BanHWID(_ string)                        {}
+func (m *mockBanManager) BanHWIDWithReason(_, _ string) error     { return nil }
+func (m *mockBanManager) UnbanHWID(_ string)                      {}
+func (m *mockBanManager) BannedHWIDList() []string                { return nil }
+func (m *mockBanManager) BannedHWIDEntries() []ban.BanEntry       { return nil }
+func (m *mockBanManager) IsNicknameBanned(_ string) bool          { return false }
+func (m *mockBanManager) BanNickname(_ string)                    {}
+func (m *mockBanManager) BanNicknameWithReason(_, _ string) error { return nil }
+func (m *mockBanManager) UnbanNickname(_ string)                  {}
+func (m *mockBanManager) BannedNicknameList() []string            { return nil }
+func (m *mockBanManager) BannedNicknameEntries() []ban.BanEntry   { return nil }
 
 type mockConn struct {
 	remoteAddr net.Addr
@@ -328,7 +345,7 @@ func TestServerApp_UnregisterMultiClient_Cleanup(t *testing.T) {
 
 	mc, _ := app.registerMultiClient(server, "client-1")
 
-	app.unregisterMultiClient(mc, "client-1")
+	app.unregisterMultiClient(mc, "client-1", false)
 
 	app.mu.RLock()
 	_, exists := app.clients["client-1"]
@@ -419,15 +436,19 @@ func TestServerApp_SetupMultiClientAudio_Success(t *testing.T) {
 	t.Parallel()
 	cfg := testMultiClientConfig()
 	app := NewServerApp(cfg, testMultiClientLogger(), nil, nil, nil)
+	installFakeSharedCaptureHub(app, func() *fakeSharedCapturer {
+		return &fakeSharedCapturer{}
+	})
 
 	peer := transport.NewWebRTCPeer(transport.DirectionSend)
 	err := peer.CreatePeerConnection(transport.ICEConfig{})
 	require.NoError(t, err)
 	defer peer.Close()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	audioDone, ok := app.setupMultiClientAudio(ctx, peer, transport.DirectionSend, "client-1")
+	audioDone, ok := app.setupMultiClientAudio(ctx, ctx, peer, transport.DirectionSend, "client-1")
 
 	assert.True(t, ok)
 	assert.NotNil(t, audioDone)
@@ -710,7 +731,7 @@ func TestServerApp_MultiClientIntegration(t *testing.T) {
 
 			mc, ok := app.registerMultiClient(server, clientID)
 			if ok {
-				app.unregisterMultiClient(mc, clientID)
+				app.unregisterMultiClient(mc, clientID, false)
 			}
 		}(i)
 	}
@@ -803,7 +824,7 @@ func TestServerApp_RegisterAndUnregister_Sequential(t *testing.T) {
 			app.mu.RUnlock()
 			assert.LessOrEqual(t, count, 5)
 
-			app.unregisterMultiClient(mc, clientID)
+			app.unregisterMultiClient(mc, clientID, false)
 		}
 		server.Close()
 	}

@@ -153,6 +153,7 @@ func applyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
 	overrideBoolFlag(cmd, "server-muted", &cfg.ServerMuted)
 	overrideBoolFlag(cmd, "hwid-required", &cfg.HWIDRequired)
 	overrideStringFlag(cmd, "record", &cfg.RecordMode)
+	overrideStringFlag(cmd, "record-dir", &cfg.RecordDir)
 	cfg.NormalizeConference()
 }
 

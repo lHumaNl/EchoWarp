@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 )
 
@@ -27,28 +28,28 @@ type ServerStoppedParams struct {
 func ServerStoppedView(p ServerStoppedParams) string {
 	var b strings.Builder
 
-	title := styles.ServerStoppedTitle.Render("Server has shut down.")
+	title := styles.ServerStoppedTitle.Render(i18n.T("server_stopped_title"))
 	b.WriteString("\n  " + title + "\n")
 
 	if p.AutoReconnect && p.Probing {
-		b.WriteString("\n  " + styles.ServerStoppedHint.Render("Probing server...") + "\n")
+		b.WriteString("\n  " + styles.ServerStoppedHint.Render(i18n.T("server_stopped_probing")) + "\n")
 	} else if p.AutoReconnect {
-		attemptStr := fmt.Sprintf("attempt %d", p.Attempt)
+		attemptStr := i18n.Tf("server_stopped_attempt", p.Attempt)
 		if p.MaxAttempts > 0 {
-			attemptStr = fmt.Sprintf("attempt %d/%d", p.Attempt, p.MaxAttempts)
+			attemptStr = i18n.Tf("server_stopped_attempt_max", p.Attempt, p.MaxAttempts)
 		}
 		countdownStr := styles.ReconnectCountdown.Render(fmt.Sprintf("%ds", p.Countdown))
 		b.WriteString("\n  " + styles.ServerStoppedHint.Render(
-			fmt.Sprintf("Waiting for server... (%s, next in %s)", attemptStr, countdownStr),
+			i18n.Tf("server_stopped_waiting", attemptStr, countdownStr),
 		) + "\n")
 		if p.LastError != "" {
-			b.WriteString("  " + styles.ServerStoppedHint.Render("Last error: "+p.LastError) + "\n")
+			b.WriteString("  " + styles.ServerStoppedHint.Render(i18n.T("server_stopped_last_error")+p.LastError) + "\n")
 		}
 	} else if p.MaxAttempts > 0 && p.Attempt >= p.MaxAttempts {
-		b.WriteString("\n  " + styles.ServerStoppedHint.Render("Max reconnect attempts reached.") + "\n")
+		b.WriteString("\n  " + styles.ServerStoppedHint.Render(i18n.T("server_stopped_max_attempts")) + "\n")
 	}
 
-	b.WriteString("\n  " + renderButtons([]string{"Reconnect", "Settings", "Quit"}, p.SelectedButton) + "\n")
+	b.WriteString("\n  " + renderButtons([]string{i18n.T("kickban_btn_reconnect"), i18n.T("kickban_btn_settings"), i18n.T("kickban_btn_quit")}, p.SelectedButton) + "\n")
 	return b.String()
 }
 
@@ -63,14 +64,14 @@ type CriticalChangesOverlayParams struct {
 func CriticalChangesOverlay(p CriticalChangesOverlayParams) string {
 	_ = p.Height // reserved for future use
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render("Server settings changed:"))
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214")).Render(i18n.T("server_stopped_critical_changes")))
 	b.WriteString("\n")
 	for _, c := range p.Changes {
 		line := fmt.Sprintf("  • %s: %s → %s", c.Field, c.OldValue, c.NewValue)
 		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n")
-	b.WriteString(styles.ServerStoppedHint.Render("Enter: open setup    Esc: quit"))
+	b.WriteString(styles.ServerStoppedHint.Render(i18n.T("server_stopped_critical_hint")))
 
 	maxW := p.Width - 8
 	if maxW < 30 {

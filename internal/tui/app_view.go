@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/internal/tui/views"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
@@ -70,7 +71,9 @@ func (m Model) View() string {
 		return m.viewSummary()
 	}
 
-	// Determine state and duration for header
+	// Determine state and duration for header.
+	// NOTE: state strings are English identifiers used for color/indicator lookups
+	// (stateColor/getStateIndicator). They must not be translated directly here.
 	state := m.stats.State
 	if state == "" {
 		switch m.screen {
@@ -100,6 +103,7 @@ func (m Model) View() string {
 	if m.isRecording {
 		recInfo.Active = true
 		recInfo.Duration = time.Since(m.recordingStart)
+		recInfo.Size = m.recordingSize
 		modeNames := []string{"mix", "tracks", "both"}
 		modeName := modeNames[m.recordingMode]
 		if m.conference {
@@ -120,10 +124,10 @@ func (m Model) View() string {
 	header := renderHeader(m.config, state, duration, m.reconnectCount, aecDisplay, m.width, recInfo)
 	// Append error banner below the header so body height is not affected (UX-11)
 	if m.err != nil {
-		errText := fmt.Sprintf(" Error: %v ", m.err)
+		errText := i18n.Tf("layout_error_prefix", m.err)
 		var ewErr *ewerrors.EchoWarpError
 		if errors.As(m.err, &ewErr) && ewErr.Suggestion != "" {
-			errText += fmt.Sprintf("| Hint: %s ", ewErr.Suggestion)
+			errText += i18n.Tf("layout_error_hint", ewErr.Suggestion)
 		}
 		errorLine := styles.Error.Render(errText)
 		// Pad to full width
@@ -195,14 +199,14 @@ func (m Model) View() string {
 	// Kick overlay
 	if m.overlay == OverlayKick {
 		body = views.RenderKickOverlay(views.KickOverlayParams{
-			ClientNickname:   m.kickClientNick,
-			Reasons:          m.kickReasons,
-			RecentStartIndex: m.kickRecentStart,
-			CustomStartIndex: m.kickCustomStart,
-			SelectedIndex:    m.kickSelectedIndex,
-			CustomText:       m.kickCustomText,
-			CustomEditing:    m.kickCustomEditing,
-			FocusButton:      m.kickFocusButton,
+			ClientNickname:   m.kickOverlay.ClientNick,
+			Reasons:          m.kickOverlay.Reasons,
+			RecentStartIndex: m.kickOverlay.RecentStart,
+			CustomStartIndex: m.kickOverlay.CustomStart,
+			SelectedIndex:    m.kickOverlay.SelectedIndex,
+			CustomText:       m.kickOverlay.CustomText,
+			CustomEditing:    m.kickOverlay.CustomEditing,
+			FocusButton:      m.kickOverlay.FocusButton,
 			Width:            m.width,
 			Height:           m.height - 2,
 		})
@@ -211,24 +215,24 @@ func (m Model) View() string {
 	// Ban overlay
 	if m.overlay == OverlayBan {
 		body = views.RenderBanOverlay(views.BanOverlayParams{
-			ClientNickname:   m.banClientNick,
-			IP:               m.banClientIP,
-			Nickname:         m.banClientNick,
-			HWID:             m.banClientHWID,
+			ClientNickname:   m.banOverlay.ClientNick,
+			IP:               m.banOverlay.ClientIP,
+			Nickname:         m.banOverlay.ClientNick,
+			HWID:             m.banOverlay.ClientHWID,
 			HWIDAvailable:    m.config.HWIDRequired,
-			CriteriaIP:       m.banCriteriaIP,
-			CriteriaNick:     m.banCriteriaNick,
-			CriteriaHWID:     m.banCriteriaHWID,
-			Reasons:          m.banReasons,
-			RecentStartIndex: m.banRecentStart,
-			CustomStartIndex: m.banCustomStart,
-			SelectedReason:   m.banSelectedReason,
-			CustomText:       m.banCustomText,
-			CustomEditing:    m.banCustomEditing,
-			FocusSection:     m.banFocusSection,
-			CriteriaIndex:    m.banCriteriaIndex,
-			ButtonFocus:      m.banButtonFocus,
-			ValidationError:  m.banValidationError,
+			CriteriaIP:       m.banOverlay.CriteriaIP,
+			CriteriaNick:     m.banOverlay.CriteriaNick,
+			CriteriaHWID:     m.banOverlay.CriteriaHWID,
+			Reasons:          m.banOverlay.Reasons,
+			RecentStartIndex: m.banOverlay.RecentStart,
+			CustomStartIndex: m.banOverlay.CustomStart,
+			SelectedReason:   m.banOverlay.SelectedReason,
+			CustomText:       m.banOverlay.CustomText,
+			CustomEditing:    m.banOverlay.CustomEditing,
+			FocusSection:     m.banOverlay.FocusSection,
+			CriteriaIndex:    m.banOverlay.CriteriaIndex,
+			ButtonFocus:      m.banOverlay.ButtonFocus,
+			ValidationError:  m.banOverlay.ValidationError,
 			Width:            m.width,
 			Height:           m.height - 2,
 		})
@@ -257,6 +261,8 @@ func (m Model) View() string {
 				SampleRate: sampleRate,
 				BitDepth:   bitDepth,
 				Muted:      ds.Muted,
+				Volume:     ds.Volume,
+				AGC:        ds.AGC,
 			})
 		}
 		body = views.RenderDeviceOverlay(views.DeviceOverlayParams{
@@ -434,7 +440,7 @@ func (m Model) viewStreaming() string {
 		if m.participantOverlay.Visible {
 			body = m.participantOverlay.Render(m.width, m.height-2)
 		} else if m.recordingOverlay.Visible {
-			body = m.recordingOverlay.Render(m.width)
+			body = m.recordingOverlay.Render(m.width, m.height-2)
 		}
 		return body
 	}
@@ -516,6 +522,7 @@ func (m Model) viewStreaming() string {
 			AggBitrateUp:        aggUp,
 			AggBitrateDown:      aggDown,
 			ClientQualities:     qualities,
+			ClientVolumes:       m.perClientVolumes,
 			SpectrumBands:       m.effectiveSpectrumBands(),
 			VULevels:            m.effectiveVULevels(),
 			ChatView:            m.chatPanelView(),
@@ -531,7 +538,11 @@ func (m Model) viewStreaming() string {
 			multiParams.PlaybackSpectrumBands = m.spectrumBands
 			multiParams.PlaybackVULevels = m.vuLevels
 		}
-		return views.MultiClientView(multiParams)
+		body := views.MultiClientView(multiParams)
+		if m.recordingOverlay.Visible {
+			body = m.recordingOverlay.Render(m.width, m.height-2)
+		}
+		return body
 	}
 	var devDisplay []views.DeviceDisplayState
 	for i, ds := range m.deviceStates {
@@ -541,6 +552,7 @@ func (m Model) viewStreaming() string {
 			Role:         ds.Role,
 			Volume:       ds.Volume,
 			Muted:        ds.Muted,
+			AGC:          ds.AGC,
 			Selected:     i == m.selectedDevice2,
 			Disconnected: ds.Disconnected,
 		})
@@ -551,6 +563,7 @@ func (m Model) viewStreaming() string {
 		Paused:          m.paused,
 		Reverse:         m.config.Reverse,
 		Duplex:          m.config.Duplex,
+		IsServer:        m.config.Mode == config.ModeServer,
 		Audio:           views.AudioInfo{Codec: "Opus", SampleRate: m.config.SampleRate, Channels: m.config.Channels},
 		Logs:            m.logs,
 		LogsVisible:     m.logsVisible,
@@ -573,8 +586,9 @@ func (m Model) viewStreaming() string {
 		Participants:    m.participants,
 		MaxClients:      m.maxClients,
 		MyNickname:      m.chatPanel.MyNickname(),
-		SourcePaused:    m.pausedParticipants["server"],
-		ServerMuted:     m.serverMuted,
+		SourcePaused:    m.singleClientSourcePaused(),
+		IncomingMuted:   m.singleClientIncomingMuted(),
+		PeerMutedYou:    m.singleClientPeerMutedYou(),
 		FocusedArea:     int(m.focusedArea),
 	}
 
@@ -586,7 +600,42 @@ func (m Model) viewStreaming() string {
 		params.PlaybackVULevels = m.vuLevels
 	}
 
-	return views.StreamingView(params)
+	body := views.StreamingView(params)
+	if m.recordingOverlay.Visible {
+		body = m.recordingOverlay.Render(m.width, m.height-2)
+	}
+	return body
+}
+
+func (m Model) singleClient() (transport.ClientInfo, bool) {
+	if m.multiClient || len(m.multiStats.Clients) != 1 {
+		return transport.ClientInfo{}, false
+	}
+	return m.multiStats.Clients[0], true
+}
+
+func (m Model) singleClientSourcePaused() bool {
+	client, ok := m.singleClient()
+	if m.config.Mode == config.ModeServer && ok {
+		return (m.config.Reverse || m.config.Duplex) && client.Paused
+	}
+	return (!m.config.Reverse || m.config.Duplex) && m.pausedParticipants["server"]
+}
+
+func (m Model) singleClientIncomingMuted() bool {
+	client, ok := m.singleClient()
+	if m.config.Mode == config.ModeServer && ok {
+		return (m.config.Reverse || m.config.Duplex) && client.MutedIncoming
+	}
+	return (!m.config.Reverse || m.config.Duplex) && m.serverMuted
+}
+
+func (m Model) singleClientPeerMutedYou() bool {
+	client, ok := m.singleClient()
+	if m.config.Mode == config.ModeServer && ok {
+		return (!m.config.Reverse || m.config.Duplex) && client.Muted
+	}
+	return (m.config.Reverse || m.config.Duplex) && m.peerMutedByServer
 }
 
 // isCaptureOnlyMode returns true when the local side only captures audio (no playback).
@@ -697,141 +746,157 @@ func (m Model) helpKeys() string {
 	}
 
 	if m.overlay == OverlayClientPopup {
-		return "↑↓: select  enter: confirm  esc: close  ^Q: quit"
+		return i18n.T("help_popup_clientlist")
 	}
 	if m.overlay == OverlayBanList {
-		return "↑↓: select  enter: unban  esc: close  ^Q: quit"
+		return i18n.T("help_popup_banlist")
 	}
 
 	switch m.screen {
 	case ScreenDeviceSelect:
 		help := m.setupModel.HelpKeys()
 		if m.config.Mode == config.ModeServer && m.banListFn != nil {
-			help += "  ^U: ban list"
+			help += i18n.T("help_banlist_append")
 		}
+		langCode := strings.ToUpper(string(i18n.CurrentLanguage()))
+		help += "  [" + langCode + "]"
 		return help
 	case ScreenConnection:
 		if m.config.Mode == config.ModeServer && m.banListFn != nil {
-			return "^U: ban list  ^Q: quit"
+			return i18n.T("help_streaming_banlist_quit")
 		}
-		return "^Q: quit"
+		return i18n.T("help_streaming_quit")
 	case ScreenServerStopped:
 		if len(m.criticalChanges) > 0 {
-			return "Enter: open setup  Esc: quit"
+			return i18n.T("help_critical_changes")
 		}
-		return "←→: select  Enter: confirm  ^Q: quit"
+		return i18n.T("help_reconnect_buttons")
 	case ScreenKicked:
-		return "←→: select  Enter: confirm  ^Q: quit"
+		return i18n.T("help_reconnect_buttons")
 	case ScreenBanned:
-		return "←→: select  Enter: confirm  ^Q: quit"
+		return i18n.T("help_reconnect_buttons")
 	case ScreenStreaming:
 		// Chat focused mode — show chat-specific help
 		if m.chatPanel.IsFocused() {
-			return "enter: send  esc: back  ↑↓: scroll  ^Q: quit"
+			return i18n.T("help_chat_focused")
+		}
+
+		if m.recordingOverlay.Visible {
+			if m.recordingOverlay.IsStatusState() {
+				return i18n.T("help_rec_stop")
+			}
+			return i18n.T("help_rec_start")
 		}
 
 		if m.conference {
-			if m.recordingOverlay.Visible {
-				return "tab: section  space: toggle  ^A: all  ^N: none  enter: start  esc: cancel"
-			}
 			if m.participantOverlay.Visible {
-				return "↑↓: select  enter: confirm  esc: cancel"
+				return i18n.T("help_conference_participant_select")
 			}
-			parts := []string{"↑↓: select"}
+			parts := []string{i18n.T("help_kw_select")}
 			isServer := m.config.Mode == config.ModeServer
 			hubMode := isServer && m.serverMuted
 			if isServer && !hubMode {
 				// Server (not hub): can pause capture
-				parts = append(parts, "ctrl+p: pause")
+				parts = append(parts, i18n.T("help_kw_pause"))
 			}
 			// Hub: only ↑↓: select
-			parts = append(parts, "enter: actions", "+/-: vol")
+			parts = append(parts, i18n.T("help_kw_actions"), i18n.T("help_kw_vol"))
 			if m.isRecording {
-				parts = append(parts, "^R: stop rec")
+				parts = append(parts, i18n.T("help_kw_rec_stop"))
 			} else {
-				parts = append(parts, "^R: rec")
+				parts = append(parts, i18n.T("help_kw_rec"))
 			}
-			parts = append(parts, "^T: chat", "^Q: quit")
+			parts = append(parts, i18n.T("help_kw_chat"), i18n.T("help_kw_quit"))
 			return strings.Join(parts, "  ")
 		}
 		if m.multiClient {
-			parts := []string{"↑↓: select", "enter: actions"}
+			parts := []string{i18n.T("help_kw_select"), i18n.T("help_kw_actions")}
 			if m.pauseCh != nil {
 				if m.paused {
-					parts = append(parts, "^P: resume")
+					parts = append(parts, i18n.T("help_kw_resume_p"))
 				} else {
-					parts = append(parts, "^P: pause")
+					parts = append(parts, i18n.T("help_kw_pause_p"))
 				}
 			}
-			parts = append(parts, "^U: unban list")
-			if m.chatPanel.IsVisible() {
-				parts = append(parts, "^T: hide chat")
+			parts = append(parts, i18n.T("help_kw_unban_list"))
+			if m.isRecording {
+				parts = append(parts, i18n.T("help_kw_rec_stop"))
 			} else {
-				parts = append(parts, "^T: show chat")
+				parts = append(parts, i18n.T("help_kw_rec"))
+			}
+			if m.chatPanel.IsVisible() {
+				parts = append(parts, i18n.T("help_kw_hide_chat"))
+			} else {
+				parts = append(parts, i18n.T("help_kw_show_chat"))
 			}
 			if m.logsVisible {
-				parts = append(parts, "^L: hide logs")
+				parts = append(parts, i18n.T("help_kw_hide_logs"))
 			} else {
-				parts = append(parts, "^L: show logs")
+				parts = append(parts, i18n.T("help_kw_show_logs"))
 			}
-			parts = append(parts, "^Q: quit")
+			parts = append(parts, i18n.T("help_kw_quit"))
 			return strings.Join(parts, "  ")
 		}
 		parts := []string{}
 		if m.config.Mode == config.ModeServer {
 			// Server single-client: if a client is connected, offer Enter→popup
 			if m.cmdCh != nil && len(m.multiStats.Clients) == 1 {
-				parts = append(parts, "enter: actions")
+				parts = append(parts, i18n.T("help_kw_actions"))
 			}
 		} else {
 			// Client mode: Enter = mute/unmute (normal/duplex), pause/resume (reverse)
 			if m.config.Reverse && !m.config.Duplex {
 				if m.paused {
-					parts = append(parts, "enter: resume")
+					parts = append(parts, i18n.T("help_kw_enter_resume"))
 				} else {
-					parts = append(parts, "enter: pause")
+					parts = append(parts, i18n.T("help_kw_enter_pause"))
 				}
 			} else {
 				// Normal or duplex: Enter = mute server
 				if m.serverMuted {
-					parts = append(parts, "enter: unmute")
+					parts = append(parts, i18n.T("help_kw_enter_unmute"))
 				} else {
-					parts = append(parts, "enter: mute")
+					parts = append(parts, i18n.T("help_kw_enter_mute"))
 				}
 			}
 		}
 		if len(m.deviceStates) > 0 {
-			parts = append(parts, "^D: devices")
+			parts = append(parts, i18n.T("help_kw_devices"))
 		}
 		if m.chatPanel.IsVisible() {
-			parts = append(parts, "^T: hide chat")
+			parts = append(parts, i18n.T("help_kw_hide_chat"))
 		} else {
-			parts = append(parts, "^T: show chat")
+			parts = append(parts, i18n.T("help_kw_show_chat"))
 		}
 		if m.logsVisible {
-			parts = append(parts, "^L: hide logs")
+			parts = append(parts, i18n.T("help_kw_hide_logs"))
 		} else {
-			parts = append(parts, "^L: show logs")
+			parts = append(parts, i18n.T("help_kw_show_logs"))
 		}
 		if m.config.AEC {
 			if m.aecActive {
-				parts = append(parts, "^E: AEC off")
+				parts = append(parts, i18n.T("help_kw_aec_off"))
 			} else {
-				parts = append(parts, "^E: AEC on")
+				parts = append(parts, i18n.T("help_kw_aec_on"))
 			}
 		}
 		// Show ^P for server, and for duplex client (Enter=mute, ^P=pause).
 		if m.pauseCh != nil && (m.config.Mode == config.ModeServer || m.config.Duplex) {
 			if m.paused {
-				parts = append(parts, "^P: resume")
+				parts = append(parts, i18n.T("help_kw_resume_p"))
 			} else {
-				parts = append(parts, "^P: pause")
+				parts = append(parts, i18n.T("help_kw_pause_p"))
 			}
 		}
-		parts = append(parts, "^Q: quit")
+		if m.isRecording {
+			parts = append(parts, i18n.T("help_kw_rec_stop"))
+		} else {
+			parts = append(parts, i18n.T("help_kw_rec"))
+		}
+		parts = append(parts, i18n.T("help_kw_quit"))
 		return strings.Join(parts, "  ")
 	}
-	return "^Q: quit"
+	return i18n.T("help_kw_quit")
 }
 
 // Quitting returns true if the user has requested to quit.

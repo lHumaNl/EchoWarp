@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -111,12 +109,11 @@ func (ch *ConferenceHandler) ParticipantIDs() []string {
 }
 
 // StartRecording begins conference recording in the given mode.
-func (ch *ConferenceHandler) StartRecording(mode audio.RecordingMode, sampleRate uint32) error {
+// baseDir is the root directory for recordings (e.g. from Config.EffectiveRecordDir).
+func (ch *ConferenceHandler) StartRecording(mode audio.RecordingMode, sampleRate uint32, baseDir string) error {
 	ch.mu.Lock()
 	defer ch.mu.Unlock()
 	ch.recorder = audio.NewConferenceRecorder(mode, sampleRate, 1) // mono
-	configDir, _ := os.UserConfigDir()                             //nolint:errcheck
-	baseDir := filepath.Join(configDir, "echowarp", "recordings")
 	return ch.recorder.Start(baseDir)
 }
 
@@ -130,6 +127,18 @@ func (ch *ConferenceHandler) StopRecording() (duration time.Duration, totalSize 
 	dur, size, files, err := ch.recorder.Stop()
 	ch.recorder = nil
 	return dur, size, files, err
+}
+
+// RecordingDir returns the output directory of the active recording,
+// or empty string when nothing is being recorded. Used by the daemon
+// API adapter to enumerate the produced files after Stop.
+func (ch *ConferenceHandler) RecordingDir() string {
+	ch.mu.RLock()
+	defer ch.mu.RUnlock()
+	if ch.recorder == nil {
+		return ""
+	}
+	return ch.recorder.Dir()
 }
 
 // IsRecording returns whether recording is active.

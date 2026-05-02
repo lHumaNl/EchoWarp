@@ -16,7 +16,7 @@ func TestRenderClientListItem_BadgeMutedOutgoing(t *testing.T) {
 		MutedOutgoing: true,
 		Duration:      "00:01:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 40)
+	result := renderClientListItem(c, QualityGood, false, 40, -1)
 	assert.Contains(t, result, "🔇↑")
 	assert.NotContains(t, result, "🔇↓")
 	assert.NotContains(t, result, "🔇↑↓")
@@ -30,7 +30,7 @@ func TestRenderClientListItem_BadgeMutedClient(t *testing.T) {
 		Muted:    true,
 		Duration: "00:02:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 40)
+	result := renderClientListItem(c, QualityGood, false, 40, -1)
 	assert.Contains(t, result, "🔇↓")
 	assert.NotContains(t, result, "🔇↑")
 }
@@ -44,7 +44,7 @@ func TestRenderClientListItem_BadgeBothMuted(t *testing.T) {
 		MutedOutgoing: true,
 		Duration:      "00:03:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 40)
+	result := renderClientListItem(c, QualityGood, false, 40, -1)
 	assert.Contains(t, result, "🔇↑↓")
 }
 
@@ -55,7 +55,7 @@ func TestRenderClientListItem_NoBadgeWhenUnmuted(t *testing.T) {
 		Nickname: "Dave",
 		Duration: "00:04:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 40)
+	result := renderClientListItem(c, QualityGood, false, 40, -1)
 	assert.NotContains(t, result, "🔇")
 }
 
@@ -67,7 +67,7 @@ func TestRenderClientListItem_BadgeMutedIncoming(t *testing.T) {
 		MutedIncoming: true,
 		Duration:      "00:05:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 40)
+	result := renderClientListItem(c, QualityGood, false, 40, -1)
 	assert.Contains(t, result, "🔇↓")
 	assert.NotContains(t, result, "🔇↑")
 	assert.NotContains(t, result, "🔇↑↓")
@@ -82,7 +82,7 @@ func TestRenderClientListItem_BadgeMutedIncomingAndOutgoing(t *testing.T) {
 		MutedIncoming: true,
 		Duration:      "00:06:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 40)
+	result := renderClientListItem(c, QualityGood, false, 40, -1)
 	assert.Contains(t, result, "🔇↑↓")
 }
 
@@ -96,7 +96,7 @@ func TestRenderClientListItem_BadgeMutedClientAndIncoming(t *testing.T) {
 		MutedIncoming: true,
 		Duration:      "00:07:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 40)
+	result := renderClientListItem(c, QualityGood, false, 40, -1)
 	assert.Contains(t, result, "🔇↓")
 	assert.NotContains(t, result, "🔇↑↓")
 }
@@ -113,7 +113,7 @@ func TestRenderClientListItem_NarrowWidthDropsBadge(t *testing.T) {
 		Duration:      "00:01:00",
 	}
 	// At width=20 the badges (🔇↑↓ ⏸) + dur + prefix won't fit alongside a 4-char nick
-	result := renderClientListItem(c, QualityGood, false, 20)
+	result := renderClientListItem(c, QualityGood, false, 20, -1)
 	// Result width (visible chars) must not exceed maxWidth
 	// Simply verify the function doesn't panic and returns a non-empty string
 	assert.NotEmpty(t, result)
@@ -128,6 +128,6 @@ func TestRenderClientListItem_NarrowWidthShowsBadgeWhenFits(t *testing.T) {
 		MutedOutgoing: true,
 		Duration:      "00:01:00",
 	}
-	result := renderClientListItem(c, QualityGood, false, 30)
+	result := renderClientListItem(c, QualityGood, false, 30, -1)
 	assert.Contains(t, result, "🔇↑")
 }

@@ -4,12 +4,14 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/lHumaNl/echowarp/internal/i18n"
 )
 
 func newCompletionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
-		Short: "Generate shell completion script",
+		Short: i18n.T("cli_completion_short"),
 		Long: `Generate shell completion script for the specified shell.
 
 To load completions:

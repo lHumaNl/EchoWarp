@@ -2,7 +2,7 @@ package tui
 
 import (
 	"errors"
-	"strings"
+	"fmt"
 	"sync"
 	"time"
 
@@ -15,6 +15,9 @@ import (
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
 )
+
+var removePulseAudioSink = views.RemovePulseAudioSink
+var findPulseAudioSinkModule = views.FindPulseAudioSinkModule
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -55,244 +58,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Chat input focus intercept — when chat is focused, consume all keys except Ctrl+Q/Ctrl+C/Ctrl+T/Tab/Esc.
-		if m.screen == ScreenStreaming && m.chatPanel.IsFocused() {
-			switch msg.Type {
-			case tea.KeyCtrlQ, tea.KeyCtrlC:
-				// Allow quit through
-			case tea.KeyCtrlT:
-				// Toggle chat visibility
-				m.chatPanel.Unfocus()
-				m.chatPanel.ToggleVisible()
-				if m.config.Mode == config.ModeServer {
-					m.focusedArea = FocusClientList
-				} else {
-					m.focusedArea = FocusLogs
-				}
-				return m, nil
-			case tea.KeyTab:
-				// If input starts with @, use Tab for autocomplete; otherwise cycle focus.
-				if strings.HasPrefix(m.chatPanel.InputValue(), "@") {
-					m.chatPanel, _ = m.chatPanel.Update(msg)
-					return m, nil
-				}
-				m.chatPanel.Unfocus()
-				m.focusedArea = m.nextFocusArea()
-				return m, nil
-			case tea.KeyEsc:
-				// Esc unfocuses chat, returns to previous area
-				m.chatPanel.Unfocus()
-				if m.config.Mode == config.ModeServer {
-					m.focusedArea = FocusClientList
-				} else {
-					m.focusedArea = FocusLogs
-				}
-				return m, nil
-			default:
-				var cmd tea.Cmd
-				m.chatPanel, cmd = m.chatPanel.Update(msg)
-				return m, cmd
-			}
+		if km, kc, handled := m.handleKeyMsg(msg); handled {
+			return km, kc
 		}
-
-		// Ctrl+T: chat visible+unfocused → focus; chat focused → hide; chat hidden → show+focus.
-		if m.screen == ScreenStreaming && msg.Type == tea.KeyCtrlT {
-			if m.chatPanel.IsVisible() && m.focusedArea == FocusChat {
-				// Already focused — hide chat
-				m.chatPanel.Unfocus()
-				m.chatPanel.ToggleVisible()
-				if m.config.Mode == config.ModeServer {
-					m.focusedArea = FocusClientList
-				} else {
-					m.focusedArea = FocusLogs
-				}
-			} else if m.chatPanel.IsVisible() {
-				// Visible but not focused — focus it
-				m.chatPanel.Focus()
-				m.focusedArea = FocusChat
-			} else {
-				// Hidden — show and focus
-				m.chatPanel.ToggleVisible()
-				m.chatPanel.Focus()
-				m.focusedArea = FocusChat
-			}
-			return m, nil
-		}
-
-		// Client popup overlay intercept.
-		if m.overlay == OverlayClientPopup {
-			return m.handleClientPopupKeys(msg)
-		}
-
-		// Kick overlay intercept
-		if m.overlay == OverlayKick {
-			return m.handleKickOverlayKeys(msg)
-		}
-
-		// Ban overlay intercept
-		if m.overlay == OverlayBan {
-			return m.handleBanOverlayKeys(msg)
-		}
-
-		// Device overlay intercept
-		if m.overlay == OverlayDevice {
-			return m.handleDeviceOverlayKeys(msg)
-		}
-
-		// Overlay key handling
-		if m.overlay != OverlayNone {
-			return m.handleOverlayKeys(msg)
-		}
-
-		// Recording overlay intercept — must be before Up/Down/Tab handling below.
-		if m.recordingOverlay.Visible {
-			return m.handleRecordingOverlayKeys(msg)
-		}
-
-		// Participant action overlay intercept.
-		if m.participantOverlay.Visible {
-			return m.handleParticipantOverlayKeys(msg)
-		}
-
-		switch msg.Type {
-		case tea.KeyCtrlQ, tea.KeyCtrlC:
-			if m.stopCh != nil && m.stopOnce != nil {
-				m.stopOnce.Do(func() { close(m.stopCh) })
-			}
-			m.quitting = true
-			return m, tea.Quit
-		case tea.KeyEsc:
-			// Clear error banner on Esc (UX-11)
-			if m.err != nil {
-				m.err = nil
-				m.errorTimer = time.Time{}
-				return m, nil
-			}
-		case tea.KeyCtrlL:
-			if m.screen == ScreenStreaming {
-				m.logsVisible = !m.logsVisible
-				return m, nil
-			}
-		case tea.KeyCtrlD:
-			// Open device overlay (only if devices are available)
-			if m.screen == ScreenStreaming && len(m.deviceStates) > 0 {
-				m.openDeviceOverlay()
-				return m, nil
-			}
-		case tea.KeyTab:
-			if m.screen == ScreenStreaming {
-				m.focusedArea = m.nextFocusArea()
-				// If switching to chat, focus the chat input
-				if m.focusedArea == FocusChat {
-					m.chatPanel.Focus()
-				} else {
-					m.chatPanel.Unfocus()
-				}
-				return m, nil
-			}
-		case tea.KeyUp:
-			if m.screen == ScreenStreaming && !m.chatPanel.IsFocused() {
-				switch m.focusedArea {
-				case FocusClientList:
-					if m.multiClient {
-						if m.selectedClient > 0 {
-							m.selectedClient--
-						}
-						if !m.conference && m.selectedClient < len(m.multiStats.Clients) {
-							m.selectedClientID = m.multiStats.Clients[m.selectedClient].ClientID
-						}
-					} else if len(m.deviceStates) > 0 {
-						if m.selectedDevice2 > 0 {
-							m.selectedDevice2--
-						}
-					}
-				case FocusLogs:
-					if m.logsVisible {
-						m.logScrollOffset++
-						maxScroll := len(m.logs) - 3
-						if m.logScrollOffset > maxScroll {
-							m.logScrollOffset = maxScroll
-						}
-						if m.logScrollOffset < 0 {
-							m.logScrollOffset = 0
-						}
-					}
-				}
-				return m, nil
-			}
-		case tea.KeyDown:
-			if m.screen == ScreenStreaming && !m.chatPanel.IsFocused() {
-				switch m.focusedArea {
-				case FocusClientList:
-					if m.multiClient {
-						maxIdx := m.conferenceMaxIndex()
-						if m.selectedClient < maxIdx {
-							m.selectedClient++
-						}
-						if !m.conference && m.selectedClient < len(m.multiStats.Clients) {
-							m.selectedClientID = m.multiStats.Clients[m.selectedClient].ClientID
-						}
-					} else if len(m.deviceStates) > 0 {
-						if m.selectedDevice2 < len(m.deviceStates)-1 {
-							m.selectedDevice2++
-						}
-					}
-				case FocusLogs:
-					if m.logsVisible {
-						m.logScrollOffset--
-						if m.logScrollOffset < 0 {
-							m.logScrollOffset = 0
-						}
-					}
-				}
-				return m, nil
-			}
-		case tea.KeyCtrlU:
-			// Open ban list overlay — available on all screens for server
-			if m.config.Mode == config.ModeServer && m.banListFn != nil {
-				m.overlay = OverlayBanList
-				m.overlaySelection = 0
-				m.bannedIPs = m.banListFn()
-				return m, nil
-			}
-		case tea.KeyEnter:
-			// Server mode: open client popup menu when client list is focused (non-conference)
-			if m.screen == ScreenStreaming && m.config.Mode == config.ModeServer && m.focusedArea == FocusClientList && !m.conference && m.cmdCh != nil {
-				if len(m.multiStats.Clients) > 0 && m.selectedClient < len(m.multiStats.Clients) {
-					c := m.multiStats.Clients[m.selectedClient]
-					nick := c.Nickname
-					if nick == "" {
-						nick = c.ClientID
-					}
-					m.openClientPopup(c.ClientID, nick)
-					return m, nil
-				}
-			}
-			// Client mode: Enter = mute/pause (non-conference, chat not focused)
-			if m.screen == ScreenStreaming && m.config.Mode == config.ModeClient && !m.conference && !m.chatPanel.IsFocused() {
-				if m.config.Reverse && !m.config.Duplex {
-					// Reverse-only: toggle pause capture (stop sending)
-					if m.pauseCh != nil {
-						m.paused = !m.paused
-						select {
-						case m.pauseCh <- m.paused:
-						default:
-						}
-					}
-				} else {
-					// Normal or duplex: toggle server mute (stop hearing server)
-					if m.serverMuteCh != nil {
-						m.serverMuted = !m.serverMuted
-						select {
-						case m.serverMuteCh <- m.serverMuted:
-						default:
-						}
-					}
-				}
-				return m, nil
-			}
-		default:
-		}
+		// Not consumed by handleKeyMsg — fall through to screen-specific dispatch below.
 
 	case DeviceChangeMsg:
 		// Mark devices as disconnected or add back
@@ -345,6 +114,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.perClientBitrateDown = make(map[string]float64)
 			m.perClientPrevBytesSent = make(map[string]uint64)
 			m.perClientPrevBytesRecv = make(map[string]uint64)
+			m.perClientVolumes = make(map[string]float64)
 		}
 
 		// Build set of active client IDs.
@@ -449,6 +219,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForParticipantPause(m.participantPauseCh)
 
+	case PeerMuteMsg:
+		m.peerMutedByServer = bool(msg)
+		return m, waitForPeerMute(m.peerMuteCh)
+
 	case ConferenceParticipantsMsg:
 		if m.pausedParticipants == nil {
 			m.pausedParticipants = make(map[string]bool)
@@ -471,6 +245,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.isRecording = false
 			m.recordingStart = time.Time{}
 		}
+		// Toast notification when recording stops with stats.
+		if msg.RecordingStopped {
+			dur := msg.RecordingStopDur.Round(time.Second)
+			size := formatRecSize(msg.RecordingStopSize)
+			logMsg := fmt.Sprintf("Recording saved: %s, %s, %d file(s)", dur, size, msg.RecordingStopFiles)
+			if msg.RecordingStopDir != "" {
+				logMsg += " → " + msg.RecordingStopDir
+			}
+			if msg.RecordingStopReason != "" {
+				logMsg += " (stopped: " + msg.RecordingStopReason + ")"
+			}
+			m.logs = append(m.logs, logMsg)
+		}
 		// Sync paused participants from conference handler (server-side).
 		if msg.PausedParticipants != nil {
 			m.pausedParticipants = msg.PausedParticipants
@@ -485,6 +272,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ChatReceivedMsg:
 		m.chatPanel.AddMessage(msg.Message)
 		return m, waitForChat(m.chatMsgCh)
+
+	case RecordingStatusUpdate:
+		m.recordingDir = msg.Dir
+		m.recordingFile = msg.FileName
+		m.recordingSize = msg.Size
+		// Update status overlay if it's visible.
+		if m.recordingOverlay.Visible && m.recordingOverlay.IsStatusState() {
+			m.recordingOverlay.UpdateStatus(msg.Size)
+		}
+		return m, nil
 
 	case views.ChatSendMsg:
 		if m.chatSendFn != nil && msg.Text != "" {
@@ -521,6 +318,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamingStartedMsg:
 		m.statsCh = msg.statsCh
 		m.errCh = msg.errCh
+		m.peerMutedByServer = false
 		if msg.serverStoppedCh != nil {
 			m.serverStoppedCh = msg.serverStoppedCh
 		}
@@ -540,10 +338,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Save server-side preset and generate server UUID (server mode, non-blocking)
 		if m.config.Mode == config.ModeServer {
-			devicePreset := m.setupModel.CollectPresetDevices()
 			mode := m.config.AudioMode()
+			modePreset := m.setupModel.CollectModePreset(mode)
 			port := m.config.Port
-			batchCmds = append(batchCmds, saveServerPresetCmd(devicePreset, mode), func() tea.Msg {
+			batchCmds = append(batchCmds, saveServerPresetCmd(modePreset, mode), func() tea.Msg {
 				_ = config.ServerID(port) // generate & persist UUID for this port
 				return nil
 			})
@@ -575,17 +373,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.participantPauseCh != nil {
 			batchCmds = append(batchCmds, waitForParticipantPause(m.participantPauseCh))
 		}
+		if m.peerMuteCh != nil {
+			batchCmds = append(batchCmds, waitForPeerMute(m.peerMuteCh))
+		}
 		if m.conferencePartsCh != nil {
 			batchCmds = append(batchCmds, waitForConferenceParticipants(m.conferencePartsCh))
 		}
 		return m, tea.Batch(batchCmds...)
 
 	case streamingEndedMsg:
+		m.cleanupVirtualSinks()
+		m.peerMutedByServer = false
 		m.quitting = true
 		return m, tea.Quit
 
 	case ServerStoppedMsg:
-		// Server sent ActionStop — transition to server-stopped screen.
+		// Server sent ActionStop — clean up virtual sinks and transition.
+		m.cleanupVirtualSinks()
+		m.peerMutedByServer = false
 		m.screen = ScreenServerStopped
 		m.autoReconnect = m.config.AutoReconnect
 		m.autoReconnectAttempts = m.config.AutoReconnectAttempts
@@ -849,7 +654,9 @@ func (m Model) updateDeviceSelect(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 
 	// Forward everything else to the setup model
 	var cmd tea.Cmd
+	beforeCleanupPlans := m.setupModel.VirtualSinkCleanupPlans()
 	m.setupModel, cmd = m.setupModel.Update(msg)
+	m.resetVirtualSinkCleanupLatchIfSessionSinkRecorded(beforeCleanupPlans)
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -900,7 +707,7 @@ func (m Model) proceedWithStart(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 		m.conference = true
 		m.serverMuted = m.config.ServerMuted
 		m.muteState = NewMuteState()
-	} else if m.config.MaxClients > 1 && !m.multiClient {
+	} else if m.config.Mode == config.ModeServer && m.config.MaxClients > 1 && !m.multiClient {
 		m.multiClient = true
 	}
 
@@ -915,12 +722,49 @@ func (m Model) proceedWithStart(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		// Populate deviceStates for Ctrl+D overlay
+		states := make([]DeviceState, 0, len(m.config.Devices))
+		for _, d := range m.config.Devices {
+			role := "playback"
+			if d.Role == config.RoleCapture {
+				role = "capture"
+			}
+			states = append(states, DeviceState{
+				ID:     d.ID,
+				Name:   d.Name,
+				Role:   role,
+				Volume: d.Volume,
+				AGC:    d.AGC,
+			})
+		}
+		m = m.WithDeviceStates(states)
 	} else if m.config.Conference && m.config.ServerMuted {
 		m.deviceName = "Hub (no audio)"
 	} else if selectedItem, ok := m.setupModel.DeviceList.SelectedItem().(deviceItem); ok {
 		m.selectedDevice = &selectedItem.device
 		m.deviceName = selectedItem.device.Name
 		m.config.DeviceID = &selectedItem.device.ID
+		// Single device — populate deviceStates for Ctrl+D overlay
+		role := "capture"
+		if !selectedItem.device.IsInput {
+			role = "playback"
+		}
+		vol := 1.0
+		for _, d := range m.config.Devices {
+			if d.ID == selectedItem.device.ID {
+				vol = d.Volume
+				break
+			}
+		}
+		if vol == 0 {
+			vol = 1.0
+		}
+		m = m.WithDeviceStates([]DeviceState{{
+			ID:     selectedItem.device.ID,
+			Name:   selectedItem.device.Name,
+			Role:   role,
+			Volume: vol,
+		}})
 	} else {
 		return m, tea.Batch(cmds...)
 	}
@@ -1067,4 +911,84 @@ func (m *Model) setDefaultFocus() {
 	} else {
 		m.focusedArea = FocusLogs
 	}
+}
+
+// cleanupVirtualSinks removes virtual sinks that have OnStop == SinkDelete.
+func (m *Model) cleanupVirtualSinks() {
+	if m.virtualSinkCleanupDone {
+		return
+	}
+	plans := m.setupModel.VirtualSinkCleanupPlans()
+	if len(plans) == 0 {
+		return
+	}
+	m.virtualSinkCleanupDone = m.cleanupVirtualSinkPlans(plans)
+}
+
+func (m *Model) cleanupVirtualSinkPlans(plans []views.VirtualSinkCleanupPlan) bool {
+	allCleaned := true
+	attempted := false
+	for _, plan := range plans {
+		if !plan.Delete {
+			continue
+		}
+		attempted = true
+		allCleaned = m.cleanupVirtualSink(plan) && allCleaned
+	}
+	return attempted && allCleaned
+}
+
+func (m *Model) cleanupVirtualSink(plan views.VirtualSinkCleanupPlan) bool {
+	if !plan.Delete {
+		return false
+	}
+	moduleID := m.resolveVirtualSinkCleanupModule(plan)
+	if moduleID == "" {
+		return false
+	}
+	if err := removePulseAudioSink(moduleID); err != nil {
+		return false
+	}
+	if err := m.setupModel.MarkVirtualSinkCleanedByName(plan.SinkName); err != nil {
+		return false
+	}
+	return true
+}
+
+func (m *Model) resolveVirtualSinkCleanupModule(plan views.VirtualSinkCleanupPlan) string {
+	resolvedID, found, err := findPulseAudioSinkModule(plan.SinkName)
+	if err == nil && found {
+		return resolvedID
+	}
+	return ""
+}
+
+func (m *Model) resetVirtualSinkCleanupLatchIfSessionSinkRecorded(before []views.VirtualSinkCleanupPlan) {
+	if hasNewSessionCleanupPlan(before, m.setupModel.VirtualSinkCleanupPlans()) {
+		m.virtualSinkCleanupDone = false
+	}
+}
+
+func hasNewSessionCleanupPlan(before, after []views.VirtualSinkCleanupPlan) bool {
+	known := make(map[string]string, len(before))
+	for _, plan := range before {
+		if plan.AllowNameFallback {
+			known[plan.SinkName] = plan.ModuleID
+		}
+	}
+	for _, plan := range after {
+		moduleID, exists := known[plan.SinkName]
+		if plan.AllowNameFallback && (!exists || moduleID != plan.ModuleID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) requestQuit() {
+	if m.stopCh != nil && m.stopOnce != nil {
+		m.stopOnce.Do(func() { close(m.stopCh) })
+	}
+	m.cleanupVirtualSinks()
+	m.quitting = true
 }

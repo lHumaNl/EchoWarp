@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 
@@ -76,6 +77,7 @@ func (m *MalgoDeviceManager) listDevices(kind malgo.DeviceType) ([]AudioDevice, 
 		devices = append(devices, AudioDevice{
 			ID:         uint32(i),
 			Name:       info.Name(),
+			BackendID:  malgoDeviceBackendID(info.ID),
 			IsInput:    kind == malgo.Capture,
 			Channels:   channels,
 			SampleRate: sampleRate,
@@ -84,6 +86,26 @@ func (m *MalgoDeviceManager) listDevices(kind malgo.DeviceType) ([]AudioDevice, 
 	}
 
 	return devices, nil
+}
+
+func malgoDeviceBackendID(id malgo.DeviceID) string {
+	raw := bytes.TrimRight(id[:], "\x00")
+	if len(raw) == 0 {
+		return ""
+	}
+	if isPrintableNativeID(raw) {
+		return string(raw)
+	}
+	return id.String()
+}
+
+func isPrintableNativeID(raw []byte) bool {
+	for _, b := range raw {
+		if b < 0x20 || b > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // Context returns the underlying malgo context for use with other audio components.

@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/recent"
@@ -86,6 +87,43 @@ func TestCollectPresetDevices_VirtualDeviceMarkedCorrectly(t *testing.T) {
 	assert.True(t, p.Devices[0].Virtual)
 	assert.Equal(t, "BlackHole 2ch", p.Devices[0].Name)
 	assert.Equal(t, uint32(10), p.Devices[0].ID)
+	assert.Nil(t, p.Devices[0].VirtualSink)
+}
+
+func TestCollectPresetDevices_EchoWarpMonitorHasVirtualSinkPreset(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 10, Name: echowarpMonitorName, IsVirtual: true, IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{
+			selectKeyFor(10, echowarpMonitorName, true): {Capture: true},
+		},
+	)
+
+	p := m.CollectPresetDevices()
+
+	require.Len(t, p.Devices, 1)
+	d := p.Devices[0]
+	assert.True(t, d.IsInput)
+	require.NotNil(t, d.VirtualSink)
+	assert.Equal(t, echowarpSinkName, d.VirtualSink.SinkName)
+	assert.Equal(t, recent.SinkDelete, d.VirtualSink.OnStop)
+	assert.Equal(t, recent.SinkRecreate, d.VirtualSink.OnStart)
+}
+
+func TestCollectPresetDevices_UncheckedMonitorPersistsVirtualLifecycle(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 10, Name: echowarpMonitorName, IsVirtual: true, IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{},
+	).WithVirtualSinkLifecycle(recent.SinkDelete, recent.SinkRecreate)
+
+	p := m.CollectPresetDevices()
+
+	assert.Empty(t, p.Devices)
+	require.Len(t, p.VirtualSinks, 1)
+	assert.Equal(t, echowarpSinkName, p.VirtualSinks[0].SinkName)
+	assert.Equal(t, recent.SinkDelete, p.VirtualSinks[0].OnStop)
+	assert.Equal(t, recent.SinkRecreate, p.VirtualSinks[0].OnStart)
 }
 
 func TestCollectPresetDevices_OnlySelectedDevicesIncluded(t *testing.T) {
@@ -149,4 +187,144 @@ func TestCollectPresetDevices_SameNameDifferentType(t *testing.T) {
 	assert.Len(t, p.Devices, 1)
 	assert.Equal(t, "BlackHole 2ch", p.Devices[0].Name)
 	assert.False(t, p.Devices[0].IsInput, "should be output device only")
+}
+
+func TestCollectPresetDevices_VirtualOutputHasVirtualSinkPreset(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{},
+		[]deviceRow{{ID: 99, Name: "EchoWarp", IsVirtual: true}},
+		map[string]DeviceRoleSet{
+			selectKeyFor(99, "EchoWarp", false): {Playback: true},
+		},
+	)
+
+	p := m.CollectPresetDevices()
+
+	require.Len(t, p.Devices, 1)
+	d := p.Devices[0]
+	assert.True(t, d.Virtual)
+	require.NotNil(t, d.VirtualSink, "virtual output should have VirtualSinkPreset")
+	assert.Equal(t, "module-null-sink", d.VirtualSink.ModuleType)
+	assert.Equal(t, "EchoWarp", d.VirtualSink.SinkName)
+	assert.Equal(t, recent.SinkDelete, d.VirtualSink.OnStop)
+	assert.Equal(t, recent.SinkRecreate, d.VirtualSink.OnStart)
+}
+
+func TestCollectPresetDevices_NonVirtualOutputHasNoVirtualSinkPreset(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{},
+		[]deviceRow{{ID: 1, Name: "Speaker", IsVirtual: false}},
+		map[string]DeviceRoleSet{
+			selectKeyFor(1, "Speaker", false): {Playback: true},
+		},
+	)
+
+	p := m.CollectPresetDevices()
+
+	require.Len(t, p.Devices, 1)
+	assert.Nil(t, p.Devices[0].VirtualSink, "non-virtual output should not have VirtualSinkPreset")
+}
+
+// TestCollectModePreset_IncludesDevicesAndServerFields verifies that
+// CollectModePreset captures BOTH device selection and server-side settings
+// (port, password, max_clients, tls*) from the TUI fields in a single snapshot.
+func TestCollectModePreset_IncludesDevicesAndServerFields(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 1, Name: "Mic", IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{
+			selectKeyFor(1, "Mic", true): {Capture: true},
+		},
+	)
+	// Populate server fields on the model.
+	for i := range m.Fields {
+		switch m.Fields[i].Key {
+		case "port":
+			m.Fields[i].SetValue("5000", SourceUser)
+		case "password":
+			m.Fields[i].SetValue("pw", SourceUser)
+		case "max_clients":
+			m.Fields[i].SetValue("7", SourceUser)
+		}
+	}
+	for i := range m.AdvancedFields {
+		switch m.AdvancedFields[i].Key {
+		case "tls":
+			m.AdvancedFields[i].SetValue("on", SourceUser)
+		case "tls_cert":
+			m.AdvancedFields[i].SetValue("/etc/ssl/a.crt", SourceUser)
+		case "tls_key":
+			m.AdvancedFields[i].SetValue("/etc/ssl/a.key", SourceUser)
+		}
+	}
+
+	mp := m.CollectModePreset("normal")
+
+	require.Len(t, mp.Devices, 1)
+	assert.Equal(t, "Mic", mp.Devices[0].Name)
+	assert.Equal(t, 5000, mp.Port)
+	assert.Equal(t, "pw", mp.Password)
+	assert.Equal(t, 7, mp.MaxClients)
+	assert.True(t, mp.TLS)
+	assert.Equal(t, "/etc/ssl/a.crt", mp.TLSCert)
+	assert.Equal(t, "/etc/ssl/a.key", mp.TLSKey)
+}
+
+func TestCollectModePreset_IncludesVirtualSinkLifecycleWithoutVirtualSelection(t *testing.T) {
+	m := newSetupModelForPresets(
+		[]deviceRow{{ID: 1, Name: "Mic", IsInput: true}},
+		[]deviceRow{},
+		map[string]DeviceRoleSet{selectKeyFor(1, "Mic", true): {Capture: true}},
+	).WithVirtualSinkLifecycle(recent.SinkDelete, recent.SinkRecreate)
+
+	mp := m.CollectModePreset("normal")
+
+	require.Len(t, mp.Devices, 1)
+	assert.Equal(t, "Mic", mp.Devices[0].Name)
+	require.Len(t, mp.VirtualSinks, 1)
+	assert.Equal(t, echowarpSinkName, mp.VirtualSinks[0].SinkName)
+}
+
+func TestMatchPresetDevices_VirtualSinkMatchesByName(t *testing.T) {
+	preset := recent.DevicePreset{
+		Devices: []recent.PresetDevice{
+			{
+				ID: 42, Name: "EchoWarp", Virtual: true,
+				VirtualSink: &recent.VirtualSinkPreset{
+					ModuleType: "module-null-sink",
+					SinkName:   "EchoWarp",
+					OnStop:     recent.SinkDelete,
+					OnStart:    recent.SinkRecreate,
+				},
+			},
+		},
+	}
+
+	// Different ID but name contains "EchoWarp"
+	outputs := []deviceRow{
+		{ID: 999, Name: "EchoWarp", IsVirtual: true},
+	}
+
+	matched, unmatched := matchPresetDevices(preset, nil, outputs)
+	assert.Len(t, matched, 1)
+	assert.Equal(t, uint32(999), matched[0].ID)
+	assert.Empty(t, unmatched)
+}
+
+func TestMatchPresetDevices_OldPresetWithoutVirtualSinkStillWorks(t *testing.T) {
+	// Backward compat: old preset has Virtual=true but no VirtualSink field
+	preset := recent.DevicePreset{
+		Devices: []recent.PresetDevice{
+			{ID: 5, Name: "Speaker", IsInput: false, Virtual: false},
+		},
+	}
+
+	outputs := []deviceRow{
+		{ID: 5, Name: "Speaker"},
+	}
+
+	matched, unmatched := matchPresetDevices(preset, nil, outputs)
+	assert.Len(t, matched, 1)
+	assert.Equal(t, uint32(5), matched[0].ID)
+	assert.Empty(t, unmatched)
 }

@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -34,6 +34,45 @@
 ---
 
 在一台机器上采集音频，在另一台机器上实时播放——通过网络传输。EchoWarp 使用 WebRTC 作为传输层，Opus 进行压缩，提供低延迟的端到端加密音频传输。
+
+## 目录
+
+- [功能特性](#功能特性)
+- [快速开始](#快速开始)
+- [交互式 TUI](#交互式-tui)
+  - [配置界面](#配置界面)
+  - [局域网发现](#局域网发现)
+  - [设备配置文件](#设备配置文件)
+  - [推流界面](#推流界面)
+  - [TUI 快捷键](#tui-快捷键)
+- [流传输模式](#流传输模式)
+  - [普通 — 单向：服务端到客户端](#普通-单向服务端到客户端)
+  - [反向 — 单向：客户端到服务端](#反向-单向客户端到服务端)
+  - [双工 — 双向](#双工-双向)
+  - [会议 — 多用户混音（N:N）](#会议-多用户混音nn)
+  - [模式总览](#模式总览)
+- [音频路由指南](#音频路由指南)
+  - [使用场景](#使用场景)
+  - [回环 — 捕获系统音频](#回环-捕获系统音频)
+  - [虚拟麦克风 — 将音频路由到其他应用](#虚拟麦克风-将音频路由到其他应用)
+  - [将本地麦克风混入虚拟输出](#将本地麦克风混入虚拟输出)
+  - [设备区域](#设备区域)
+  - [诊断](#诊断)
+  - [常见问题](#常见问题)
+- [CLI 模式](#cli-模式)
+  - [模式](#模式)
+  - [常用参数](#常用参数)
+  - [配置文件](#配置文件)
+- [安装](#安装)
+  - [预编译二进制文件](#预编译二进制文件)
+  - [从源码构建](#从源码构建)
+- [系统要求](#系统要求)
+- [网络与防火墙](#网络与防火墙)
+  - [服务端 — 需要开放的端口](#服务端-需要开放的端口)
+  - [客户端 — 无需开放入站端口](#客户端-无需开放入站端口)
+  - [局域网发现](#局域网发现-1)
+  - [NAT 穿透（STUN / TURN）](#nat-穿透stun-turn)
+- [许可证](#许可证)
 
 ## 功能特性
 
@@ -342,6 +381,9 @@ Audio
 **我想进行3台及以上设备的群组通话。**
 → 使用会议（Conference）模式。服务端充当集线器（无需配置设备）。每个客户端选择麦克风和扬声器。所有人可以听到彼此的声音，但不会听到自己的回声。
 
+**我使用 Moonlight/Sunshine（或 NVIDIA GameStream），想让麦克风在主机的游戏中正常工作。**
+→ 在游戏主机（Sunshine/GameStream 机器）上以 Reverse 模式运行 `EchoWarp server`。在 Moonlight 机器上运行 `EchoWarp client`，在 Input 中选择您的麦克风。在服务端，于 Output 中选择虚拟音频设备（BlackHole/VB-Cable），或启用 `--virtual-mic` 自动创建。在主机上的游戏或语音聊天中，选择该虚拟设备作为麦克风。您从 Moonlight 客户端发出的声音将作为游戏主机上的麦克风输入出现。
+
 **我想让 Discord 通过一个虚拟麦克风同时听到远端音频流和我的声音。**
 → 在客户端，于输出（Output）中选择一个虚拟设备（BlackHole/VB-Cable）。其下方会显示输入设备列表——勾选您的麦克风。EchoWarp 会将音频流和您的麦克风混合后写入虚拟输出。在 Discord 中，选择该虚拟设备作为麦克风即可。
 
@@ -353,6 +395,20 @@ Audio
 
 **虚拟设备显示"adaptive"而非采样率。**
 → 这是正常现象。虚拟音频驱动（BlackHole、VB-Cable）会自适应应用程序所使用的采样率——显示的采样率没有实际意义。
+
+<details>
+<summary>macOS："无法打开 EchoWarp" / Gatekeeper 警告</summary>
+
+macOS 会阻止未签名的应用程序。要允许 EchoWarp 运行：
+
+```bash
+xattr -cr /path/to/EchoWarp       # 针对二进制文件
+xattr -cr /path/to/EchoWarp.app   # 针对 .app 包
+```
+
+或者：**系统设置 → 隐私与安全性 → "仍要打开"**
+
+</details>
 
 ## CLI 模式
 

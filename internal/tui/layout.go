@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/internal/tui/views"
 	"github.com/lHumaNl/echowarp/internal/version"
@@ -37,6 +38,7 @@ type RecordingInfo struct {
 	Active   bool
 	Duration time.Duration
 	Label    string // e.g. "(3/4)" for server, "(mic+in)" for client
+	Size     uint64 // current recording size in bytes
 }
 
 // renderHeader renders the fixed top line:
@@ -65,6 +67,9 @@ func renderHeader(cfg config.Config, state string, duration time.Duration, recon
 	if len(rec) > 0 && rec[0].Active {
 		recDur := formatDuration(rec[0].Duration)
 		recText := "● REC " + recDur
+		if rec[0].Size > 0 {
+			recText += " " + formatRecSize(rec[0].Size)
+		}
 		if rec[0].Label != "" {
 			recText += " " + rec[0].Label
 		}
@@ -74,7 +79,7 @@ func renderHeader(cfg config.Config, state string, duration time.Duration, recon
 
 	// AEC badge
 	if aecEnabled {
-		left += "  " + styles.StatLabel.Render("[Echo Cancel]")
+		left += "  " + styles.StatLabel.Render(i18n.T("streaming_label_echo_cancel"))
 	}
 
 	// Right side: state indicator + state text + duration
@@ -83,7 +88,7 @@ func renderHeader(cfg config.Config, state string, duration time.Duration, recon
 	stateText := stateStyle.Render(fmt.Sprintf("%s %s", indicator, capitalizeFirst(state)))
 
 	if reconnectCount > 0 && strings.EqualFold(state, "connected") {
-		stateText += styles.StatLabel.Render(fmt.Sprintf(" (reconnected %d×)", reconnectCount))
+		stateText += styles.StatLabel.Render(i18n.Tf("streaming_reconnected_count", reconnectCount))
 	}
 
 	dur := formatDuration(duration)
@@ -106,13 +111,13 @@ func renderStatusBar(cfg config.Config, tlsEnabled bool, tlsSelfSigned bool, hel
 
 	// TLS indicator
 	if tlsEnabled {
-		label := "TLS"
+		label := i18n.T("layout_tls")
 		if tlsSelfSigned {
-			label = "TLS (self-signed)"
+			label = i18n.T("layout_tls_self_signed")
 		}
 		parts = append(parts, styles.TLSEnabled.Render(label))
 	} else {
-		parts = append(parts, styles.TLSEncrypted.Render("AES+DTLS (E2E encryption)"))
+		parts = append(parts, styles.TLSEncrypted.Render(i18n.T("layout_aes_dtls")))
 	}
 
 	// Codec info
@@ -177,6 +182,24 @@ func capitalizeFirst(s string) string {
 }
 
 // formatDuration formats a duration as HH:MM:SS or MM:SS.
+func formatRecSize(bytes uint64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+	switch {
+	case bytes >= gb:
+		return fmt.Sprintf("%.1f GB", float64(bytes)/float64(gb))
+	case bytes >= mb:
+		return fmt.Sprintf("%.1f MB", float64(bytes)/float64(mb))
+	case bytes >= kb:
+		return fmt.Sprintf("%.0f KB", float64(bytes)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", bytes)
+	}
+}
+
 func formatDuration(d time.Duration) string {
 	d = d.Round(time.Second)
 	h := d / time.Hour

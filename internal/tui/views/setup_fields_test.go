@@ -9,7 +9,8 @@ import (
 )
 
 func TestNewTextField(t *testing.T) {
-	f := NewTextField("Server address", "192.168.1.1", true)
+	f := NewTextField("server_address", "Server address", "192.168.1.1", true)
+	assert.Equal(t, "server_address", f.Key)
 	assert.Equal(t, "Server address", f.Label)
 	assert.Equal(t, FieldText, f.Type)
 	assert.Equal(t, "192.168.1.1", f.Value)
@@ -19,14 +20,14 @@ func TestNewTextField(t *testing.T) {
 }
 
 func TestNewPasswordField(t *testing.T) {
-	f := NewPasswordField("Password", "secret")
+	f := NewPasswordField("password", "Password", "secret")
 	assert.Equal(t, FieldText, f.Type)
 	assert.True(t, f.masked)
 	assert.Equal(t, "secret", f.Value)
 }
 
 func TestNewNumberField(t *testing.T) {
-	f := NewNumberField("Port", 4415, 1, 65535)
+	f := NewNumberField("port", "Port", 4415, 1, 65535)
 	assert.Equal(t, FieldNumber, f.Type)
 	assert.Equal(t, "4415", f.Value)
 	assert.Equal(t, 1, f.MinVal)
@@ -36,7 +37,7 @@ func TestNewNumberField(t *testing.T) {
 }
 
 func TestNumberFieldValidation(t *testing.T) {
-	f := NewNumberField("Port", 4415, 1, 65535)
+	f := NewNumberField("port", "Port", 4415, 1, 65535)
 
 	f.SetValue("99999", SourceUser)
 	assert.False(t, f.IsValid())
@@ -53,7 +54,7 @@ func TestNumberFieldValidation(t *testing.T) {
 }
 
 func TestNewToggleField(t *testing.T) {
-	f := NewToggleField("TLS", []string{"off", "on", "insecure"}, 0)
+	f := NewToggleField("tls", "TLS", []string{"off", "on", "insecure"}, 0)
 	assert.Equal(t, FieldToggle, f.Type)
 	assert.Equal(t, "off", f.Value)
 	assert.Equal(t, 0, f.OptionIndex())
@@ -70,14 +71,14 @@ func TestNewToggleField(t *testing.T) {
 }
 
 func TestNewSelectField(t *testing.T) {
-	f := NewSelectField("Sample rate", []string{"48000", "24000", "16000", "8000"}, 1)
+	f := NewSelectField("sample_rate", "Sample rate", []string{"48000", "24000", "16000", "8000"}, 1)
 	assert.Equal(t, FieldSelect, f.Type)
 	assert.Equal(t, "24000", f.Value)
 	assert.Equal(t, 1, f.OptionIndex())
 }
 
 func TestFieldSetValue(t *testing.T) {
-	f := NewTextField("Addr", "", true)
+	f := NewTextField("addr", "Addr", "", true)
 	assert.False(t, f.IsValid()) // required and empty
 
 	f.SetValue("10.0.0.1", SourceCLI)
@@ -87,14 +88,14 @@ func TestFieldSetValue(t *testing.T) {
 }
 
 func TestToggleSetValueFindsCorrectIndex(t *testing.T) {
-	f := NewToggleField("Mode", []string{"normal", "reverse"}, 0)
+	f := NewToggleField("mode", "Mode", []string{"normal", "reverse"}, 0)
 	f.SetValue("reverse", SourceCLI)
 	assert.Equal(t, "reverse", f.Value)
 	assert.Equal(t, 1, f.OptionIndex())
 }
 
 func TestActionField(t *testing.T) {
-	f := NewActionField("", "Advanced ▸")
+	f := NewActionField("advanced", "", "Advanced ▸")
 	assert.Equal(t, FieldAction, f.Type)
 	assert.Equal(t, "Advanced ▸", f.ActionLabel)
 	assert.False(t, f.ActionExpanded)
@@ -102,7 +103,7 @@ func TestActionField(t *testing.T) {
 }
 
 func TestFieldEditing(t *testing.T) {
-	f := NewTextField("Port", "4415", false)
+	f := NewTextField("port", "Port", "4415", false)
 	assert.False(t, f.IsEditing())
 
 	f.StartEditing()
@@ -132,7 +133,7 @@ func TestValidateAddress(t *testing.T) {
 }
 
 func TestFieldRender(t *testing.T) {
-	f := NewTextField("Port", "4415", false)
+	f := NewTextField("port", "Port", "4415", false)
 	rendered := f.Render(false, 60)
 	assert.Contains(t, rendered, "Port")
 	assert.Contains(t, rendered, "4415")
@@ -142,7 +143,7 @@ func TestFieldRender(t *testing.T) {
 }
 
 func TestPasswordFieldRenderMasked(t *testing.T) {
-	f := NewPasswordField("Password", "secret")
+	f := NewPasswordField("password", "Password", "secret")
 	rendered := f.Render(false, 60)
 	assert.Contains(t, rendered, "●●●●●●")
 	assert.NotContains(t, rendered, "secret")

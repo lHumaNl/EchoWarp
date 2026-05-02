@@ -18,17 +18,47 @@ const MaxEntries = 10
 
 // DevicePreset stores the device selection for a specific audio mode.
 type DevicePreset struct {
-	Devices []PresetDevice `json:"devices" yaml:"devices"`
+	Devices      []PresetDevice      `json:"devices" yaml:"devices"`
+	VirtualSinks []VirtualSinkPreset `json:"virtual_sinks,omitempty" yaml:"virtual_sinks,omitempty"`
+}
+
+// SinkLifecycle controls virtual sink behavior on start/stop.
+type SinkLifecycle string
+
+const (
+	// SinkKeep leaves the virtual sink as-is.
+	SinkKeep SinkLifecycle = "keep"
+	// SinkDelete removes the virtual sink.
+	SinkDelete SinkLifecycle = "delete"
+	// SinkRecreate removes and re-creates the virtual sink.
+	SinkRecreate SinkLifecycle = "recreate"
+)
+
+// VirtualSinkPreset stores parameters for a PulseAudio virtual sink
+// that was created alongside a device preset.
+type VirtualSinkPreset struct {
+	ID           string        `json:"id,omitempty" yaml:"id,omitempty"`
+	BaseName     string        `json:"base_name,omitempty" yaml:"base_name,omitempty"`
+	ModuleType   string        `json:"module_type" yaml:"module_type"`
+	SinkName     string        `json:"sink_name" yaml:"sink_name"`
+	MonitorName  string        `json:"monitor_name,omitempty" yaml:"monitor_name,omitempty"`
+	PlaybackName string        `json:"playback_name,omitempty" yaml:"playback_name,omitempty"`
+	CaptureName  string        `json:"capture_name,omitempty" yaml:"capture_name,omitempty"`
+	OnStop       SinkLifecycle `json:"on_stop" yaml:"on_stop"`
+	OnStart      SinkLifecycle `json:"on_start" yaml:"on_start"`
 }
 
 // PresetDevice represents a single device in a preset.
 type PresetDevice struct {
-	ID           uint32  `json:"id" yaml:"id"`
-	Name         string  `json:"name" yaml:"name"`
-	IsInput      bool    `json:"is_input" yaml:"is_input"`
-	Virtual      bool    `json:"virtual" yaml:"virtual"`
-	MixInputID   *uint32 `json:"mix_input_id,omitempty" yaml:"mix_input_id,omitempty"`
-	MixInputName string  `json:"mix_input_name,omitempty" yaml:"mix_input_name,omitempty"`
+	ID           uint32             `json:"id" yaml:"id"`
+	Name         string             `json:"name" yaml:"name"`
+	IsInput      bool               `json:"is_input" yaml:"is_input"`
+	Virtual      bool               `json:"virtual" yaml:"virtual"`
+	MixInputID   *uint32            `json:"mix_input_id,omitempty" yaml:"mix_input_id,omitempty"`
+	MixInputName string             `json:"mix_input_name,omitempty" yaml:"mix_input_name,omitempty"`
+	VirtualSink  *VirtualSinkPreset `json:"virtual_sink,omitempty" yaml:"virtual_sink,omitempty"`
+	Volume       float64            `json:"volume,omitempty" yaml:"volume,omitempty"`
+	AGC          bool               `json:"agc,omitempty" yaml:"agc,omitempty"`
 }
 
 // Server represents a recently connected server.
@@ -39,6 +69,7 @@ type Server struct {
 	ServerID      string                  `json:"server_id,omitempty" yaml:"server_id,omitempty"` // Stable per-port UUID; empty for old entries.
 	LastConnected time.Time               `json:"last_connected" yaml:"last_connected"`
 	Presets       map[string]DevicePreset `json:"presets,omitempty" yaml:"presets,omitempty"`
+	LogLevel      string                  `json:"log_level,omitempty" yaml:"log_level,omitempty"`
 }
 
 // serverJSON is used for backward-compatible deserialization from legacy JSON.
@@ -50,6 +81,7 @@ type serverJSON struct {
 	ServerID      string                  `json:"server_id,omitempty"`
 	LastConnected time.Time               `json:"last_connected"`
 	Presets       map[string]DevicePreset `json:"presets,omitempty"`
+	LogLevel      string                  `json:"log_level,omitempty"`
 }
 
 // UnmarshalJSON provides backward compatibility: reads both "hostname" and legacy "nickname" fields.
@@ -67,6 +99,7 @@ func (s *Server) UnmarshalJSON(data []byte) error {
 	s.ServerID = raw.ServerID
 	s.LastConnected = raw.LastConnected
 	s.Presets = raw.Presets
+	s.LogLevel = raw.LogLevel
 	return nil
 }
 
@@ -111,6 +144,7 @@ func Load() ([]Server, error) {
 		if err := json.Unmarshal(data, &servers); err != nil {
 			return nil, nil //nolint:nilerr
 		}
+		defaultPresetVolumes(servers)
 		return filterValid(servers), nil
 	}
 
@@ -119,7 +153,23 @@ func Load() ([]Server, error) {
 	if err := yaml.Unmarshal(data, &servers); err != nil {
 		return nil, nil //nolint:nilerr
 	}
+	defaultPresetVolumes(servers)
 	return filterValid(servers), nil
+}
+
+// defaultPresetVolumes sets Volume to 1.0 for any PresetDevice where it is zero
+// (backward compatibility with presets saved before the Volume field existed).
+func defaultPresetVolumes(servers []Server) {
+	for i := range servers {
+		for k, preset := range servers[i].Presets {
+			for j := range preset.Devices {
+				if preset.Devices[j].Volume == 0 {
+					preset.Devices[j].Volume = 1.0
+				}
+			}
+			servers[i].Presets[k] = preset
+		}
+	}
 }
 
 // filterValid removes entries with empty address or zero port.
@@ -151,9 +201,9 @@ func Save(servers []Server) error {
 
 // Add upserts a server into the list.
 // Matching priority:
-//  1. By ServerID (if both have one) — handles servers that moved to a new IP.
+//  1. By ServerID (when both sides have one) — handles servers that moved to a new IP.
 //     When matched by ServerID but addr:port differs, the stored addr:port is updated.
-//  2. By address:port — fallback for old entries without a ServerID.
+//  2. By address:port — only when both entries are legacy entries without a ServerID.
 //
 // If the server already exists, it is updated and moved to front.
 // Presets from an existing entry are preserved when the new entry has no presets.
@@ -161,15 +211,7 @@ func Save(servers []Server) error {
 func Add(servers []Server, s Server) []Server {
 	filtered := make([]Server, 0, len(servers))
 	for _, existing := range servers {
-		matched := false
-		// Primary match: both have ServerID
-		if s.ServerID != "" && existing.ServerID == s.ServerID {
-			matched = true
-		} else if existing.Address == s.Address && existing.Port == s.Port {
-			// Fallback match: addr:port
-			matched = true
-		}
-		if matched {
+		if MatchesServer(existing, s.Address, s.Port, s.ServerID) {
 			// Preserve presets from existing entry if new entry has none
 			if len(s.Presets) == 0 && len(existing.Presets) > 0 {
 				s.Presets = existing.Presets
@@ -189,4 +231,15 @@ func Add(servers []Server, s Server) []Server {
 		result = result[:MaxEntries]
 	}
 	return result
+}
+
+// MatchesServer reports whether an existing recent entry identifies the same
+// server. If either side has a stable ServerID, both IDs must be present and
+// equal. Address and port are used only for legacy entries where both IDs are
+// missing.
+func MatchesServer(existing Server, address string, port int, serverID string) bool {
+	if existing.ServerID != "" || serverID != "" {
+		return existing.ServerID != "" && serverID != "" && existing.ServerID == serverID
+	}
+	return existing.Address == address && existing.Port == port
 }

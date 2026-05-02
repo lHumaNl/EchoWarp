@@ -11,13 +11,13 @@ import (
 
 func TestApplyDiscoveredServer(t *testing.T) {
 	fields := []SetupField{
-		NewTextField("Server address", "", true),
-		NewNumberField("Port", 4415, 1, 65535),
-		NewPasswordField("Password", ""),
+		NewTextField("server_address", "Server address", "", true),
+		NewNumberField("port", "Port", 4415, 1, 65535),
+		NewPasswordField("password", "Password", ""),
 	}
 	advFields := []SetupField{
-		NewToggleField("Mode", []string{"normal (server → client)", "reverse (client → server)"}, 0),
-		NewToggleField("TLS", []string{"off", "on", "insecure"}, 0),
+		NewToggleField("mode", "Mode", []string{"normal (server → client)", "reverse (client → server)"}, 0),
+		NewToggleField("tls", "TLS", []string{"off", "on", "insecure"}, 0),
 	}
 
 	server := discovery.ServiceInfo{

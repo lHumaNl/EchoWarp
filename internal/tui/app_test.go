@@ -644,17 +644,71 @@ func TestSaveRecentServerCmd_PreservesPresetsForOtherModes(t *testing.T) {
 	assert.Equal(t, "OldDevice", presets["duplex"].Devices[0].Name)
 }
 
+func TestSaveRecentServerCmd_DoesNotInheritLegacyPresetForIdentifiedServer(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	cfg := config.Config{Mode: config.ModeClient, Address: "10.0.0.1", Port: 4415}
+	legacyPreset := recent.DevicePreset{Devices: []recent.PresetDevice{{ID: 99, Name: "LegacyDevice", Volume: 1}}}
+	initial := []recent.Server{{
+		Address: "10.0.0.1", Port: 4415, Hostname: "legacy",
+		Presets: map[string]recent.DevicePreset{"duplex": legacyPreset},
+	}}
+	require.NoError(t, recent.Save(initial))
+
+	newPreset := recent.DevicePreset{Devices: []recent.PresetDevice{{ID: 1, Name: "Mic"}}}
+	probeResult := &views.ProbeServerResult{ServerID: "server-a", ServerName: "new-server"}
+	cmd := saveRecentServerCmd(cfg, probeResult, nil, newPreset, "normal")
+	_ = cmd()
+
+	servers, err := recent.Load()
+	require.NoError(t, err)
+	require.Len(t, servers, 2)
+	assert.Equal(t, "server-a", servers[0].ServerID)
+	assert.Contains(t, servers[0].Presets, "normal")
+	assert.NotContains(t, servers[0].Presets, "duplex")
+	assert.Empty(t, servers[1].ServerID)
+	assert.Equal(t, legacyPreset, servers[1].Presets["duplex"])
+}
+
+func TestSaveRecentServerCmd_PreservesVirtualLifecycleWithOnlyRealMic(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	cfg := config.Config{Mode: config.ModeClient, Address: "10.0.0.1", Port: 4415}
+	presetWithMic := recent.DevicePreset{
+		Devices: []recent.PresetDevice{{ID: 1, Name: "Mic", IsInput: true}},
+		VirtualSinks: []recent.VirtualSinkPreset{{
+			ModuleType: "module-null-sink",
+			SinkName:   "EchoWarp",
+			OnStop:     recent.SinkDelete,
+			OnStart:    recent.SinkRecreate,
+		}},
+	}
+
+	cmd := saveRecentServerCmd(cfg, nil, nil, presetWithMic, "normal")
+	_ = cmd()
+
+	servers, _ := recent.Load()
+	normal := servers[0].Presets["normal"]
+
+	require.Len(t, normal.Devices, 1)
+	require.Len(t, normal.VirtualSinks, 1)
+	assert.Equal(t, "Mic", normal.Devices[0].Name)
+	assert.Equal(t, "EchoWarp", normal.VirtualSinks[0].SinkName)
+}
+
 func TestSaveServerPresetCmd_PersistsPreset(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	devicePreset := recent.DevicePreset{
+	mp := preset.ModePreset{
 		Devices: []recent.PresetDevice{
 			{ID: 5, Name: "Speaker", Virtual: false},
 		},
+		Port: 9090,
 	}
 
-	cmd := saveServerPresetCmd(devicePreset, "normal")
+	cmd := saveServerPresetCmd(mp, "normal")
 	require.NotNil(t, cmd)
 	msg := cmd()
 	assert.Nil(t, msg)
@@ -664,6 +718,8 @@ func TestSaveServerPresetCmd_PersistsPreset(t *testing.T) {
 	require.NotNil(t, p)
 	require.Len(t, p.Devices, 1)
 	assert.Equal(t, "Speaker", p.Devices[0].Name)
+	assert.Equal(t, 9090, p.Port)
+	assert.Equal(t, "normal", sp.LastMode)
 }
 
 func TestSaveServerPresetCmd_PreservesOtherModes(t *testing.T) {
@@ -672,13 +728,13 @@ func TestSaveServerPresetCmd_PreservesOtherModes(t *testing.T) {
 
 	// Write an existing preset for "duplex".
 	sp := preset.Load()
-	sp.Set("duplex", recent.DevicePreset{
+	sp.Set("duplex", preset.ModePreset{
 		Devices: []recent.PresetDevice{{ID: 9, Name: "OldSpeaker"}},
 	})
 	require.NoError(t, preset.Save(sp))
 
 	// Now save a "normal" preset.
-	cmd := saveServerPresetCmd(recent.DevicePreset{
+	cmd := saveServerPresetCmd(preset.ModePreset{
 		Devices: []recent.PresetDevice{{ID: 1, Name: "NewMic"}},
 	}, "normal")
 	_ = cmd()

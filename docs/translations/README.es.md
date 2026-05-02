@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -34,6 +34,45 @@
 ---
 
 Captura audio en una máquina y reprodúcelo en otra — en tiempo real a través de la red. EchoWarp utiliza WebRTC para el transporte y Opus para la compresión, ofreciendo audio de baja latencia con cifrado de extremo a extremo.
+
+## Tabla de Contenidos
+
+- [Características](#características)
+- [Inicio rápido](#inicio-rápido)
+- [TUI interactiva](#tui-interactiva)
+  - [Pantalla de configuración](#pantalla-de-configuración)
+  - [Descubrimiento en LAN](#descubrimiento-en-lan)
+  - [Perfiles de dispositivo](#perfiles-de-dispositivo)
+  - [Pantalla de transmisión](#pantalla-de-transmisión)
+  - [Atajos de teclado de la TUI](#atajos-de-teclado-de-la-tui)
+- [Modos de Transmisión](#modos-de-transmisión)
+  - [Normal — Unidireccional: Servidor a Clientes](#normal-unidireccional-servidor-a-clientes)
+  - [Inverso — Unidireccional: Clientes a Servidor](#inverso-unidireccional-clientes-a-servidor)
+  - [Dúplex — Bidireccional](#dúplex-bidireccional)
+  - [Conferencia — Mezcla Multiusuario (N:N)](#conferencia-mezcla-multiusuario-nn)
+  - [Resumen de Modos](#resumen-de-modos)
+- [Guía de Enrutamiento de Audio](#guía-de-enrutamiento-de-audio)
+  - [Casos de Uso](#casos-de-uso)
+  - [Loopback — Capturar Audio del Sistema](#loopback-capturar-audio-del-sistema)
+  - [Micrófono Virtual — Enrutar Audio a Otras Aplicaciones](#micrófono-virtual-enrutar-audio-a-otras-aplicaciones)
+  - [Mezcla del Micrófono Local en la Salida Virtual](#mezcla-del-micrófono-local-en-la-salida-virtual)
+  - [Secciones de Dispositivos](#secciones-de-dispositivos)
+  - [Diagnóstico](#diagnóstico)
+  - [Preguntas Frecuentes](#preguntas-frecuentes)
+- [Modo CLI](#modo-cli)
+  - [Modos](#modos)
+  - [Flags comunes](#flags-comunes)
+  - [Archivos de configuración](#archivos-de-configuración)
+- [Instalación](#instalación)
+  - [Binarios precompilados](#binarios-precompilados)
+  - [Compilar desde el código fuente](#compilar-desde-el-código-fuente)
+- [Requisitos del sistema](#requisitos-del-sistema)
+- [Red y Firewall](#red-y-firewall)
+  - [Servidor — puertos a abrir](#servidor-puertos-a-abrir)
+  - [Cliente — no se requieren puertos de entrada](#cliente-no-se-requieren-puertos-de-entrada)
+  - [Descubrimiento en LAN](#descubrimiento-en-lan-1)
+  - [Traversal de NAT (STUN / TURN)](#traversal-de-nat-stun-turn)
+- [Licencia](#licencia)
 
 ## Características
 
@@ -342,6 +381,9 @@ Si no se encuentra ningún driver de audio virtual, el doctor mostrará instrucc
 **Quiero una llamada grupal con 3+ máquinas.**
 → Usa el modo Conference. El servidor actúa como hub (no se necesitan dispositivos). Cada cliente selecciona un micrófono y altavoces. Todos escuchan a todos los demás, excepto su propia voz.
 
+**Uso Moonlight/Sunshine (o NVIDIA GameStream) y quiero que mi micrófono funcione en juegos en el host.**
+→ Ejecuta `EchoWarp server` en modo Reverse en el host de juegos (máquina Sunshine/GameStream). Ejecuta `EchoWarp client` en la máquina Moonlight, selecciona tu micrófono en Input. En el servidor, selecciona un dispositivo de audio virtual (BlackHole/VB-Cable) en Output, o habilita `--virtual-mic` para crear uno automáticamente. En tu juego o chat de voz en el host, selecciona ese dispositivo virtual como micrófono. Tu voz desde el cliente Moonlight aparecerá como entrada de micrófono en el host de juegos.
+
 **Quiero que Discord escuche tanto la transmisión remota COMO mi voz a través de un solo micrófono virtual.**
 → En el cliente, selecciona un dispositivo virtual (BlackHole/VB-Cable) en Output. Aparecerá una lista de dispositivos de entrada debajo — marca tu micrófono. EchoWarp mezclará la transmisión y tu micrófono en la salida virtual. En Discord, selecciona el dispositivo virtual como tu micrófono.
 
@@ -353,6 +395,20 @@ Si no se encuentra ningún driver de audio virtual, el doctor mostrará instrucc
 
 **El dispositivo virtual muestra "adaptive" en lugar de una frecuencia de muestreo.**
 → Esto es normal. Los drivers de audio virtual (BlackHole, VB-Cable) se adaptan a la frecuencia de muestreo que use la aplicación — la tasa mostrada no tiene relevancia.
+
+<details>
+<summary>macOS: "No se puede abrir EchoWarp" / advertencia de Gatekeeper</summary>
+
+macOS bloquea las aplicaciones no firmadas. Para permitir la ejecución de EchoWarp:
+
+```bash
+xattr -cr /path/to/EchoWarp       # para el binario
+xattr -cr /path/to/EchoWarp.app   # para el paquete .app
+```
+
+Alternativamente: **Ajustes del Sistema → Privacidad y seguridad → "Permitir de todos modos"**
+
+</details>
 
 ## Modo CLI
 

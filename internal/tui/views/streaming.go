@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
@@ -26,8 +27,9 @@ type DeviceDisplayState struct {
 	ID           uint32
 	Name         string
 	Role         string  // "capture" or "playback"
-	Volume       float64 // 0.0–2.0
+	Volume       float64 // 0.0–1.5
 	Muted        bool
+	AGC          bool
 	Selected     bool
 	Disconnected bool
 }
@@ -61,6 +63,8 @@ type StreamingParams struct {
 	PlaybackSpectrumBands []float64
 	PlaybackVULevels      []float64
 
+	IsServer bool // true when local side is the server (controls device panel visibility)
+
 	Quality       QualityLevel
 	PacketLossPct float64 // packet loss percentage (0–100)
 	ChatView      string  // pre-rendered chat panel (empty if not visible)
@@ -73,7 +77,11 @@ type StreamingParams struct {
 
 	// SourcePaused indicates the remote audio source has paused its capture.
 	SourcePaused bool
-	// ServerMuted indicates we have muted the incoming server audio.
+	// IncomingMuted indicates the local side refuses incoming peer audio.
+	IncomingMuted bool
+	// PeerMutedYou indicates the remote side refuses our outgoing audio.
+	PeerMutedYou bool
+	// ServerMuted is kept as a compatibility alias for IncomingMuted.
 	ServerMuted bool
 
 	// FocusedArea indicates which area has keyboard focus (0=ClientList, 1=Chat, 2=Logs).
@@ -95,11 +103,11 @@ func StreamingView(p StreamingParams) string {
 	var sections []string
 
 	// Summary line: direction + device
-	sections = append(sections, renderSummaryLine(p.Reverse, p.Duplex, p.Paused, p.SourcePaused, p.ServerMuted, p.DeviceName, p.Nickname, p.Width))
+	sections = append(sections, renderSummaryLine(p, p.DeviceName, p.Nickname, p.Width))
 
 	// Duplex warning + latency estimation
 	if p.Duplex {
-		sections = append(sections, styles.StatValueWarn.Render("  ⚠ Duplex mode: headphones recommended to avoid echo"))
+		sections = append(sections, styles.StatValueWarn.Render(i18n.T("streaming_duplex_warning")))
 		// Latency estimation: codec (20ms × 2 encode+decode) + RTT/2 + jitter buffer
 		codecMs := 40.0 // 20ms encode + 20ms decode
 		jitterBuf := p.Stats.Jitter * 2
@@ -108,8 +116,9 @@ func StreamingView(p StreamingParams) string {
 		}
 		oneWayMs := codecMs + p.Stats.RoundTrip/2 + jitterBuf
 		latStyle := getValueStyle(oneWayMs, 80, 150, styles.StatValueGood, styles.StatValueWarn, styles.StatValueError)
-		sections = append(sections, fmt.Sprintf("  Estimated latency: %s",
-			latStyle.Render(fmt.Sprintf("%.0f ms (one-way)", oneWayMs))))
+		sections = append(sections, fmt.Sprintf("  %s%s",
+			i18n.T("streaming_latency_estimated"),
+			latStyle.Render(i18n.Tf("streaming_latency_oneway", oneWayMs))))
 	}
 
 	// Remote address
@@ -132,10 +141,7 @@ func StreamingView(p StreamingParams) string {
 		sections = append(sections, statsContent)
 	}
 
-	// Device panel
-	if len(p.Devices) > 0 {
-		sections = append(sections, renderSep(p.Width), renderDevicePanel(p.Devices, p.GlobalMuted))
-	}
+	// Device panel removed from streaming view — access via Ctrl+D overlay only.
 
 	// Chat panel
 	if p.ChatView != "" {
@@ -152,7 +158,7 @@ func StreamingView(p StreamingParams) string {
 		}
 		sections = append(sections, renderSep(p.Width))
 		if p.FocusedArea == 2 { // FocusLogs
-			sections = append(sections, styles.FocusedLabel.Render("Logs ▾"))
+			sections = append(sections, styles.FocusedLabel.Render(i18n.T("streaming_label_logs")))
 			remaining--
 		}
 		logPanel := renderLogPanelWithMax(p.Logs, p.LogScrollOffset, p.Width, remaining-1)
@@ -167,7 +173,7 @@ func renderParticipantSidebar(participants []string, maxClients int, myNickname 
 	lines := make([]string, 0, 2+len(participants))
 
 	// Header: "Online (N/M)"
-	header := fmt.Sprintf("Online (%d/%d)", len(participants), maxClients)
+	header := i18n.Tf("streaming_online_count", len(participants), maxClients)
 	lines = append(lines, styles.StatLabel.Render(header), styles.Separator.Render(strings.Repeat("─", leftColumnWidth)))
 
 	// Participant list with bullets
@@ -175,7 +181,7 @@ func renderParticipantSidebar(participants []string, maxClients int, myNickname 
 		bullet := styles.ParticipantBullet.Render(" • ")
 		entry := nick
 		if nick == myNickname {
-			entry += " (me)"
+			entry += i18n.T("streaming_me_suffix")
 		}
 		// Truncate if too wide
 		maxNameW := leftColumnWidth - 3 // " • " prefix
@@ -223,40 +229,13 @@ func joinSidebarAndStats(sidebar, statsContent string) string {
 	return strings.Join(combined, "\n")
 }
 
-func renderSummaryLine(reverse, duplex, paused, sourcePaused, serverMuted bool, deviceName, nickname string, width int) string {
-	var dirText string
-	var style lipgloss.Style
-
-	if paused {
-		if duplex {
-			dirText = "⇄ server ↔ client (duplex) [PAUSED]"
-		} else if reverse {
-			dirText = "▸ client → server (reverse) [PAUSED]"
-		} else {
-			dirText = "▸ server → client (normal) [PAUSED]"
-		}
-		style = styles.Paused
-	} else if duplex {
-		dirText = "⇄ server ↔ client (duplex)"
-		style = styles.Direction
-	} else if reverse {
-		dirText = "▸ client → server (reverse)"
-		style = styles.DirectionReverse
-	} else {
-		dirText = "▸ server → client (normal)"
-		style = styles.Direction
-	}
-
-	if sourcePaused && !paused {
-		dirText += " [SOURCE PAUSED]"
+func renderSummaryLine(p StreamingParams, deviceName, nickname string, width int) string {
+	dirText, style := summaryDirection(p.Reverse, p.Duplex)
+	badges := summaryBadges(p)
+	if len(badges) > 0 {
+		dirText += " " + strings.Join(badges, " ")
 		style = styles.Paused
 	}
-
-	if serverMuted {
-		dirText += " [MUTED]"
-		style = styles.Paused
-	}
-
 	if nickname != "" {
 		dirText += "  " + nickname
 	}
@@ -274,8 +253,35 @@ func renderSummaryLine(reverse, duplex, paused, sourcePaused, serverMuted bool, 
 	return left
 }
 
+func summaryDirection(reverse, duplex bool) (string, lipgloss.Style) {
+	if duplex {
+		return i18n.T("streaming_dir_duplex"), styles.Direction
+	}
+	if reverse {
+		return i18n.T("streaming_dir_reverse"), styles.DirectionReverse
+	}
+	return i18n.T("streaming_dir_normal"), styles.Direction
+}
+
+func summaryBadges(p StreamingParams) []string {
+	badges := make([]string, 0, 4)
+	if p.Paused {
+		badges = append(badges, i18n.T("streaming_badge_paused"))
+	}
+	if p.SourcePaused {
+		badges = append(badges, i18n.T("streaming_badge_source_paused"))
+	}
+	if p.IncomingMuted || p.ServerMuted {
+		badges = append(badges, i18n.T("streaming_badge_incoming_muted"))
+	}
+	if p.PeerMutedYou {
+		badges = append(badges, i18n.T("streaming_badge_peer_muted_you"))
+	}
+	return badges
+}
+
 func renderRemoteLine(remoteAddr string, _ int) string {
-	return styles.StatLabel.Render("Remote: ") + styles.StatValueGood.Render(remoteAddr)
+	return styles.StatLabel.Render(i18n.T("streaming_label_remote")) + styles.StatValueGood.Render(remoteAddr)
 }
 
 func renderSep(width int) string {
@@ -291,7 +297,7 @@ const thresholdBarWidth = 10
 
 // renderQualityLine renders a single quality indicator line above stats.
 func renderQualityLine(q QualityLevel) string {
-	return styles.StatLabel.Render("Connection Quality  ") + RenderQualityBadge(q)
+	return styles.StatLabel.Render(i18n.T("streaming_label_connection_quality")) + RenderQualityBadge(q)
 }
 
 // renderStatsLines builds the left-column stats lines (jitter, RTT, loss, traffic).
@@ -307,9 +313,9 @@ func renderStatsLines(stats transport.ConnectionStats, jitterHist, rttHist []flo
 	rttBar := RTTBar(stats.RoundTrip, thresholdBarWidth)
 	lossBar := LossBar(stats.PacketsLost, thresholdBarWidth)
 
-	jitterText := fmt.Sprintf("Jitter %s  %s", jitterStyle.Render(fmt.Sprintf("%5.1f ms", stats.Jitter)), jitterBar)
-	rttText := fmt.Sprintf("RTT    %s  %s", rttStyle.Render(fmt.Sprintf("%5.1f ms", stats.RoundTrip)), rttBar)
-	lossText := fmt.Sprintf("Loss   %s  %s", lossStyle.Render(fmt.Sprintf("%d / %.1f%%", stats.PacketsLost, packetLossPct)), lossBar)
+	jitterText := fmt.Sprintf("%-6s %s  %s", i18n.T("streaming_label_jitter"), jitterStyle.Render(fmt.Sprintf("%5.1f ms", stats.Jitter)), jitterBar)
+	rttText := fmt.Sprintf("%-6s %s  %s", i18n.T("streaming_label_rtt"), rttStyle.Render(fmt.Sprintf("%5.1f ms", stats.RoundTrip)), rttBar)
+	lossText := fmt.Sprintf("%-6s %s  %s", i18n.T("streaming_label_loss"), lossStyle.Render(fmt.Sprintf("%d / %.1f%%", stats.PacketsLost, packetLossPct)), lossBar)
 
 	if jitterSpark != "" {
 		jitterText += "  " + styles.StatLabel.Render(jitterSpark)
@@ -327,8 +333,8 @@ func renderStatsLines(stats transport.ConnectionStats, jitterHist, rttHist []flo
 
 	var sentPrefix, recvPrefix string
 	if duplex {
-		sentPrefix = "Sending   "
-		recvPrefix = "Receiving "
+		sentPrefix = i18n.T("streaming_label_sending")
+		recvPrefix = i18n.T("streaming_label_receiving")
 	}
 	sent := fmt.Sprintf("%s↑ %*s  %*s", sentPrefix, bytesW, sentBytes, rateW, sentRate)
 	recv := fmt.Sprintf("%s↓ %*s  %*s", recvPrefix, bytesW, recvBytes, rateW, recvRate)
@@ -484,51 +490,24 @@ func formatKbps(kbps float64) string {
 	return fmt.Sprintf("%.1f kbps", kbps)
 }
 
-func renderDevicePanel(devices []DeviceDisplayState, globalMuted bool) string {
-	lines := make([]string, 0, 1+len(devices))
-	header := "Devices"
-	if globalMuted {
-		header += "  " + styles.StatValueError.Render("[GLOBAL MUTE]")
+// renderCompactVolumeBar renders a short volume bar (6 chars) + percentage for inline use.
+func renderCompactVolumeBar(volume float64) string {
+	const barLen = 6
+	filled := int(volume / 1.5 * float64(barLen))
+	if filled > barLen {
+		filled = barLen
 	}
-	lines = append(lines, styles.StatLabel.Render(header))
-
-	for _, dev := range devices {
-		role := "[C]"
-		if dev.Role == "playback" {
-			role = "[P]"
-		}
-
-		volPct := int(dev.Volume * 100)
-		volBar := renderVolumeBar(dev.Volume)
-
-		muteIcon := ""
-		if dev.Disconnected {
-			muteIcon = " " + styles.StatValueError.Render("[disconnected]")
-		} else if dev.Muted || globalMuted {
-			muteIcon = " " + styles.StatValueError.Render("MUTED")
-		}
-
-		prefix := "  "
-		if dev.Selected {
-			prefix = styles.DirectionReverse.Render("▸ ")
-		}
-
-		line := fmt.Sprintf("%s%s %s  %s %3d%%%s",
-			prefix,
-			styles.StatLabel.Render(role),
-			dev.Name,
-			volBar,
-			volPct,
-			muteIcon,
-		)
-		lines = append(lines, line)
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
+	pct := fmt.Sprintf("%3d%%", int(volume*100))
+	if volume > 1.0 {
+		return styles.StatValueWarn.Render(bar) + " " + pct
 	}
-	return strings.Join(lines, "\n")
+	return styles.StatValueGood.Render(bar) + " " + pct
 }
 
 func renderVolumeBar(volume float64) string {
 	const barLen = 10
-	filled := int(volume / 2.0 * float64(barLen))
+	filled := int(volume / 1.5 * float64(barLen))
 	if filled > barLen {
 		filled = barLen
 	}
@@ -582,7 +561,7 @@ func renderLogPanelInner(logs []string, scrollOffset, width, maxVisible int) str
 	}
 
 	if scrollOffset > 0 {
-		hint := styles.ScrollHint.Render(fmt.Sprintf("[SCROLLED ↑%d]", scrollOffset))
+		hint := styles.ScrollHint.Render(i18n.Tf("streaming_scrolled", scrollOffset))
 		sb.WriteString(hint)
 	}
 

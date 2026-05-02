@@ -26,7 +26,7 @@
 
 <p align="center">
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/v/release/lHumaNl/EchoWarp?style=flat-square" alt="Release"></a>
-  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=main&style=flat-square" alt="CI"></a>
+  <a href="https://github.com/lHumaNl/EchoWarp/actions"><img src="https://img.shields.io/github/actions/workflow/status/lHumaNl/EchoWarp/ci.yml?branch=master&style=flat-square" alt="CI"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/blob/master/LICENSE"><img src="https://img.shields.io/github/license/lHumaNl/EchoWarp?style=flat-square" alt="License"></a>
   <a href="https://github.com/lHumaNl/EchoWarp/releases"><img src="https://img.shields.io/github/downloads/lHumaNl/EchoWarp/total?style=flat-square" alt="Downloads"></a>
 </p>
@@ -34,6 +34,45 @@
 ---
 
 한 머신에서 오디오를 캡처하여 다른 머신에서 실시간으로 재생하세요 — 네트워크를 통해. EchoWarp는 전송에 WebRTC, 압축에 Opus를 사용하며, 종단간 암호화와 함께 저지연 오디오를 제공합니다.
+
+## 목차
+
+- [기능](#기능)
+- [빠른 시작](#빠른-시작)
+- [대화형 TUI](#대화형-tui)
+  - [설정 화면](#설정-화면)
+  - [LAN 탐색](#lan-탐색)
+  - [장치 프로필](#장치-프로필)
+  - [스트리밍 화면](#스트리밍-화면)
+  - [TUI 키보드 단축키](#tui-키보드-단축키)
+- [스트리밍 모드](#스트리밍-모드)
+  - [일반 — 단방향: 서버에서 클라이언트로](#일반-단방향-서버에서-클라이언트로)
+  - [역방향 — 단방향: 클라이언트에서 서버로](#역방향-단방향-클라이언트에서-서버로)
+  - [듀플렉스 — 양방향](#듀플렉스-양방향)
+  - [컨퍼런스 — 다중 사용자 믹싱 (N:N)](#컨퍼런스-다중-사용자-믹싱-nn)
+  - [모드 요약](#모드-요약)
+- [오디오 라우팅 가이드](#오디오-라우팅-가이드)
+  - [사용 사례](#사용-사례)
+  - [루프백 — 시스템 오디오 캡처](#루프백-시스템-오디오-캡처)
+  - [가상 마이크 — 다른 앱으로 오디오 라우팅](#가상-마이크-다른-앱으로-오디오-라우팅)
+  - [로컬 마이크를 가상 출력에 믹싱](#로컬-마이크를-가상-출력에-믹싱)
+  - [장치 섹션](#장치-섹션)
+  - [진단](#진단)
+  - [FAQ](#faq)
+- [CLI 모드](#cli-모드)
+  - [모드](#모드)
+  - [공통 플래그](#공통-플래그)
+  - [설정 파일](#설정-파일)
+- [설치](#설치)
+  - [미리 빌드된 바이너리](#미리-빌드된-바이너리)
+  - [소스에서 빌드](#소스에서-빌드)
+- [시스템 요구 사항](#시스템-요구-사항)
+- [네트워크 및 방화벽](#네트워크-및-방화벽)
+  - [서버 — 열어야 할 포트](#서버-열어야-할-포트)
+  - [클라이언트 — 인바운드 포트 불필요](#클라이언트-인바운드-포트-불필요)
+  - [LAN 검색](#lan-검색)
+  - [NAT 통과 (STUN / TURN)](#nat-통과-stun-turn)
+- [라이선스](#라이선스)
 
 ## 기능
 
@@ -342,6 +381,9 @@ Audio
 **3대 이상으로 그룹 통화를 하고 싶습니다.**
 → Conference 모드를 사용하십시오. 서버는 허브 역할을 합니다(장치 불필요). 각 클라이언트는 마이크와 스피커를 선택합니다. 모든 참가자가 자신의 목소리를 제외한 다른 모든 소리를 들을 수 있습니다.
 
+**Moonlight/Sunshine(또는 NVIDIA GameStream)을 사용하는데, 호스트의 게임에서 마이크가 작동하게 하고 싶습니다.**
+→ 게임 호스트(Sunshine/GameStream 머신)에서 `EchoWarp server`를 Reverse 모드로 실행하십시오. Moonlight 머신에서 `EchoWarp client`를 실행하고 Input에서 마이크를 선택하십시오. 서버에서 Output에 가상 오디오 장치(BlackHole/VB-Cable)를 선택하거나, `--virtual-mic`를 활성화하여 자동으로 생성하십시오. 호스트의 게임이나 음성 채팅에서 해당 가상 장치를 마이크로 선택하십시오. Moonlight 클라이언트에서 보낸 음성이 게임 호스트의 마이크 입력으로 나타납니다.
+
 **Discord에서 원격 스트림과 내 목소리를 하나의 가상 마이크로 사용하고 싶습니다.**
 → 클라이언트에서 Output에 가상 장치(BlackHole/VB-Cable)를 선택하십시오. 그 아래에 입력 장치 목록이 나타납니다 — 마이크를 체크하십시오. EchoWarp가 스트림과 마이크를 가상 출력으로 믹싱합니다. Discord에서 해당 가상 장치를 마이크로 선택하십시오.
 
@@ -353,6 +395,20 @@ Audio
 
 **가상 장치에 샘플 레이트 대신 "adaptive"가 표시됩니다.**
 → 정상입니다. 가상 오디오 드라이버(BlackHole, VB-Cable)는 애플리케이션이 사용하는 샘플 레이트에 자동으로 적응하므로 표시된 레이트는 의미가 없습니다.
+
+<details>
+<summary>macOS: "EchoWarp를 열 수 없습니다" / Gatekeeper 경고</summary>
+
+macOS는 서명되지 않은 애플리케이션을 차단합니다. EchoWarp 실행을 허용하려면:
+
+```bash
+xattr -cr /path/to/EchoWarp       # 바이너리용
+xattr -cr /path/to/EchoWarp.app   # .app 번들용
+```
+
+또는: **시스템 설정 → 개인정보 보호 및 보안 → "확인 없이 열기"**
+
+</details>
 
 ## CLI 모드
 

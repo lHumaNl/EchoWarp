@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
 
 permissions:
   contents: write
@@ -251,9 +251,24 @@ jobs:
           APP="EchoWarp.app"
           mkdir -p "${APP}/Contents/MacOS"
           mkdir -p "${APP}/Contents/Resources"
-          cp EchoWarp "${APP}/Contents/MacOS/EchoWarp"
+          cp EchoWarp "${APP}/Contents/MacOS/EchoWarp-bin"
           cp build/icons/icon.icns "${APP}/Contents/Resources/icon.icns"
-          cat > "${APP}/Contents/Info.plist" << 'PLIST'
+          cat > "${APP}/Contents/MacOS/EchoWarp" << 'LAUNCHER'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          BIN="${DIR}/EchoWarp-bin"
+          osascript << EOF
+          tell application "Terminal"
+              activate
+              repeat until (count of windows) > 0
+                  delay 0.1
+              end repeat
+              do script "exec \"${BIN}\"" in front window
+          end tell
+          EOF
+          LAUNCHER
+          chmod +x "${APP}/Contents/MacOS/EchoWarp"
+          cat > "${APP}/Contents/Info.plist" << PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
@@ -269,22 +284,23 @@ jobs:
             <key>CFBundlePackageType</key>
             <string>APPL</string>
             <key>CFBundleShortVersionString</key>
-          PLIST
-          echo "  <string>${VERSION}</string>" >> "${APP}/Contents/Info.plist"
-          cat >> "${APP}/Contents/Info.plist" << 'PLIST'
+            <string>${VERSION}</string>
             <key>CFBundleVersion</key>
-          PLIST
-          echo "  <string>${VERSION}</string>" >> "${APP}/Contents/Info.plist"
-          cat >> "${APP}/Contents/Info.plist" << 'PLIST'
+            <string>${VERSION}</string>
             <key>LSMinimumSystemVersion</key>
             <string>11.0</string>
             <key>NSHighResolutionCapable</key>
             <true/>
-            <key>LSUIElement</key>
-            <true/>
           </dict>
           </plist>
           PLIST
+
+      # ── Sign macOS binary ──────────────────────────────────────
+      - name: Sign macOS binary
+        if: matrix.goos == 'darwin'
+        run: |
+          codesign -s - --force --deep EchoWarp.app
+          codesign -s - --force EchoWarp
 
       # ── Create archives ──────────────────────────────────────
       - name: Create archive (tar.gz)
@@ -341,7 +357,7 @@ jobs:
 
             Each archive contains a single `EchoWarp` binary (or `EchoWarp.exe` on Windows). macOS archives also include an `EchoWarp.app` bundle.
 
-            **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/main/build/launchers) and place next to `EchoWarp.exe` to launch with a double-click.
+            **Windows users:** Download [launcher scripts](https://github.com/lHumaNl/EchoWarp/tree/master/build/launchers) and place next to `EchoWarp.exe` to launch with a double-click.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -353,14 +369,14 @@ jobs:
     steps:
       - name: Get version
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Download release archives
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_arm64.zip" -o darwin_arm64.zip
-          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_amd64.zip" -o darwin_amd64.zip
-          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_linux_amd64.tar.gz" -o linux_amd64.tar.gz
+          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/${VERSION}/EchoWarp_darwin_arm64.zip" -o darwin_arm64.zip
+          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/${VERSION}/EchoWarp_darwin_amd64.zip" -o darwin_amd64.zip
+          curl -sL "https://github.com/lHumaNl/EchoWarp/releases/download/${VERSION}/EchoWarp_linux_amd64.tar.gz" -o linux_amd64.tar.gz
 
       - name: Compute checksums
         id: sha
@@ -381,17 +397,17 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_arm64.zip"
+                url "https://github.com/lHumaNl/EchoWarp/releases/download/${VERSION}/EchoWarp_darwin_arm64.zip"
                 sha256 "${{ steps.sha.outputs.darwin_arm64 }}"
               else
-                url "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_darwin_amd64.zip"
+                url "https://github.com/lHumaNl/EchoWarp/releases/download/${VERSION}/EchoWarp_darwin_amd64.zip"
                 sha256 "${{ steps.sha.outputs.darwin_amd64 }}"
               end
             end
 
             on_linux do
               if Hardware::CPU.intel?
-                url "https://github.com/lHumaNl/EchoWarp/releases/download/v${VERSION}/EchoWarp_linux_amd64.tar.gz"
+                url "https://github.com/lHumaNl/EchoWarp/releases/download/${VERSION}/EchoWarp_linux_amd64.tar.gz"
                 sha256 "${{ steps.sha.outputs.linux_amd64 }}"
               end
             end

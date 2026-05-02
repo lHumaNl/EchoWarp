@@ -151,23 +151,42 @@ func (s *ServerApp) handleOneClient(ctx context.Context, listenAddr string) erro
 
 	// Register single client in s.clients so processCommands (kick/ban/mute) can find it.
 	// Must happen before setupAudioPipeline so the mute filter can reference mc.mutedOutgoing.
+	isCustomNick := meta.Nickname != ""
 	s.mu.Lock()
-	s.clients[clientID] = &multiClient{
-		id:        clientID,
-		nickname:  nickname,
-		hwid:      meta.HWID,
-		sessionID: sessionID,
-		conn:      &remoteAddrConn{addr: remoteAddr, closeFn: signaler.Close},
-		peer:      peer,
-		joinedAt:  connStart,
+	mc := &multiClient{
+		id:           clientID,
+		nickname:     nickname,
+		hwid:         meta.HWID,
+		sessionID:    sessionID,
+		isCustomNick: isCustomNick,
+		conn:         &remoteAddrConn{addr: remoteAddr, closeFn: signaler.Close},
+		peer:         peer,
+		joinedAt:     connStart,
 	}
+	s.clients[clientID] = mc
 	s.notifyClientCount()
 	s.mu.Unlock()
+	if s.onClientJoin != nil {
+		s.onClientJoin(clientID, remoteAddr)
+	}
+	singleGraceful := false
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, clientID)
+		if singleGraceful {
+			delete(s.sessions, sessionID)
+		} else {
+			s.sessions[sessionID] = &sessionEntry{
+				clientID:     clientID,
+				nickname:     nickname,
+				isCustomNick: isCustomNick,
+			}
+		}
 		s.notifyClientCount()
 		s.mu.Unlock()
+		if s.onClientLeave != nil {
+			s.onClientLeave(clientID)
+		}
 	}()
 
 	audioDone, err := s.setupAudioPipeline(sigCtx, peer, direction, clientID)
@@ -198,7 +217,12 @@ func (s *ServerApp) handleOneClient(ctx context.Context, listenAddr string) erro
 	go s.processCommands(sigCtx)
 	go s.reportMultiStats(sigCtx)
 
-	return s.handleSignalingLoop(sigCtx, signaler, peer, audioDone, connStart, protocol, clientID, nickname, sessionID)
+	loopErr := s.handleSignalingLoop(sigCtx, signaler, peer, audioDone, connStart, protocol, clientID, nickname, sessionID)
+	// nil error means graceful disconnect (client sent stop, or server TUI stop).
+	if loopErr == nil {
+		singleGraceful = true
+	}
+	return loopErr
 }
 
 func (s *ServerApp) createAndStartSignaler(ctx context.Context, listenAddr string) (transport.Signaler, context.Context, context.CancelFunc, error) {
@@ -424,85 +448,19 @@ func (s *ServerApp) processServerPauseSingle(ctx context.Context, peer transport
 // newServerPauseFilterCh creates a forwarding channel that drops audio frames when serverPaused is set.
 // Used to implement server-side pause of its own capture stream.
 func (s *ServerApp) newServerPauseFilterCh(ctx context.Context, dst chan<- []byte) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if s.serverPaused.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, &s.serverPaused)
 }
 
 // newMuteFilterCh creates a forwarding channel that drops audio frames when the given flag is set.
 // Used to implement server-side mute requested by the client (per-client in multi-client mode).
 func newMuteFilterCh(ctx context.Context, dst chan<- []byte, flag *atomic.Bool) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if flag.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newFlagFilterCh(ctx, dst, flag)
 }
 
 // newCombinedMuteFilterCh creates a forwarding channel that drops audio frames when
 // either flag1 or flag2 is true. Used for combining client-initiated and server-initiated mute.
 func newCombinedMuteFilterCh(ctx context.Context, dst chan<- []byte, flag1, flag2 *atomic.Bool) chan<- []byte {
-	src := make(chan []byte, cap(dst))
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data, ok := <-src:
-				if !ok {
-					return
-				}
-				if flag1.Load() || flag2.Load() {
-					audio.PutOpusOutput(data)
-					continue
-				}
-				select {
-				case dst <- data:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return src
+	return newTwoFlagFilterCh(ctx, dst, flag1, flag2)
 }
 
 func (s *ServerApp) setupReverseAudio(ctx context.Context, peer transport.PeerManager, audioDone chan<- error) {
@@ -521,13 +479,41 @@ func (s *ServerApp) setupReverseAudioWithID(ctx context.Context, peer transport.
 // AEC reference feeding is also done here.
 // If muteIncomingFlag is non-nil and true, incoming frames are dropped before processing.
 func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.PeerManager, audioDone chan<- error, clientID string, muteIncomingFlag *atomic.Bool) {
+	// Build gain control for the server's playback device so Ctrl+D
+	// volume/mute in the TUI affects what the server plays. Initial
+	// volume comes from the single-device entry in PlaybackDevices().
+	var initialVol float32 = 1.0
+	playbackDevs := s.cfg.PlaybackDevices()
+	if len(playbackDevs) == 1 {
+		initialVol = float32(playbackDevs[0].Volume)
+	}
+	if initialVol <= 0 {
+		initialVol = 1.0
+	}
+	playbackGainCtl := NewDeviceGainControl(initialVol)
+	// AGC processors for playback (runtime toggle via Ctrl+D).
+	playbackAGCMap := buildAGCProcessors(playbackDevs, s.cfg.SampleRate)
+	var playbackAGC *audio.AGCProcessor
+	if len(playbackDevs) == 1 {
+		playbackAGC = playbackAGCMap[playbackDevs[0].ID]
+	}
+	// Start HandleDeviceCommands only in reverse-only mode. In duplex mode
+	// runCapturePipeline already spawned one for the capture device — starting
+	// another would race on the shared s.deviceCmdCh channel. This is a known
+	// limitation for duplex server: playback volume via Ctrl+D only works in
+	// reverse-only mode for now (tracked separately as a multi-device router
+	// refactor).
+	if !s.cfg.Duplex {
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, playbackGainCtl, playbackAGCMap, s.logger)
+	}
+
 	// If we need to intercept audio (AEC or conference or incoming mute), use channel-based decode
 	// with JitterBuffer between intercept and player.
 	needsIntercept := s.aec != nil || (s.conference != nil && clientID != "") || muteIncomingFlag != nil
 
 	if !needsIntercept {
 		// Simple path: decoder → JitterBuffer → player.
-		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone)
+		startJitteredPlayback(ctx, s.logger, s.cfg, peer, s.spectrum, s.levelMeter, audioDone, nil, nil, playbackGainCtl, playbackAGC)
 		return
 	}
 
@@ -595,14 +581,72 @@ func (s *ServerApp) setupReverseAudioMuted(ctx context.Context, peer transport.P
 		}
 	}()
 
-	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh)
-	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone)
+	readyCh := make(chan struct{})
+	go jitterPlaybackPump(ctx, jb, playbackCh, frameSize, int(s.cfg.SampleRate), int(s.cfg.Channels), s.logger, doneCh, nil, nil, playbackGainCtl, playbackAGC, readyCh, nil)
+	startAudioPlayer(ctx, s.logger, s.cfg, playbackCh, audioDone, readyCh)
 
 	s.logger.Info("Jitter buffer enabled (intercept path)",
 		"target", targetFrames,
 		"max", maxFrames,
 		"aec", s.aec != nil,
 		"conference", clientID != "",
+		"muteIncoming", muteIncomingFlag != nil,
+	)
+}
+
+// setupConferenceReceiver sets up the receive-only pipeline for conference mode:
+// decode client audio → submit to conference mixer. No JitterBuffer, no audio player.
+// This prevents the server from playing client audio through its speakers (feedback loop).
+func (s *ServerApp) setupConferenceReceiver(ctx context.Context, peer transport.PeerManager, audioDone chan<- error, clientID string, muteIncomingFlag *atomic.Bool) {
+	bufFrames := s.cfg.EffectiveAudioBufferFrames()
+	decodeCh := make(chan []float32, bufFrames)
+
+	// Spectrum/level fed after mute check when muteIncomingFlag is present.
+	var decSpectrum *audio.SpectrumAnalyzer
+	var decLevel *audio.LevelMeter
+	if muteIncomingFlag == nil {
+		decSpectrum = s.spectrum
+		decLevel = s.levelMeter
+	}
+	setupAudioDecoder(s.logger, peer, s.cfg.SampleRate, s.cfg.Channels, decodeCh, decSpectrum, decLevel)
+
+	// Intercept goroutine: decode → muteIncoming check → AEC/conference submit.
+	go func() {
+		defer func() {
+			audioDone <- nil
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case samples, ok := <-decodeCh:
+				if !ok {
+					return
+				}
+				if muteIncomingFlag != nil && muteIncomingFlag.Load() {
+					continue
+				}
+				if muteIncomingFlag != nil {
+					if s.spectrum != nil {
+						s.spectrum.Feed(samples)
+					}
+					if s.levelMeter != nil {
+						s.levelMeter.Feed(samples)
+					}
+				}
+				if s.aec != nil {
+					s.aec.FeedReference(samples)
+				}
+				if s.conference != nil && clientID != "" {
+					s.conference.SubmitAudio(clientID, samples)
+				}
+			}
+		}
+	}()
+
+	s.logger.Info("Conference receiver started (no local playback)",
+		"clientID", clientID,
+		"aec", s.aec != nil,
 		"muteIncoming", muteIncomingFlag != nil,
 	)
 }
@@ -649,7 +693,8 @@ func (s *ServerApp) handleSignalingLoop(ctx context.Context, signaler transport.
 
 	// Start stats reporting immediately so the TUI can transition to the streaming
 	// screen as soon as the PeerConnection reaches "connected" state.
-	if s.statsCh != nil {
+	// Also runs in daemon mode when only a statsHook is configured.
+	if s.statsCh != nil || s.statsHook != nil {
 		statsWg.Add(1)
 		go func() {
 			defer statsWg.Done()
@@ -867,18 +912,22 @@ func (s *ServerApp) handleDCControl(raw []byte, connStart time.Time, nickname st
 		return true
 	case transport.ActionPeerMute:
 		s.clientMuted.Store(true)
+		s.setSingleClientMuted(true)
 		s.logger.Info(nickname + " muted server audio")
 		return false
 	case transport.ActionPeerUnmute:
 		s.clientMuted.Store(false)
+		s.setSingleClientMuted(false)
 		s.logger.Info(nickname + " unmuted server audio")
 		return false
 	case transport.ActionPause, transport.ActionPauseAll:
 		s.clientPaused.Store(true)
+		s.setSingleClientPaused(true)
 		s.logger.Info(nickname + " paused capture")
 		return false
 	case transport.ActionResume, transport.ActionResumeAll:
 		s.clientPaused.Store(false)
+		s.setSingleClientPaused(false)
 		s.logger.Info(nickname + " resumed capture")
 		return false
 	}
@@ -886,7 +935,33 @@ func (s *ServerApp) handleDCControl(raw []byte, connStart time.Time, nickname st
 	return false
 }
 
+func (s *ServerApp) setSingleClientMuted(muted bool) {
+	s.mu.RLock()
+	mc := s.clients["client-1"]
+	s.mu.RUnlock()
+	if mc != nil {
+		mc.muted.Store(muted)
+	}
+}
+
+func (s *ServerApp) setSingleClientPaused(paused bool) {
+	s.mu.RLock()
+	mc := s.clients["client-1"]
+	s.mu.RUnlock()
+	if mc != nil {
+		mc.paused.Store(paused)
+	}
+}
+
+type capturePipelineOptions struct {
+	HandleDeviceCommands bool
+}
+
 func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte) error {
+	return s.runCapturePipelineWithOptions(ctx, sendCh, capturePipelineOptions{HandleDeviceCommands: true})
+}
+
+func (s *ServerApp) runCapturePipelineWithOptions(ctx context.Context, sendCh chan<- []byte, opts capturePipelineOptions) error {
 	encCfg := EncoderConfig{
 		Bitrate:     s.cfg.OpusBitrate,
 		Complexity:  s.cfg.OpusComplexity,
@@ -906,6 +981,19 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		captureLevel = s.levelMeter
 	}
 
+	// Recording tap for non-conference mode: feed captured PCM to the recorder.
+	var recTap func([]float32)
+	if s.conference == nil {
+		recTap = func(samples []float32) {
+			s.recorderMu.Lock()
+			rec := s.recorder
+			s.recorderMu.Unlock()
+			if rec != nil && rec.IsActive() {
+				_ = rec.WriteMix(samples) //nolint:errcheck
+			}
+		}
+	}
+
 	// Multi-device capture: use MultiCapturePipeline
 	captureDevices := s.cfg.CaptureDevices()
 	if len(captureDevices) > 1 {
@@ -917,7 +1005,12 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 			BufferFrames:  s.cfg.EffectiveAudioBufferFrames(),
 			Spectrum:      captureSpectrum,
 			LevelMeter:    captureLevel,
+			AGCProcessors: buildAGCProcessors(captureDevices, s.cfg.SampleRate),
+			RecordingTap:  recTap,
 		}, s.logger)
+		if opts.HandleDeviceCommands {
+			go HandleDeviceCommands(ctx, s.deviceCmdCh, pipeline.Mixer(), pipeline.AGCProcessors(), s.logger)
+		}
 		return pipeline.Run(ctx, sendCh)
 	}
 
@@ -934,6 +1027,20 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		deviceID = *s.cfg.DeviceID
 	}
 
+	// Build AGC processor for single-device capture if AGC is enabled.
+	var agcProc *audio.AGCProcessor
+	agcMap := buildAGCProcessors(captureDevices, s.cfg.SampleRate)
+	if agcMap != nil {
+		agcProc = agcMap[deviceID]
+	}
+
+	// Build gain control for single-device volume/mute.
+	var initialVol float32 = 1.0
+	if len(captureDevices) == 1 {
+		initialVol = float32(captureDevices[0].Volume)
+	}
+	gainCtl := NewDeviceGainControl(initialVol)
+
 	pipeline := NewServerCapturePipeline(CapturePipelineConfig{
 		SampleRate:           s.cfg.SampleRate,
 		Channels:             s.cfg.Channels,
@@ -944,9 +1051,15 @@ func (s *ServerApp) runCapturePipeline(ctx context.Context, sendCh chan<- []byte
 		LoopbackBlackHole:    s.cfg.LoopbackBlackHole,
 		EncoderConfig:        encCfg,
 		AEC:                  s.aec,
+		AGC:                  agcProc,
 		Spectrum:             captureSpectrum,
 		LevelMeter:           captureLevel,
+		RecordingTap:         recTap,
+		GainControl:          gainCtl,
 	}, s.logger)
 
+	if opts.HandleDeviceCommands {
+		go HandleDeviceCommands(ctx, s.deviceCmdCh, gainCtl, agcMap, s.logger)
+	}
 	return pipeline.Run(ctx, sendCh)
 }

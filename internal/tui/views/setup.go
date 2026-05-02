@@ -10,8 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 )
@@ -34,6 +36,8 @@ const (
 	SetupOverlayRestore
 	SetupOverlayConfigSave
 	SetupOverlayConfigLoad
+	SetupOverlayVirtualSinkLifecycle
+	SetupOverlayLanguage
 )
 
 // SetupDoneMsg is sent when the user confirms setup and is ready to start.
@@ -74,11 +78,10 @@ type SetupModel struct {
 
 	// Unified multi-select mode: Space toggles device selection/roles.
 	// Key = device name (stable across re-enumerations), Value = assigned role(s)
-	multiSelect             map[string]DeviceRoleSet
-	unifiedDuplex           bool // true when using unified list (all modes)
-	isDuplexMode            bool // true when duplex/conference — two checkbox columns; false — one column
-	isConferenceMode        bool // true when conference — enables hub mode on server
-	preConferenceMaxClients int  // saved Max clients value before conference auto-bump
+	multiSelect      map[string]DeviceRoleSet
+	unifiedDuplex    bool // true when using unified list (all modes)
+	isDuplexMode     bool // true when duplex/conference — two checkbox columns; false — one column
+	isConferenceMode bool // true when conference — enables hub mode on server
 
 	// Sectioned device list (Input/Output sections with checkbox columns)
 	inputDevices  []deviceRow
@@ -86,6 +89,7 @@ type SetupModel struct {
 	deviceCursor  int // row index within current section
 	inputScroll   int // scroll offset for input section
 	outputScroll  int // scroll offset for output section
+	deviceColumn  int // 0 = device select, 1 = AGC column
 
 	// Right column — settings fields
 	Fields       []SetupField
@@ -106,12 +110,14 @@ type SetupModel struct {
 	height int
 
 	// Overlays
-	overlay              SetupOverlay
-	summaryOverlay       *SummaryOverlay
-	virtualDeviceOverlay *VirtualDeviceOverlay
-	restoreOverlay       *RestoreOverlay
-	configSaveOverlay    *ConfigSaveOverlay
-	configLoadOverlay    *ConfigLoadOverlay
+	overlay                     SetupOverlay
+	summaryOverlay              *SummaryOverlay
+	virtualDeviceOverlay        *VirtualDeviceOverlay
+	restoreOverlay              *RestoreOverlay
+	configSaveOverlay           *ConfigSaveOverlay
+	configLoadOverlay           *ConfigLoadOverlay
+	virtualSinkLifecycleOverlay *VirtualSinkLifecycleOverlay
+	languageOverlay             *LanguageOverlay
 
 	// Config save/load state
 	lastLoadedConfigName string
@@ -133,10 +139,11 @@ type SetupModel struct {
 	discoveryScanning bool
 
 	// Server probe state (client mode)
-	probeAddr   string // "addr:port" currently being probed (for dedup)
-	probeStatus string // "", "probing", "ok", "error"
-	probeError  string // error message when probeStatus == "error"
-	probeResult *ProbeServerResult
+	probeAddr     string // "addr:port" currently being probed (for dedup)
+	probeStatus   string // "", "probing", "ok", "error"
+	probeError    string // error message when probeStatus == "error"
+	probeResult   *ProbeServerResult
+	probeIdentity clientProbeIdentity
 
 	// Validation error feedback (UX-1)
 	validationError string
@@ -153,12 +160,35 @@ type SetupModel struct {
 	pendingRestoreCmd tea.Cmd
 
 	// Virtual mic state (Linux only)
-	virtualMicCreated bool   // true when pactl sink was created this session
-	virtualMicModule  string // PulseAudio module ID for cleanup
+	virtualMicCreated       bool   // true when pactl sink was created this session
+	virtualMicModule        string // PulseAudio module ID for automatic cleanup
+	virtualMicManageable    bool   // true when an exact EchoWarp sink can be managed
+	virtualMicManagedModule string // PulseAudio module ID for explicit user removal
+	virtualSessionID        string
+	trackedVirtualSinks     map[string]trackedVirtualSink
+	pendingLifecycleSink    recent.VirtualSinkPreset
+
+	// Virtual sink lifecycle preferences (set via overlay after creation)
+	virtualSinkOnStop              recent.SinkLifecycle // default: SinkDelete
+	virtualSinkOnStart             recent.SinkLifecycle // default: SinkRecreate
+	virtualSinkLifecycleConfigured bool                 // true after app-managed lifecycle setup
+	pendingVirtualSinkSelection    map[string]bool      // sinks that should be selected after refresh
 
 	// Mix input: maps virtual output device selectKey → set of input device selectKeys
 	// whose audio should be mixed into that output.
 	mixInputs map[string]map[string]bool
+
+	// refreshDevicesFn re-enumerates audio devices from the OS.
+	// Set via WithDeviceRefreshFunc. Used after creating a virtual sink.
+	refreshDevicesFn func() ([]list.Item, error)
+}
+
+type trackedVirtualSink struct {
+	Preset             recent.VirtualSinkPreset
+	ModuleID           string
+	CreatedThisSession bool
+	Manageable         bool
+	LiveConfirmed      bool
 }
 
 // InputMode tracks the current keyboard input routing priority.
@@ -176,16 +206,18 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 	advFields := buildAdvancedFields(cfg)
 
 	m := SetupModel{
-		activeColumn:    ColumnDevices,
-		DeviceList:      deviceList,
-		IsInput:         isInput,
-		Fields:          fields,
-		AdvancedFields:  advFields,
-		cfg:             cfg,
-		width:           width,
-		height:          height,
-		serverList:      NewServerListModel(width/2, height),
-		presetDismissed: make(map[string]bool),
+		activeColumn:        ColumnDevices,
+		DeviceList:          deviceList,
+		IsInput:             isInput,
+		Fields:              fields,
+		AdvancedFields:      advFields,
+		cfg:                 cfg,
+		width:               width,
+		height:              height,
+		serverList:          NewServerListModel(width/2, height),
+		presetDismissed:     make(map[string]bool),
+		virtualSessionID:    virtualstate.NewSessionID(),
+		trackedVirtualSinks: make(map[string]trackedVirtualSink),
 	}
 
 	// Load recent servers (client mode only) before mDNS discovery
@@ -202,6 +234,7 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 					Address:       rs.Address,
 					Port:          rs.Port,
 					Hostname:      nick,
+					ServerID:      rs.ServerID,
 					Source:        ServerSourceRecent,
 					LastConnected: rs.LastConnected,
 					ProbeStatus:   ServerProbePending,
@@ -209,6 +242,31 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 			}
 			m.serverList.SetEntries(entries)
 			m.serverList.SetHasRecent(true)
+
+			// Apply LogLevel from the most recent server entry (recentServers
+			// is sorted by LastConnected desc) so user's last choice persists
+			// across restarts. Only when cfg.LogLevel is still at default.
+			if cfg.LogLevel == "" || cfg.LogLevel == "info" {
+				for _, rs := range recentServers {
+					if rs.LogLevel == "" {
+						continue
+					}
+					m.cfg.LogLevel = rs.LogLevel
+					// "info" is the default — restore it with SourceDefault
+					// so the UI doesn't flag it with a ✓ user-set marker.
+					src := SourceConfig
+					if rs.LogLevel == "info" {
+						src = SourceDefault
+					}
+					for i := range m.AdvancedFields {
+						if m.AdvancedFields[i].Key == "log_level" {
+							m.AdvancedFields[i].SetValue(rs.LogLevel, src)
+							break
+						}
+					}
+					break
+				}
+			}
 		}
 	}
 
@@ -231,6 +289,23 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 	if cfg.Mode == config.ModeServer {
 		sp := preset.Load()
 		m.serverPresets = &sp
+		// Apply top-level last_mode first (so the current mode is known before restoring
+		// per-mode server fields).
+		m.restoreLastMode(sp.LastMode)
+		// Determine current mode from the (possibly just-updated) Mode field.
+		currentMode := ""
+		for _, f := range m.Fields {
+			if f.Key == "mode" {
+				currentMode = modeKeyFromValue(f.Value)
+				break
+			}
+		}
+		if currentMode == "" {
+			currentMode = "normal"
+		}
+		if mp := sp.Get(currentMode); mp != nil {
+			m.restoreModePreset(*mp)
+		}
 	}
 
 	// Apply field dependencies on init
@@ -262,10 +337,27 @@ func (m SetupModel) WithUnifiedDuplex(allDevices list.Model) SetupModel {
 // In duplex: two checkbox columns (Capture/Playback). In normal/reverse: one column (Select).
 func (m SetupModel) WithUnifiedDeviceList(isDuplex bool) SetupModel {
 	m.unifiedDuplex = true
-	m.isDuplexMode = isDuplex
+	// Preserve isDuplexMode when already set by applyFieldDependencies from the
+	// restored Mode field (duplex/conference presets): overwriting with the
+	// caller's isDuplex flag (derived from cfg.Duplex, which is false after a
+	// plain restart without CLI) would hide the output section on startup.
+	if isDuplex {
+		m.isDuplexMode = true
+	}
 	m.multiSelect = make(map[string]DeviceRoleSet)
 	m.HasOutputList = false
-	m.DeviceSection = SectionInput
+	// Pick the initial focused section based on which ones are visible.
+	// In reverse mode the input section is hidden, so the cursor must start
+	// on Output — otherwise ↑/↓ scroll the invisible inputDevices list and
+	// no ▸ cursor is drawn until the user presses →← to re-sync.
+	showInput, showOutput := m.visibleSections()
+	if showInput {
+		m.DeviceSection = SectionInput
+	} else if showOutput {
+		m.DeviceSection = SectionOutput
+	} else {
+		m.DeviceSection = SectionInput
+	}
 	m.deviceCursor = 0
 	m.rebuildDeviceGroups()
 
@@ -273,8 +365,231 @@ func (m SetupModel) WithUnifiedDeviceList(isDuplex bool) SetupModel {
 	if m.cfg.Mode == config.ModeServer && m.serverPresets != nil {
 		m.pendingRestoreCmd = m.tryShowServerRestoreOverlay()
 	}
+	if m.cfg.Mode == config.ModeServer {
+		m.recreateVirtualSinksFromState(nil)
+	}
 
 	return m
+}
+
+// WithDeviceRefreshFunc sets a callback that re-enumerates audio devices from the OS.
+// The callback should return list items for all devices (input + output).
+func (m SetupModel) WithDeviceRefreshFunc(fn func() ([]list.Item, error)) SetupModel {
+	m.refreshDevicesFn = fn
+	m.refreshTrackedVirtualSinkAfterEnumeratorInstall()
+	return m
+}
+
+func (m *SetupModel) refreshTrackedVirtualSinkAfterEnumeratorInstall() {
+	if !isLinuxRuntime || !m.hasVirtualMicModuleState() {
+		return
+	}
+	m.refreshDevicesAfterVirtualSinkEnsure()
+}
+
+// WithVirtualSinkLifecycle sets cleanup/startup behavior for the virtual sink.
+func (m SetupModel) WithVirtualSinkLifecycle(onStop, onStart recent.SinkLifecycle) SetupModel {
+	m.virtualSinkOnStop = onStop
+	m.virtualSinkOnStart = onStart
+	m.virtualSinkLifecycleConfigured = true
+	return m
+}
+
+// WithVirtualSinkCreatedForSession records a virtual sink created by this process.
+func (m SetupModel) WithVirtualSinkCreatedForSession(moduleID string) SetupModel {
+	m.virtualMicCreated = true
+	m.virtualMicModule = moduleID
+	m.virtualMicManageable = true
+	m.virtualMicManagedModule = moduleID
+	m.virtualSinkLifecycleConfigured = true
+	m.ensureVirtualSessionID()
+	m.trackVirtualSink(moduleID, *m.defaultVirtualSinkPreset(), true)
+	return m
+}
+
+// VirtualMicModule returns the PulseAudio module ID of the virtual mic created
+// this session (empty string if none). Used by the TUI to clean up on stop.
+func (m SetupModel) VirtualMicModule() string {
+	return m.virtualMicModule
+}
+
+// VirtualSinkCleanupPlan describes whether and how the app should remove a sink.
+type VirtualSinkCleanupPlan struct {
+	Delete            bool
+	SinkName          string
+	ModuleID          string
+	AllowNameFallback bool
+}
+
+// VirtualSinkCleanupPlan returns the safe cleanup action for the EchoWarp sink.
+func (m SetupModel) VirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
+	plans := m.VirtualSinkCleanupPlans()
+	if len(plans) > 0 {
+		return plans[0]
+	}
+	return VirtualSinkCleanupPlan{SinkName: echowarpSinkName}
+}
+
+func (m SetupModel) VirtualSinkCleanupPlans() []VirtualSinkCleanupPlan {
+	if len(m.trackedVirtualSinks) > 0 {
+		return m.trackedVirtualSinkCleanupPlans()
+	}
+	if m.virtualMicCreated {
+		return []VirtualSinkCleanupPlan{m.sessionVirtualSinkCleanupPlan()}
+	}
+	if plan, ok := m.stateVirtualSinkCleanupPlan(); ok {
+		return []VirtualSinkCleanupPlan{plan}
+	}
+	return nil
+}
+
+func (m SetupModel) trackedVirtualSinkCleanupPlans() []VirtualSinkCleanupPlan {
+	plans := make([]VirtualSinkCleanupPlan, 0, len(m.trackedVirtualSinks))
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		tracked := m.trackedVirtualSinks[sinkName]
+		if !tracked.CreatedThisSession || tracked.Preset.OnStop != recent.SinkDelete {
+			continue
+		}
+		plans = append(plans, VirtualSinkCleanupPlan{
+			Delete: true, SinkName: tracked.Preset.SinkName,
+			ModuleID: tracked.ModuleID, AllowNameFallback: true,
+		})
+	}
+	return plans
+}
+
+func (m SetupModel) sessionVirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
+	sinkName, shouldDelete := m.virtualSinkCleanupTarget()
+	return VirtualSinkCleanupPlan{
+		Delete:            shouldDelete,
+		SinkName:          sinkName,
+		ModuleID:          m.virtualSinkCleanupModuleID(),
+		AllowNameFallback: m.virtualMicCreated,
+	}
+}
+
+func (m SetupModel) stateVirtualSinkCleanupPlan() (VirtualSinkCleanupPlan, bool) {
+	device, ok := m.currentRoleVirtualStateDevice()
+	if !ok || device.State.Desired != virtualstate.DesiredPresent {
+		return VirtualSinkCleanupPlan{}, false
+	}
+	if device.Ownership.SessionID == "" || device.Ownership.SessionID != m.virtualSessionID {
+		return VirtualSinkCleanupPlan{}, false
+	}
+	return VirtualSinkCleanupPlan{
+		Delete:   device.Policy.OnStop == recent.SinkDelete,
+		SinkName: device.SinkName,
+		ModuleID: firstNonEmpty(device.State.ModuleID, m.virtualMicManagedModule),
+	}, true
+}
+
+func (m SetupModel) currentRoleVirtualStateDevice() (virtualstate.Device, bool) {
+	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
+	if err != nil || !ok {
+		return virtualstate.Device{}, false
+	}
+	return device, virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole())
+}
+
+// MarkVirtualSinkCleaned clears session-local module state after cleanup.
+func (m *SetupModel) MarkVirtualSinkCleaned() error {
+	return m.MarkVirtualSinkCleanedByName(echowarpSinkName)
+}
+
+func (m *SetupModel) MarkVirtualSinkCleanedByName(sinkName string) error {
+	if err := virtualstate.MarkAbsent(sinkName, m.virtualStateRole()); err != nil {
+		return fmt.Errorf("persist virtual audio device cleanup: %w", err)
+	}
+	delete(m.trackedVirtualSinks, sinkName)
+	m.virtualMicCreated = false
+	m.virtualMicModule = ""
+	m.syncVirtualMicState()
+	return nil
+}
+
+func (m SetupModel) virtualStateRole() string {
+	switch m.cfg.Mode {
+	case config.ModeClient:
+		return virtualstate.RoleClient
+	case config.ModeServer:
+		return virtualstate.RoleServer
+	default:
+		return virtualstate.RoleUnknown
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (m SetupModel) virtualSinkCleanupTarget() (string, bool) {
+	if m.virtualSinkLifecycleConfigured || m.virtualMicCreated {
+		for _, vs := range m.SelectedVirtualSinkPresets() {
+			if vs.ModuleType == "module-null-sink" && vs.SinkName == echowarpSinkName {
+				return vs.SinkName, vs.OnStop == recent.SinkDelete
+			}
+		}
+	}
+	if !m.hasVirtualSinkCleanupCandidate() {
+		return echowarpSinkName, false
+	}
+	onStop := m.virtualSinkOnStop
+	if onStop == "" {
+		onStop = recent.SinkDelete
+	}
+	return echowarpSinkName, onStop == recent.SinkDelete
+}
+
+func (m SetupModel) virtualSinkCleanupModuleID() string {
+	if m.virtualMicModule != "" {
+		return m.virtualMicModule
+	}
+	if m.virtualSinkLifecycleConfigured {
+		return m.virtualMicManagedModule
+	}
+	return ""
+}
+
+func (m SetupModel) hasVirtualSinkCleanupCandidate() bool {
+	if m.virtualMicCreated || m.virtualMicModule != "" {
+		return true
+	}
+	return m.virtualSinkLifecycleConfigured && m.virtualMicManagedModule != ""
+}
+
+// SelectedVirtualSinkPresets returns VirtualSinkPreset entries for all currently
+// selected output devices that have a virtual sink preset.
+func (m SetupModel) SelectedVirtualSinkPresets() []recent.VirtualSinkPreset {
+	var result []recent.VirtualSinkPreset
+	for _, d := range m.outputDevices {
+		if _, ok := m.multiSelect[d.selectKey()]; !ok {
+			continue
+		}
+		if !d.IsVirtual {
+			continue
+		}
+		if vs := m.virtualSinkPresetForDevice(d); vs != nil {
+			result = append(result, *vs)
+		}
+	}
+	return result
+}
+
+// refreshDevicesFromOS re-enumerates devices and updates the device list.
+func (m *SetupModel) refreshDevicesFromOS() {
+	if m.refreshDevicesFn == nil {
+		return
+	}
+	items, err := m.refreshDevicesFn()
+	if err != nil {
+		return
+	}
+	m.DeviceList.SetItems(items)
 }
 
 // visibleSections returns which device sections should be shown based on mode.
@@ -302,7 +617,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 	var fields []SetupField
 
 	if cfg.Mode == config.ModeClient {
-		addrField := NewTextField("Server address", cfg.Address, true)
+		addrField := NewTextField("server_address", i18n.T("field_server_address"), cfg.Address, true)
 		addrField.SetValidator(ValidateAddress)
 		if cfg.Address != "" {
 			addrField.Source = SourceCLI
@@ -310,7 +625,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 		fields = append(fields, addrField)
 	}
 
-	portField := NewNumberField("Port", cfg.Port, 1, 65535)
+	portField := NewNumberField("port", i18n.T("field_port"), cfg.Port, 1, 65535)
 	if cfg.Port != 4415 { // non-default
 		portField.Source = SourceCLI
 	}
@@ -320,19 +635,19 @@ func buildMainFields(cfg config.Config) []SetupField {
 	if cfg.Password != "" {
 		pw = cfg.Password
 	}
-	pwField := NewPasswordField("Password", pw)
+	pwField := NewPasswordField("password", i18n.T("field_password"), pw)
 	if cfg.Password != "" {
 		pwField.Source = SourceCLI
 	} else if cfg.Mode == config.ModeClient {
-		pwField.Hint = "(server)"
+		pwField.Hint = i18n.T("hint_server")
 		pwField.Hidden = true // hidden until probe says PasswordRequired
 	}
 	fields = append(fields, pwField)
 
 	// Nickname (client only)
 	if cfg.Mode == config.ModeClient {
-		nickField := NewTextField("Nickname", cfg.Nickname, false)
-		nickField.Hint = "(optional, max 20 chars)"
+		nickField := NewTextField("nickname", i18n.T("field_nickname"), cfg.Nickname, false)
+		nickField.Hint = i18n.T("hint_nickname")
 		if cfg.Nickname != "" {
 			nickField.Source = SourceCLI
 		}
@@ -340,7 +655,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 	}
 
 	if cfg.Mode == config.ModeServer {
-		mcField := NewNumberField("Max clients", cfg.MaxClients, 1, 100)
+		mcField := NewNumberField("max_clients", i18n.T("field_max_clients"), cfg.MaxClients, 1, 100)
 		if cfg.MaxClients != 1 {
 			mcField.Source = SourceCLI
 		}
@@ -350,10 +665,10 @@ func buildMainFields(cfg config.Config) []SetupField {
 	// Mode (server only — client gets mode from probe result)
 	if cfg.Mode == config.ModeServer {
 		modeOpts := []string{
-			"normal (server → client)",
-			"reverse (client → server)",
-			"duplex (bidirectional)",
-			"conference (multi-user)",
+			i18n.T("mode_normal"),
+			i18n.T("mode_reverse"),
+			i18n.T("mode_duplex"),
+			i18n.T("mode_conference"),
 		}
 		modeIdx := 0
 		if cfg.Conference {
@@ -363,7 +678,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 		} else if cfg.Reverse {
 			modeIdx = 1
 		}
-		modeField := NewToggleField("Mode", modeOpts, modeIdx)
+		modeField := NewToggleField("mode", i18n.T("field_mode"), modeOpts, modeIdx)
 		if cfg.Reverse || cfg.Duplex || cfg.Conference {
 			modeField.Source = SourceCLI
 		}
@@ -372,14 +687,14 @@ func buildMainFields(cfg config.Config) []SetupField {
 
 	if cfg.Mode == config.ModeServer {
 		// Server: show "Max auth fail" (ban threshold) in main fields
-		mafField := NewNumberField("Max auth fail", cfg.MaxFailedAttempts, 0, 100)
+		mafField := NewNumberField("max_auth_fail", i18n.T("field_max_auth_fail"), cfg.MaxFailedAttempts, 0, 100)
 		if cfg.MaxFailedAttempts != 5 {
 			mafField.Source = SourceCLI
 		}
 		fields = append(fields, mafField)
 	} else {
 		// Client: show "Max reconnect" in main fields
-		mrField := NewNumberField("Max reconnect", cfg.MaxReconnectAttempts, 0, 100)
+		mrField := NewNumberField("max_reconnect", i18n.T("field_max_reconnect"), cfg.MaxReconnectAttempts, 0, 100)
 		if cfg.MaxReconnectAttempts != 5 {
 			mrField.Source = SourceCLI
 		}
@@ -391,16 +706,16 @@ func buildMainFields(cfg config.Config) []SetupField {
 		if cfg.AutoReconnect {
 			arIdx = 1
 		}
-		arField := NewToggleField("Auto reconnect", arOpts, arIdx)
-		arField.Hint = "(reconnect after server shutdown)"
+		arField := NewToggleField("auto_reconnect", i18n.T("field_auto_reconnect"), arOpts, arIdx)
+		arField.Hint = i18n.T("hint_reconnect_after")
 		if cfg.AutoReconnect {
 			arField.Source = SourceCLI
 		}
 		fields = append(fields, arField)
 
 		// Reconnect limit (client only)
-		attField := NewNumberField("Reconnect limit", cfg.AutoReconnectAttempts, 0, 999)
-		attField.Hint = "(0 = unlimited)"
+		attField := NewNumberField("reconnect_limit", i18n.T("field_reconnect_limit"), cfg.AutoReconnectAttempts, 0, 999)
+		attField.Hint = i18n.T("hint_reconnect_unlimited")
 		if cfg.AutoReconnectAttempts != 0 {
 			attField.Source = SourceCLI
 		}
@@ -414,7 +729,7 @@ func buildMainFields(cfg config.Config) []SetupField {
 	if cfg.AEC {
 		aecIdx = 1
 	}
-	aecField := NewToggleField("Echo cancellation", aecOpts, aecIdx)
+	aecField := NewToggleField("echo_cancellation", i18n.T("field_echo_cancellation"), aecOpts, aecIdx)
 	if cfg.AEC {
 		aecField.Source = SourceCLI
 	}
@@ -422,13 +737,13 @@ func buildMainFields(cfg config.Config) []SetupField {
 
 	// Virtual mic (Linux only) — creates PulseAudio null-sink
 	if runtime.GOOS == "linux" {
-		vmField := NewActionField("Virtual mic", "Create ▸")
-		vmField.Hint = "(PulseAudio)"
+		vmField := NewActionField("virtual_mic", i18n.T("field_virtual_mic"), i18n.T("action_create_virtual"))
+		vmField.Hint = i18n.T("hint_pulse_audio")
 		fields = append(fields, vmField)
 	}
 
 	// Action: Advanced
-	fields = append(fields, NewActionField("", "Advanced ▸"))
+	fields = append(fields, NewActionField("advanced", "", i18n.T("action_advanced")))
 
 	return fields
 }
@@ -445,7 +760,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 			break
 		}
 	}
-	logField := NewSelectField("Log level", logOpts, logIdx)
+	logField := NewSelectField("log_level", i18n.T("field_log_level"), logOpts, logIdx)
 	if cfg.LogLevel != "" && cfg.LogLevel != "info" {
 		logField.Source = SourceCLI
 	}
@@ -458,12 +773,12 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.IsTLSEnabled() {
 			tlsIdx = 1
 		}
-		tlsField := NewToggleField("TLS", tlsOpts, tlsIdx)
+		tlsField := NewToggleField("tls", i18n.T("field_tls"), tlsOpts, tlsIdx)
 		if cfg.IsTLSEnabled() {
 			tlsField.Source = SourceCLI
 		}
 		if cfg.TLSSelfSigned {
-			tlsField.Hint = "⚠ self-signed"
+			tlsField.Hint = i18n.T("hint_tls_self_signed")
 		}
 		fields = append(fields, tlsField)
 	} else {
@@ -472,11 +787,11 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.TLS {
 			tlsIdx = 1
 		}
-		tlsField := NewToggleField("TLS", tlsOpts, tlsIdx)
+		tlsField := NewToggleField("tls", i18n.T("field_tls"), tlsOpts, tlsIdx)
 		if cfg.TLS {
 			tlsField.Source = SourceCLI
 		} else {
-			tlsField.Hint = "(server)"
+			tlsField.Hint = i18n.T("hint_server")
 		}
 		fields = append(fields, tlsField)
 	}
@@ -485,19 +800,33 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 	if cfg.Mode == config.ModeServer {
 		tlsOn := cfg.IsTLSEnabled()
 
-		certField := NewTextField("TLS Cert", cfg.TLSCert, false)
+		certField := NewTextField("tls_cert", i18n.T("field_tls_cert"), cfg.TLSCert, false)
 		if cfg.TLSCert != "" {
 			certField.Source = SourceCLI
 		}
 		certField.Hidden = !tlsOn
 		fields = append(fields, certField)
 
-		keyField := NewTextField("TLS Key", cfg.TLSKey, false)
+		keyField := NewTextField("tls_key", i18n.T("field_tls_key"), cfg.TLSKey, false)
 		if cfg.TLSKey != "" {
 			keyField.Source = SourceCLI
 		}
 		keyField.Hidden = !tlsOn
 		fields = append(fields, keyField)
+	}
+
+	// Rate limit (server only)
+	if cfg.Mode == config.ModeServer {
+		rlVal := cfg.RateLimit
+		if rlVal == 0 {
+			rlVal = 5 // CLI default
+		}
+		rlField := NewNumberField("rate_limit", i18n.T("field_rate_limit"), rlVal, 0, 1000)
+		rlField.Hint = i18n.T("hint_rate_limit")
+		if cfg.RateLimit != 0 && cfg.RateLimit != 5 {
+			rlField.Source = SourceCLI
+		}
+		fields = append(fields, rlField)
 	}
 
 	srOpts := []string{"48 kHz", "24 kHz", "16 kHz", "8 kHz"}
@@ -509,7 +838,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 			break
 		}
 	}
-	srField := NewSelectField("Sample rate", srOpts, srIdx)
+	srField := NewSelectField("sample_rate", i18n.T("field_sample_rate"), srOpts, srIdx)
 	if cfg.SampleRate != 48000 {
 		srField.Source = SourceCLI
 	}
@@ -520,7 +849,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 	if cfg.Channels == 1 {
 		chIdx = 1
 	}
-	chField := NewToggleField("Channels", chOpts, chIdx)
+	chField := NewToggleField("channels", i18n.T("field_channels"), chOpts, chIdx)
 	if cfg.Channels != 2 {
 		chField.Source = SourceCLI
 	}
@@ -535,7 +864,7 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 			break
 		}
 	}
-	brField := NewSelectField("Opus bitrate", brOpts, brIdx)
+	brField := NewSelectField("opus_bitrate", i18n.T("field_opus_bitrate"), brOpts, brIdx)
 	if cfg.OpusBitrate != 64000 {
 		brField.Source = SourceCLI
 	}
@@ -548,8 +877,8 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.NoSIMDOptimization {
 			hwIdx = 1
 		}
-		hwField := NewToggleField("Use SIMD", hwOpts, hwIdx)
-		hwField.Hint = "(accelerate audio mixing for 2+ streams)"
+		hwField := NewToggleField("use_simd", i18n.T("field_use_simd"), hwOpts, hwIdx)
+		hwField.Hint = i18n.T("hint_simd")
 		if cfg.NoSIMDOptimization {
 			hwField.Source = SourceCLI
 		}
@@ -563,8 +892,8 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 		if cfg.HWIDRequired {
 			hwidIdx = 1
 		}
-		hwidField := NewToggleField("HWID collection", hwidOpts, hwidIdx)
-		hwidField.Hint = "(collect device ID for bans)"
+		hwidField := NewToggleField("hwid_collection", i18n.T("field_hwid_collection"), hwidOpts, hwidIdx)
+		hwidField.Hint = i18n.T("hint_hwid")
 		if cfg.HWIDRequired {
 			hwidField.Source = SourceCLI
 		}
@@ -576,11 +905,34 @@ func buildAdvancedFields(cfg config.Config) []SetupField {
 
 // modeKeyToDescriptive maps a bare mode key ("normal", "reverse", etc.) to its
 // descriptive option string used in the Mode toggle field.
-var modeKeyToDescriptive = map[string]string{
-	"normal":     "normal (server → client)",
-	"reverse":    "reverse (client → server)",
-	"duplex":     "duplex (bidirectional)",
-	"conference": "conference (multi-user)",
+// Computed at call time so that i18n translations are resolved dynamically.
+func modeKeyToDescriptiveMap() map[string]string {
+	return map[string]string{
+		"normal":     i18n.T("mode_normal"),
+		"reverse":    i18n.T("mode_reverse"),
+		"duplex":     i18n.T("mode_duplex"),
+		"conference": i18n.T("mode_conference"),
+	}
+}
+
+// modeKeyFromValue returns the canonical mode key ("normal", "reverse", "duplex",
+// "conference") given a Mode field value. The field value is normally a localized
+// descriptive string (e.g. "normale (server → client)" in Italian), so this
+// reverse-looks-up the canonical key via modeKeyToDescriptiveMap. Falls back to
+// the first whitespace-delimited word when no descriptive match is found — this
+// keeps backward compatibility with legacy call sites that pass bare keys.
+//
+// This helper exists because taking `strings.SplitN(value, " ", 2)[0]` directly
+// on a localized descriptive string yields the translated first word
+// (e.g. "normale" / "thường"), which then fails preset lookup keyed by the
+// canonical English key.
+func modeKeyFromValue(v string) string {
+	for key, desc := range modeKeyToDescriptiveMap() {
+		if desc == v {
+			return key
+		}
+	}
+	return strings.SplitN(v, " ", 2)[0]
 }
 
 // applyFieldDependencies updates field requirements based on current values.
@@ -588,7 +940,7 @@ func (m *SetupModel) applyFieldDependencies() {
 	// Find TLS field value (now in AdvancedFields)
 	tlsValue := "off"
 	for _, f := range m.AdvancedFields {
-		if f.Label == "TLS" {
+		if f.Key == "tls" {
 			tlsValue = f.Value
 			break
 		}
@@ -596,7 +948,7 @@ func (m *SetupModel) applyFieldDependencies() {
 
 	// Update TLS Cert/Key visibility and requirements in advanced fields
 	for i := range m.AdvancedFields {
-		if m.AdvancedFields[i].Label == "TLS Cert" || m.AdvancedFields[i].Label == "TLS Key" {
+		if m.AdvancedFields[i].Key == "tls_cert" || m.AdvancedFields[i].Key == "tls_key" {
 			if tlsValue == "on" {
 				m.AdvancedFields[i].Hidden = false
 				m.AdvancedFields[i].Required = true
@@ -631,8 +983,8 @@ func (m *SetupModel) applyFieldDependencies() {
 	// or from probe result (client).
 	var modeKey string
 	for _, f := range m.Fields {
-		if f.Label == "Mode" {
-			modeKey = strings.SplitN(f.Value, " ", 2)[0]
+		if f.Key == "mode" {
+			modeKey = modeKeyFromValue(f.Value)
 			break
 		}
 	}
@@ -657,23 +1009,9 @@ func (m *SetupModel) applyFieldDependencies() {
 		}
 	}
 
-	// Conference requires at least 2 clients; restore default when leaving conference.
-	for i := range m.Fields {
-		if m.Fields[i].Label == "Max clients" {
-			if m.isConferenceMode && m.Fields[i].IntValue() < 2 {
-				m.preConferenceMaxClients = m.Fields[i].IntValue()
-				m.Fields[i].SetValue("2", SourceDefault)
-			} else if !m.isConferenceMode && m.preConferenceMaxClients > 0 {
-				m.Fields[i].SetValue(fmt.Sprintf("%d", m.preConferenceMaxClients), SourceDefault)
-				m.preConferenceMaxClients = 0
-			}
-			break
-		}
-	}
-
 	// Echo cancellation is only useful in duplex/conference modes
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Echo cancellation" {
+		if m.Fields[i].Key == "echo_cancellation" {
 			m.Fields[i].Hidden = !m.isDuplexMode
 			if m.Fields[i].Hidden {
 				m.Fields[i].Value = "off"
@@ -686,13 +1024,13 @@ func (m *SetupModel) applyFieldDependencies() {
 	// Auto reconnect: show/hide Reconnect limit field
 	autoReconnectOn := false
 	for _, f := range m.Fields {
-		if f.Label == "Auto reconnect" {
+		if f.Key == "auto_reconnect" {
 			autoReconnectOn = f.Value == "on"
 			break
 		}
 	}
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Reconnect limit" {
+		if m.Fields[i].Key == "reconnect_limit" {
 			m.Fields[i].Hidden = !autoReconnectOn
 			break
 		}
@@ -703,10 +1041,10 @@ func (m *SetupModel) applyFieldDependencies() {
 		certEmpty := true
 		keyEmpty := true
 		for _, f := range m.AdvancedFields {
-			if f.Label == "TLS Cert" && f.Value != "" {
+			if f.Key == "tls_cert" && f.Value != "" {
 				certEmpty = false
 			}
-			if f.Label == "TLS Key" && f.Value != "" {
+			if f.Key == "tls_key" && f.Value != "" {
 				keyEmpty = false
 			}
 		}
@@ -747,10 +1085,10 @@ func (m SetupModel) InitCmd() tea.Cmd {
 	if m.cfg.Address != "" {
 		var addr, port string
 		for _, f := range m.Fields {
-			if f.Label == "Server address" {
+			if f.Key == "server_address" {
 				addr = f.Value
 			}
-			if f.Label == "Port" {
+			if f.Key == "port" {
 				port = f.Value
 			}
 		}
@@ -773,7 +1111,7 @@ func (m *SetupModel) activeFields() []SetupField {
 		combined := make([]SetupField, 0, len(m.Fields)+len(m.AdvancedFields))
 		for _, f := range m.Fields {
 			combined = append(combined, f)
-			if f.Type == FieldAction && strings.Contains(f.ActionLabel, "Advanced") {
+			if f.Key == "advanced" {
 				combined = append(combined, m.AdvancedFields...)
 			}
 		}
@@ -808,7 +1146,7 @@ func (m *SetupModel) writeBackFields(fields []SetupField) {
 		advIdx := 0
 		inAdvanced := false
 		for _, f := range fields {
-			if f.Type == FieldAction && strings.Contains(f.ActionLabel, "Advanced") {
+			if f.Key == "advanced" {
 				m.Fields[mainIdx] = f
 				mainIdx++
 				inAdvanced = true
@@ -891,12 +1229,14 @@ func (m SetupModel) SelectedDeviceName() string {
 	if m.unifiedDuplex {
 		if m.isDuplexMode {
 			var caps, plays []string
-			for key := range m.multiSelect {
-				name := displayNameFromKey(key)
-				if strings.HasPrefix(key, "I:") {
-					caps = append(caps, name)
-				} else {
-					plays = append(plays, name)
+			for _, d := range m.inputDevices {
+				if roles := m.multiSelect[d.selectKey()]; roles.Capture {
+					caps = append(caps, d.Name)
+				}
+			}
+			for _, d := range m.outputDevices {
+				if roles := m.multiSelect[d.selectKey()]; roles.Playback {
+					plays = append(plays, d.Name)
 				}
 			}
 			if len(caps) > 0 && len(plays) > 0 {
@@ -908,9 +1248,10 @@ func (m SetupModel) SelectedDeviceName() string {
 			return ""
 		}
 		// Non-duplex: just list selected names
-		var names []string
-		for key := range m.multiSelect {
-			names = append(names, displayNameFromKey(key))
+		rows := m.selectedVisibleRows()
+		names := make([]string, 0, len(rows))
+		for _, d := range rows {
+			names = append(names, d.Name)
 		}
 		return strings.Join(names, ", ")
 	}

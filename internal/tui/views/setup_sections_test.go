@@ -73,7 +73,7 @@ func TestModeChange_SectionVisibility_Updates(t *testing.T) {
 
 	// Switch to reverse mode via Mode field toggle
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Mode" {
+		if m.Fields[i].Key == "mode" {
 			m.Fields[i].Toggle() // normal -> reverse
 			break
 		}
@@ -92,7 +92,7 @@ func TestModeChange_FocusMovesToVisibleSection(t *testing.T) {
 
 	// Switch to reverse: Input becomes hidden, focus should move to Output
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Mode" {
+		if m.Fields[i].Key == "mode" {
 			m.Fields[i].Toggle() // normal -> reverse
 			break
 		}
@@ -104,7 +104,7 @@ func TestModeChange_FocusMovesToVisibleSection(t *testing.T) {
 
 	// Switch to duplex: both visible, focus stays on Output
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Mode" {
+		if m.Fields[i].Key == "mode" {
 			m.Fields[i].Toggle() // reverse -> duplex
 			break
 		}
@@ -117,7 +117,7 @@ func TestModeChange_FocusMovesToVisibleSection(t *testing.T) {
 	// Switch back to normal: Output hidden, focus should move to Input
 	// Toggle twice more: duplex -> conference -> normal (wrap around)
 	for i := range m.Fields {
-		if m.Fields[i].Label == "Mode" {
+		if m.Fields[i].Key == "mode" {
 			m.Fields[i].Toggle() // duplex -> conference
 			m.Fields[i].Toggle() // conference -> normal (wraps)
 			break

@@ -1,6 +1,10 @@
 package app
 
-import "github.com/lHumaNl/echowarp/pkg/echowarp/audio"
+import (
+	"time"
+
+	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
+)
 
 // ClientAction represents an action to perform on a client.
 type ClientAction int
@@ -16,6 +20,10 @@ const (
 	ActionMuteOutgoing
 	// ActionMuteIncoming toggles server-initiated incoming mute for a client.
 	ActionMuteIncoming
+	// ActionVolumeUp increases per-client volume by 10%.
+	ActionVolumeUp
+	// ActionVolumeDown decreases per-client volume by 10%.
+	ActionVolumeDown
 )
 
 // ClientCommand is a command sent from the TUI to the server backend.
@@ -39,6 +47,8 @@ const (
 	DeviceVolumeUp
 	// DeviceVolumeDown decreases device volume by 10%.
 	DeviceVolumeDown
+	// DeviceToggleAGC toggles automatic gain control for a device.
+	DeviceToggleAGC
 )
 
 // DeviceCommand is sent from the TUI to control device volume/mute on the mixer.
@@ -63,12 +73,32 @@ const (
 	ParticipantMutePersist
 	// ParticipantUnmutePersist unmutes and removes from persistent mute list.
 	ParticipantUnmutePersist
+	// ParticipantKick disconnects a participant from the conference.
+	// Consumed by the API-level HandleParticipantCommand path; TUI currently
+	// does not emit this action.
+	ParticipantKick
+	// ParticipantSetVolume sets an absolute volume multiplier (carried on
+	// the Volume field of ParticipantCommand). Used by the API path — TUI
+	// still uses the VolumeUp/VolumeDown toggle actions.
+	ParticipantSetVolume
+	// ParticipantSetMute sets an absolute mute state (carried on the Muted
+	// field of ParticipantCommand). Used by the API path — TUI uses the
+	// Mute/Unmute toggle actions.
+	ParticipantSetMute
 )
 
-// ParticipantCommand is sent from TUI to control conference participants.
+// ParticipantCommand is sent from TUI or the daemon HTTP API to control
+// conference participants.
+//
+// The Muted / Volume fields are only consumed for the API-originating
+// actions (ParticipantSetMute / ParticipantSetVolume). TUI-originating
+// actions (Mute / Unmute / VolumeUp / VolumeDown) leave them at their
+// zero values.
 type ParticipantCommand struct {
 	Action        ParticipantAction
 	ParticipantID string
+	Muted         bool    // absolute value for ParticipantSetMute (ignored otherwise)
+	Volume        float64 // absolute value for ParticipantSetVolume, range 0.0–1.5
 }
 
 // ConferenceStatsPayload is sent from server to TUI with participant states and recording status.
@@ -76,6 +106,14 @@ type ConferenceStatsPayload struct {
 	States             []audio.ParticipantState
 	Recording          bool
 	PausedParticipants map[string]bool // per-participant pause state
+
+	// RecordingStopped is set on the first stats tick after a recording stop.
+	RecordingStopped    bool
+	RecordingStopDur    time.Duration
+	RecordingStopSize   uint64
+	RecordingStopFiles  int
+	RecordingStopDir    string
+	RecordingStopReason string // non-empty if auto-stopped due to error
 }
 
 // ParticipantPauseMsg notifies the TUI that a remote participant changed pause state.

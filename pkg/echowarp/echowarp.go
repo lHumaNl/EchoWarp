@@ -92,12 +92,13 @@ const (
 
 // DeviceEntry represents a single audio device in a multi-device configuration.
 type DeviceEntry struct {
-	ID     uint32     `yaml:"id"     json:"id"`               // Audio device ID.
-	Name   string     `yaml:"name"   json:"name,omitempty"`   // Human-readable device name. Used as fallback when IDs change across reboots.
-	Type   DeviceType `yaml:"type"   json:"type,omitempty"`   // Hardware type: input or output. Used to disambiguate overlapping IDs.
-	Role   DeviceRole `yaml:"role"   json:"role,omitempty"`   // Device role: capture or playback. Empty = inferred from mode.
-	Volume float64    `yaml:"volume" json:"volume,omitempty"` // Volume multiplier 0.0-2.0 (default 1.0).
-	Muted  bool       `yaml:"muted"  json:"muted,omitempty"`  // If true, device is muted (capture paused / playback silent).
+	ID     uint32     `yaml:"id"     json:"id"`                   // Audio device ID.
+	Name   string     `yaml:"name"   json:"name,omitempty"`       // Human-readable device name. Used as fallback when IDs change across reboots.
+	Type   DeviceType `yaml:"type"   json:"type,omitempty"`       // Hardware type: input or output. Used to disambiguate overlapping IDs.
+	Role   DeviceRole `yaml:"role"   json:"role,omitempty"`       // Device role: capture or playback. Empty = inferred from mode.
+	Volume float64    `yaml:"volume" json:"volume,omitempty"`     // Volume multiplier 0.0-1.5 (default 1.0).
+	Muted  bool       `yaml:"muted"  json:"muted,omitempty"`      // If true, device is muted (capture paused / playback silent).
+	AGC    bool       `yaml:"agc,omitempty" json:"agc,omitempty"` // Automatic Gain Control enabled for this device.
 
 	// MixInputID, when set, specifies a local input device whose audio is mixed into
 	// this playback device's output stream. Used to combine a local microphone with
@@ -137,11 +138,18 @@ type NodeConfig struct {
 	Channels uint32
 	// VirtualMic enables creation of a virtual microphone device.
 	VirtualMic bool
+	// Loopback enables capture of system audio output (requires BlackHole on
+	// macOS, WASAPI loopback on Windows, PulseAudio monitor source on Linux).
+	Loopback bool
+	// AEC enables software acoustic echo cancellation. Only relevant in duplex
+	// and conference modes where the local speaker signal can bleed into the
+	// microphone capture.
+	AEC bool
 
 	// Opus configuration parameters.
 	OpusBitrate     int    // Target bitrate in bits per second.
 	OpusComplexity  int    // Encoder complexity (0-10).
-	OpusApplication string // Application type: "voip", "audio", or "lowdelay".
+	OpusApplication string // Application type: "voip", "audio", or "restricted_lowdelay".
 	OpusDTX         bool   // Enable discontinuous transmission.
 	OpusFEC         bool   // Enable in-band forward error correction.
 
@@ -371,6 +379,15 @@ type Node struct {
 
 	runner     Runner
 	runnerDone chan struct{} // closed when runRunner goroutine exits
+}
+
+// EventHandler returns the EventHandler associated with the Node, or nil if no
+// handler was configured via WithEventHandler. The returned handler can be used
+// to subscribe to lifecycle events via its Bus().
+func (n *Node) EventHandler() *EventHandler {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.events
 }
 
 // NewNode creates a new Node with the given configuration and optional functional options.
@@ -626,31 +643,85 @@ func (n *Node) setState(status NodeStatus) {
 
 // Pause temporarily suspends audio streaming. Only valid when status is Streaming.
 // Use Resume to continue streaming.
+//
+// When the current runner implements PauseController, Pause also forwards
+// the toggle into the runner so the outgoing audio frame counter actually
+// stops advancing. If the runner's SetPaused(true) returns an error the
+// state machine is rolled back to Streaming (and paused atomic cleared) so
+// the Node never lands in a half-paused state. Runners that do not
+// implement PauseController cause Pause to succeed with state-only
+// semantics — this preserves backwards compatibility with pre-phase-6
+// tests and the TUI path, where the runner observes the serverPauseCh/
+// pauseCh channel independently.
 func (n *Node) Pause() error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if !n.state.CanPause() {
-		return ewerrors.NewError(ewerrors.ErrInternalState, "Cannot pause: not streaming").
+		err := ewerrors.NewError(ewerrors.ErrInternalState, "Cannot pause: not streaming").
 			WithContext("status", string(n.status)).
 			WithSuggestion("Start streaming before pausing")
+		n.mu.Unlock()
+		return err
 	}
 	n.paused.Store(true)
 	n.setState(StatusPaused)
+	runner := n.runner
+	n.mu.Unlock()
+
+	if runner == nil {
+		return nil
+	}
+	ctrl, ok := runner.(PauseController)
+	if !ok {
+		return nil
+	}
+	if err := ctrl.SetPaused(true); err != nil {
+		// Roll back state so the node stays consistent.
+		n.mu.Lock()
+		n.paused.Store(false)
+		n.setState(StatusStreaming)
+		n.mu.Unlock()
+		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to pause runner")
+	}
 	return nil
 }
 
 // Resume continues audio streaming after being paused.
 // Only valid when status is Paused.
+//
+// Like Pause, Resume forwards the toggle into the runner when the current
+// runner implements PauseController, rolling the Node state back to
+// Paused if the runner's SetPaused(false) returns an error. Runners that
+// do not implement PauseController cause Resume to succeed with
+// state-only semantics.
 func (n *Node) Resume() error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 	if !n.state.CanResume() {
-		return ewerrors.NewError(ewerrors.ErrInternalState, "Cannot resume: not paused").
+		err := ewerrors.NewError(ewerrors.ErrInternalState, "Cannot resume: not paused").
 			WithContext("status", string(n.status)).
 			WithSuggestion("Pause the node before resuming")
+		n.mu.Unlock()
+		return err
 	}
 	n.paused.Store(false)
 	n.setState(StatusStreaming)
+	runner := n.runner
+	n.mu.Unlock()
+
+	if runner == nil {
+		return nil
+	}
+	ctrl, ok := runner.(PauseController)
+	if !ok {
+		return nil
+	}
+	if err := ctrl.SetPaused(false); err != nil {
+		// Roll back state so the node stays consistent.
+		n.mu.Lock()
+		n.paused.Store(true)
+		n.setState(StatusPaused)
+		n.mu.Unlock()
+		return ewerrors.Wrap(err, ewerrors.ErrInternalState, "Failed to resume runner")
+	}
 	return nil
 }
 
@@ -661,6 +732,521 @@ func (n *Node) IsPaused() bool {
 
 func (n *Node) Devices() ([]AudioDevice, error) {
 	return listDevices()
+}
+
+// SetDeviceMute sets the mute state of the given audio device on the running
+// runner. Returns an error if the device id is negative, the node has no
+// runner (not started), or the runner does not implement DeviceCommandReceiver.
+//
+// Safe for concurrent use. This method is non-blocking: it delegates to the
+// runner's HandleDeviceCommand which is expected to enqueue the command with
+// a bounded timeout.
+func (n *Node) SetDeviceMute(id int, muted bool) error {
+	if id < 0 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid device id").
+			WithContext("device_id", id).
+			WithSuggestion("Device id must be non-negative")
+	}
+	receiver, err := n.deviceCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleDeviceCommand(DeviceCommand{
+		Action:   DeviceActionSetMute,
+		DeviceID: id,
+		Muted:    muted,
+	})
+}
+
+// SetDeviceVolume sets the volume multiplier (0.0–1.5) of the given audio
+// device on the running runner. Returns an error if the id is negative, the
+// volume is out of range, the node has no runner, or the runner does not
+// implement DeviceCommandReceiver.
+//
+// Safe for concurrent use.
+func (n *Node) SetDeviceVolume(id int, volume float64) error {
+	if id < 0 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid device id").
+			WithContext("device_id", id).
+			WithSuggestion("Device id must be non-negative")
+	}
+	if volume < 0.0 || volume > 1.5 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Volume out of range").
+			WithContext("volume", volume).
+			WithSuggestion("Volume must be in the range 0.0–1.5")
+	}
+	receiver, err := n.deviceCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleDeviceCommand(DeviceCommand{
+		Action:   DeviceActionSetVolume,
+		DeviceID: id,
+		Volume:   volume,
+	})
+}
+
+// deviceCommandReceiver returns the current runner as a DeviceCommandReceiver
+// or a structured error if the node is not running or the runner does not
+// support device commands.
+func (n *Node) deviceCommandReceiver() (DeviceCommandReceiver, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(n.Status())).
+			WithSuggestion("Start the node before issuing device commands")
+	}
+	receiver, ok := runner.(DeviceCommandReceiver)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support device commands").
+			WithSuggestion("Use a runner implementation that implements DeviceCommandReceiver")
+	}
+	return receiver, nil
+}
+
+// Participants returns a snapshot of the current conference participants as
+// reported by the running runner. Returns an empty (non-nil) slice if the
+// node is not running or the runner does not implement ParticipantLister.
+//
+// Safe for concurrent use.
+func (n *Node) Participants() []ParticipantInfo {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return []ParticipantInfo{}
+	}
+	lister, ok := runner.(ParticipantLister)
+	if !ok {
+		return []ParticipantInfo{}
+	}
+	parts := lister.Participants()
+	if parts == nil {
+		return []ParticipantInfo{}
+	}
+	return parts
+}
+
+// MuteParticipant sets the mute state of the given conference participant on
+// the running runner. Returns an error if the id is empty, the node has no
+// runner (not started), or the runner does not implement
+// ParticipantCommandReceiver.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's
+// HandleParticipantCommand which is expected to enqueue with a bounded timeout.
+func (n *Node) MuteParticipant(id string, muted bool) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid participant id").
+			WithSuggestion("Participant id must be non-empty")
+	}
+	receiver, err := n.participantCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleParticipantCommand(ParticipantCommand{
+		Action: ParticipantActionMute,
+		ID:     id,
+		Muted:  muted,
+	})
+}
+
+// KickParticipant disconnects the given conference participant from the
+// running runner. Returns an error if the id is empty, the node has no
+// runner, or the runner does not implement ParticipantCommandReceiver.
+//
+// Safe for concurrent use.
+func (n *Node) KickParticipant(id string) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid participant id").
+			WithSuggestion("Participant id must be non-empty")
+	}
+	receiver, err := n.participantCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleParticipantCommand(ParticipantCommand{
+		Action: ParticipantActionKick,
+		ID:     id,
+	})
+}
+
+// SetParticipantVolume sets the volume multiplier (0.0–1.5) of the given
+// conference participant on the running runner. Returns an error if the id
+// is empty, the volume is out of range, the node has no runner, or the
+// runner does not implement ParticipantCommandReceiver.
+//
+// Safe for concurrent use.
+func (n *Node) SetParticipantVolume(id string, volume float64) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid participant id").
+			WithSuggestion("Participant id must be non-empty")
+	}
+	if volume < 0.0 || volume > 1.5 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Volume out of range").
+			WithContext("volume", volume).
+			WithSuggestion("Volume must be in the range 0.0–1.5")
+	}
+	receiver, err := n.participantCommandReceiver()
+	if err != nil {
+		return err
+	}
+	return receiver.HandleParticipantCommand(ParticipantCommand{
+		Action: ParticipantActionSetVolume,
+		ID:     id,
+		Volume: volume,
+	})
+}
+
+// participantCommandReceiver returns the current runner as a
+// ParticipantCommandReceiver or a structured error if the node is not running
+// or the runner does not support participant commands.
+func (n *Node) participantCommandReceiver() (ParticipantCommandReceiver, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(n.Status())).
+			WithSuggestion("Start the node before issuing participant commands")
+	}
+	receiver, ok := runner.(ParticipantCommandReceiver)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support participant commands").
+			WithSuggestion("Use a runner implementation that implements ParticipantCommandReceiver")
+	}
+	return receiver, nil
+}
+
+// SendChat sends a chat message via the running runner. An empty to
+// broadcasts to all participants; a non-empty to is delivered as a direct
+// message to the identified participant (nickname/id, as the runner sees
+// fit). Returns an error if text is empty, the node is not running, or the
+// runner does not implement ChatSender.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's SendChat
+// which is expected to enqueue with a bounded timeout.
+func (n *Node) SendChat(text, to string) error {
+	if text == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Chat text must not be empty").
+			WithSuggestion("Provide a non-empty text field in the chat send request")
+	}
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(n.Status())).
+			WithSuggestion("Start the node before sending chat messages")
+	}
+	sender, ok := runner.(ChatSender)
+	if !ok {
+		return ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support chat send").
+			WithSuggestion("Use a runner implementation that implements ChatSender")
+	}
+	return sender.SendChat(text, to)
+}
+
+// BanList returns a snapshot of all currently active bans across IP,
+// HWID, and Nickname kinds. The method is deliberately idempotent and
+// non-erroring: if the node is not running, has no runner, or the
+// runner does not implement the BanManager optional interface, it
+// returns a non-nil empty slice. API callers can therefore poll GET
+// /api/v1/bans safely regardless of node state.
+//
+// The returned slice is freshly allocated — the caller is free to
+// mutate or sort it without affecting the runner's internal state.
+//
+// Safe for concurrent use.
+func (n *Node) BanList() []BanEntry {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return []BanEntry{}
+	}
+	mgr, ok := runner.(BanManager)
+	if !ok {
+		return []BanEntry{}
+	}
+	list := mgr.BanList()
+	if list == nil {
+		return []BanEntry{}
+	}
+	return list
+}
+
+// AddBan installs a new ban on the running runner. Exactly one of
+// entry.IP, entry.HWID, or entry.Nickname must be non-empty — providing
+// none or more than one returns ErrConfigValidation. The node must be
+// running, otherwise ErrNotRunning is returned. If the runner does not
+// implement the BanManager optional interface (e.g. a client-mode
+// runner that does not own a ban list), ErrInternalState is returned.
+//
+// Bans installed through this method take effect immediately: the
+// underlying ban manager is the same instance consulted on incoming
+// signaling connections, so a subsequent connect attempt from the
+// banned subject is rejected without requiring a reload.
+//
+// Safe for concurrent use.
+func (n *Node) AddBan(entry BanEntry) error {
+	if err := validateBanEntry(entry); err != nil {
+		return err
+	}
+	mgr, err := n.banManagerRunner()
+	if err != nil {
+		return err
+	}
+	return mgr.AddBan(entry)
+}
+
+// RemoveBan removes a previously installed ban identified by its stable
+// ID ("<kind>:<subject>"). The id must be non-empty
+// (ErrConfigValidation otherwise) and the node must be running
+// (ErrNotRunning otherwise). If the runner does not implement the
+// BanManager optional interface, ErrInternalState is returned. Unknown
+// IDs are reported as an error propagated from the runner.
+//
+// Safe for concurrent use.
+func (n *Node) RemoveBan(id string) error {
+	if id == "" {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid ban id").
+			WithSuggestion("Ban id must be non-empty (format: <kind>:<subject>)")
+	}
+	mgr, err := n.banManagerRunner()
+	if err != nil {
+		return err
+	}
+	return mgr.RemoveBan(id)
+}
+
+// validateBanEntry enforces the "exactly one of IP/HWID/Nickname must
+// be set" invariant. Kept as a free function so handler-level and
+// node-level call sites share the same check and error message.
+func validateBanEntry(entry BanEntry) error {
+	count := 0
+	if entry.IP != "" {
+		count++
+	}
+	if entry.HWID != "" {
+		count++
+	}
+	if entry.Nickname != "" {
+		count++
+	}
+	if count == 0 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Ban entry requires a subject").
+			WithSuggestion("Set exactly one of ip, hwid, or nickname on the ban entry")
+	}
+	if count > 1 {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Ban entry has multiple subjects").
+			WithSuggestion("Set exactly one of ip, hwid, or nickname — not more than one at a time")
+	}
+	return nil
+}
+
+// banManagerRunner returns the current runner as a BanManager or a
+// structured error describing why it cannot serve a ban command. Split
+// out from AddBan/RemoveBan so both mutation paths map to the same
+// error taxonomy (ErrNotRunning vs ErrInternalState).
+func (n *Node) banManagerRunner() (BanManager, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before managing bans")
+	}
+	mgr, ok := runner.(BanManager)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support ban management").
+			WithSuggestion("Use a runner implementation that implements BanManager (e.g. ServerApp)")
+	}
+	return mgr, nil
+}
+
+// StartRecording begins an audio recording session in the given mode on
+// the running runner. mode must be one of "mix", "tracks", or "both"
+// (the three RecordingMode constants exported from this package) —
+// anything else is rejected as ErrConfigValidation without touching the
+// runner. The node must be running (ErrNotRunning otherwise) and the
+// runner must implement RecordingController (ErrInternalState
+// otherwise). Any error returned by the controller itself — notably
+// "recording already active" — is propagated unchanged so API callers
+// can distinguish a conflict from a wiring problem.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's
+// StartRecording which is expected to return quickly (file creation
+// only — no audio is buffered here).
+func (n *Node) StartRecording(mode string) error {
+	if !IsValidRecordingMode(mode) {
+		return ewerrors.NewError(ewerrors.ErrConfigValidation, "Invalid recording mode").
+			WithContext("mode", mode).
+			WithSuggestion("Use one of: mix, tracks, both")
+	}
+	ctrl, err := n.recordingController()
+	if err != nil {
+		return err
+	}
+	return ctrl.StartRecording(RecordingMode(mode))
+}
+
+// StopRecording stops the currently active recording session and
+// returns a summary of the produced files. If no recording was active
+// but the runner is otherwise healthy, a zero-value RecordingResult and
+// nil error are returned — the API layer maps that to a 200 response
+// with an empty body, matching the idempotent convention used by other
+// "stop" endpoints (Disconnect, Stop). Returns ErrNotRunning when the
+// node is not running and ErrInternalState when the runner does not
+// implement RecordingController.
+//
+// Safe for concurrent use.
+func (n *Node) StopRecording() (RecordingResult, error) {
+	ctrl, err := n.recordingController()
+	if err != nil {
+		return RecordingResult{}, err
+	}
+	return ctrl.StopRecording()
+}
+
+// RecordingStatus returns a snapshot of the recorder state. This
+// method is deliberately idempotent and never returns an error: when
+// the node is not running, the runner is absent, or the runner does
+// not implement RecordingController, the method returns a zero-value
+// RecordingStatus (Active=false). API callers can therefore poll GET
+// /api/v1/recording/status safely regardless of node state — matching
+// the BanList / Participants convention introduced in phase 4b/5b.
+//
+// Safe for concurrent use.
+func (n *Node) RecordingStatus() RecordingStatus {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return RecordingStatus{}
+	}
+	ctrl, ok := runner.(RecordingController)
+	if !ok {
+		return RecordingStatus{}
+	}
+	return ctrl.RecordingStatus()
+}
+
+// recordingController returns the current runner as a
+// RecordingController or a structured error explaining why it cannot
+// serve a recording command. Mirrors banManagerRunner /
+// participantCommandReceiver so all optional-interface endpoints share
+// the same error taxonomy (ErrNotRunning vs ErrInternalState).
+func (n *Node) recordingController() (RecordingController, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before managing recordings")
+	}
+	ctrl, ok := runner.(RecordingController)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support recording control").
+			WithSuggestion("Use a runner implementation that implements RecordingController (e.g. ServerApp)")
+	}
+	return ctrl, nil
+}
+
+// SetMuted toggles local mute of the incoming audio stream on the running
+// runner. Intended for client-mode runners — when muted is true, decoded
+// audio frames are dropped before reaching the playback device; when
+// false, playback resumes. Returns ErrNotRunning when the node is not
+// running and ErrInternalState when the runner does not implement
+// MuteController (i.e. server-mode runners). The operation is idempotent.
+//
+// Safe for concurrent use. Non-blocking: delegates to the runner's
+// SetMuted which is expected to perform a single atomic store.
+func (n *Node) SetMuted(muted bool) error {
+	ctrl, err := n.muteController()
+	if err != nil {
+		return err
+	}
+	return ctrl.SetMuted(muted)
+}
+
+// SetDiscoveryPublish toggles runtime mDNS service publishing on the
+// running runner. Intended for server-mode runners — a client has nothing
+// to advertise. When enabled is true the runner starts a zeroconf
+// publisher goroutine; when false it cancels the publisher's context and
+// waits for it to exit. Returns ErrNotRunning when the node is not
+// running and ErrInternalState when the runner does not implement
+// DiscoveryPublisher (i.e. client-mode runners). The operation is
+// idempotent — enabling an already-published service or disabling an
+// already-stopped one is a no-op that returns nil.
+//
+// Safe for concurrent use.
+func (n *Node) SetDiscoveryPublish(enabled bool) error {
+	pub, err := n.discoveryPublisher()
+	if err != nil {
+		return err
+	}
+	return pub.SetDiscoveryPublish(enabled)
+}
+
+// muteController returns the current runner as a MuteController or a
+// structured error explaining why it cannot serve a mute command.
+// Mirrors recordingController / banManagerRunner / participantCommandReceiver
+// so all optional-interface endpoints share the same error taxonomy
+// (ErrNotRunning vs ErrInternalState).
+func (n *Node) muteController() (MuteController, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before toggling mute")
+	}
+	ctrl, ok := runner.(MuteController)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support mute control").
+			WithSuggestion("Use a runner implementation that implements MuteController (e.g. ClientApp)")
+	}
+	return ctrl, nil
+}
+
+// discoveryPublisher returns the current runner as a DiscoveryPublisher
+// or a structured error explaining why it cannot serve a discovery
+// toggle command. Mirrors muteController / recordingController so the
+// error taxonomy stays uniform across all optional-interface endpoints.
+func (n *Node) discoveryPublisher() (DiscoveryPublisher, error) {
+	n.mu.RLock()
+	runner := n.runner
+	running := n.state.CanStop()
+	status := n.status
+	n.mu.RUnlock()
+	if runner == nil || !running {
+		return nil, ewerrors.NewError(ewerrors.ErrNotRunning, "Node is not running").
+			WithContext("status", string(status)).
+			WithSuggestion("Start the node before toggling discovery publishing")
+	}
+	pub, ok := runner.(DiscoveryPublisher)
+	if !ok {
+		return nil, ewerrors.NewError(ewerrors.ErrInternalState, "Runner does not support discovery publishing").
+			WithSuggestion("Use a runner implementation that implements DiscoveryPublisher (e.g. ServerApp)")
+	}
+	return pub, nil
 }
 
 // Devices returns a list of all available audio input and output devices on the system.

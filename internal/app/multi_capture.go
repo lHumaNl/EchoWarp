@@ -25,6 +25,8 @@ type MultiCapturePipeline struct {
 	mixer            *audio.AudioMixer
 	spectrum         *audio.SpectrumAnalyzer
 	levelMeter       *audio.LevelMeter
+	agcProcessors    map[uint32]*audio.AGCProcessor
+	recordingTap     func([]float32)
 }
 
 // MultiCapturePipelineConfig holds configuration for a multi-device capture pipeline.
@@ -37,6 +39,13 @@ type MultiCapturePipelineConfig struct {
 	Normalize     bool // if true, apply 1/sqrt(N) normalization
 	Spectrum      *audio.SpectrumAnalyzer
 	LevelMeter    *audio.LevelMeter
+
+	// AGCProcessors maps deviceID → AGCProcessor for per-device AGC.
+	// Entries may be nil; only devices with AGC enabled have processors.
+	AGCProcessors map[uint32]*audio.AGCProcessor
+
+	// RecordingTap is called with each mixed PCM frame for non-conference recording. May be nil.
+	RecordingTap func([]float32)
 }
 
 // NewMultiCapturePipeline creates a pipeline that captures from multiple devices.
@@ -51,15 +60,17 @@ func NewMultiCapturePipeline(cfg MultiCapturePipelineConfig, logger *slog.Logger
 	mixer.SetNormalize(cfg.Normalize)
 
 	p := &MultiCapturePipeline{
-		devices:      cfg.Devices,
-		sampleRate:   cfg.SampleRate,
-		channels:     cfg.Channels,
-		encoderCfg:   cfg.EncoderConfig,
-		bufferFrames: cfg.BufferFrames,
-		logger:       logger,
-		mixer:        mixer,
-		spectrum:     cfg.Spectrum,
-		levelMeter:   cfg.LevelMeter,
+		devices:       cfg.Devices,
+		sampleRate:    cfg.SampleRate,
+		channels:      cfg.Channels,
+		encoderCfg:    cfg.EncoderConfig,
+		bufferFrames:  cfg.BufferFrames,
+		logger:        logger,
+		mixer:         mixer,
+		spectrum:      cfg.Spectrum,
+		levelMeter:    cfg.LevelMeter,
+		agcProcessors: cfg.AGCProcessors,
+		recordingTap:  cfg.RecordingTap,
 	}
 	p.configureEncoder = p.defaultConfigureEncoder
 	return p
@@ -68,6 +79,11 @@ func NewMultiCapturePipeline(cfg MultiCapturePipelineConfig, logger *slog.Logger
 // Mixer returns the underlying AudioMixer for external volume/mute control.
 func (p *MultiCapturePipeline) Mixer() *audio.AudioMixer {
 	return p.mixer
+}
+
+// AGCProcessors returns the per-device AGC processor map for runtime toggle.
+func (p *MultiCapturePipeline) AGCProcessors() map[uint32]*audio.AGCProcessor {
+	return p.agcProcessors
 }
 
 // Run starts capturing from all devices, mixing, encoding and sending.
@@ -86,6 +102,10 @@ func (p *MultiCapturePipeline) Run(ctx context.Context, sendCh chan<- []byte) er
 }
 
 func (p *MultiCapturePipeline) runSingle(ctx context.Context, sendCh chan<- []byte, dev config.DeviceEntry) error {
+	var agc *audio.AGCProcessor
+	if p.agcProcessors != nil {
+		agc = p.agcProcessors[dev.ID]
+	}
 	pipeline := NewCapturePipeline(CapturePipelineConfig{
 		SampleRate:        p.sampleRate,
 		Channels:          p.channels,
@@ -94,6 +114,8 @@ func (p *MultiCapturePipeline) runSingle(ctx context.Context, sendCh chan<- []by
 		AudioBufferFrames: p.bufferFrames,
 		Spectrum:          p.spectrum,
 		LevelMeter:        p.levelMeter,
+		AGC:               agc,
+		RecordingTap:      p.recordingTap,
 	}, p.logger)
 	pipeline.configureEncoder = p.configureEncoder
 	return pipeline.Run(ctx, sendCh)
@@ -123,12 +145,17 @@ func (p *MultiCapturePipeline) runMulti(ctx context.Context, sendCh chan<- []byt
 			p.mixer.SetSourceMuted(sourceID, true)
 		}
 
+		var agc *audio.AGCProcessor
+		if p.agcProcessors != nil {
+			agc = p.agcProcessors[dev.ID]
+		}
+
 		wg.Add(1)
-		go func(deviceID uint32, ch chan<- []float32) {
+		go func(deviceID uint32, ch chan<- []float32, agcProc *audio.AGCProcessor) {
 			defer wg.Done()
 			defer close(ch)
-			p.captureDevice(captureCtx, deviceID, ch)
-		}(dev.ID, devCh)
+			p.captureDevice(captureCtx, deviceID, ch, agcProc)
+		}(dev.ID, devCh, agc)
 	}
 
 	// Start mixer
@@ -155,6 +182,9 @@ func (p *MultiCapturePipeline) runMulti(ctx context.Context, sendCh chan<- []byt
 			if p.levelMeter != nil {
 				p.levelMeter.Feed(mixed)
 			}
+			if p.recordingTap != nil {
+				p.recordingTap(mixed)
+			}
 			frames := acc.Write(mixed)
 			p.mixer.PutMixedFrame(mixed)
 			for _, frame := range frames {
@@ -174,7 +204,7 @@ func (p *MultiCapturePipeline) runMulti(ctx context.Context, sendCh chan<- []byt
 	}
 }
 
-func (p *MultiCapturePipeline) captureDevice(ctx context.Context, deviceID uint32, ch chan<- []float32) {
+func (p *MultiCapturePipeline) captureDevice(ctx context.Context, deviceID uint32, ch chan<- []float32, agc *audio.AGCProcessor) {
 	capturer, err := audio.NewCapturer(p.sampleRate, p.channels)
 	if err != nil {
 		p.logger.Error("Failed to create capturer", "device", deviceID, "error", err)
@@ -201,6 +231,12 @@ func (p *MultiCapturePipeline) captureDevice(ctx context.Context, deviceID uint3
 		case samples, ok := <-pcmCh:
 			if !ok {
 				return
+			}
+			// Apply per-device AGC before feeding into mixer.
+			if agc != nil {
+				if processed, err := agc.Process(ctx, samples); err == nil {
+					samples = processed
+				}
 			}
 			select {
 			case ch <- samples:

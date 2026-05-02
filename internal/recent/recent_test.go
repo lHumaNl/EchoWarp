@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -207,6 +208,36 @@ func TestAddFallsBackToAddrPortWhenNoServerID(t *testing.T) {
 	assert.Equal(t, "A-updated", result[0].Hostname)
 }
 
+func TestMatchesServerRequiresBothServerIDsWhenEitherSideHasID(t *testing.T) {
+	legacy := Server{Address: "10.0.0.1", Port: 4415}
+	identified := Server{Address: "10.0.0.1", Port: 4415, ServerID: "server-a"}
+
+	assert.False(t, MatchesServer(legacy, "10.0.0.1", 4415, "server-a"))
+	assert.False(t, MatchesServer(identified, "10.0.0.1", 4415, ""))
+	assert.False(t, MatchesServer(identified, "10.0.0.1", 4415, "server-b"))
+	assert.True(t, MatchesServer(identified, "192.168.1.10", 4415, "server-a"))
+	assert.True(t, MatchesServer(legacy, "10.0.0.1", 4415, ""))
+}
+
+func TestAddDoesNotMergeLegacyEntryWithIdentifiedServer(t *testing.T) {
+	now := time.Now()
+	legacyPreset := DevicePreset{Devices: []PresetDevice{{ID: 7, Name: "Legacy Mic"}}}
+	existing := []Server{{
+		Address: "10.0.0.1", Port: 4415, Hostname: "Legacy", LastConnected: now.Add(-time.Hour),
+		Presets: map[string]DevicePreset{"normal": legacyPreset},
+	}}
+
+	result := Add(existing, Server{
+		Address: "10.0.0.1", Port: 4415, Hostname: "New", ServerID: "server-a", LastConnected: now,
+	})
+
+	require.Len(t, result, 2)
+	assert.Equal(t, "server-a", result[0].ServerID)
+	assert.Empty(t, result[0].Presets, "new identified server must not inherit legacy presets")
+	assert.Empty(t, result[1].ServerID)
+	assert.Equal(t, legacyPreset, result[1].Presets["normal"])
+}
+
 func TestAddServerIDRoundtrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
@@ -221,6 +252,54 @@ func TestAddServerIDRoundtrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, uid, loaded[0].ServerID)
+}
+
+func TestLoadYAMLMigratesLegacyAndPreservesMultiVirtualDeviceMetadata(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+	yamlData := strings.TrimSpace(`
+- address: 127.0.0.1
+  port: 4415
+  hostname: Server
+  presets:
+    reverse:
+      devices:
+        - id: 11
+          name: Monitor of EchoWarp
+          is_input: true
+          virtual: true
+          virtual_sink:
+            module_type: module-null-sink
+            sink_name: EchoWarp
+            on_stop: delete
+            on_start: recreate
+      virtual_sinks:
+        - id: virtual-deadbeef
+          base_name: Studio
+          module_type: module-null-sink
+          sink_name: echowarp_Studio_deadbeef
+          monitor_name: echowarp_Studio_deadbeef.monitor
+          playback_name: Playback Studio
+          capture_name: Capture Studio
+          on_stop: keep
+          on_start: recreate
+`) + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "recent_servers.yaml"), []byte(yamlData), 0o600))
+
+	servers, err := Load()
+
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	preset := servers[0].Presets["reverse"]
+	require.Len(t, preset.Devices, 1)
+	require.NotNil(t, preset.Devices[0].VirtualSink)
+	assert.Equal(t, "EchoWarp", preset.Devices[0].VirtualSink.SinkName)
+	require.Len(t, preset.VirtualSinks, 1)
+	assert.Equal(t, "virtual-deadbeef", preset.VirtualSinks[0].ID)
+	assert.Equal(t, "Studio", preset.VirtualSinks[0].BaseName)
+	assert.Equal(t, "echowarp_Studio_deadbeef.monitor", preset.VirtualSinks[0].MonitorName)
+	assert.Equal(t, "Playback Studio", preset.VirtualSinks[0].PlaybackName)
+	assert.Equal(t, "Capture Studio", preset.VirtualSinks[0].CaptureName)
 }
 
 func TestSaveCreatesDirectory(t *testing.T) {
@@ -268,6 +347,113 @@ func TestLoadPrefersYAMLOverJSON(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, "FromYAML", loaded[0].Hostname, "YAML should be preferred over JSON")
+}
+
+func TestVirtualSinkPresetYAMLRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	id := uint32(42)
+	servers := []Server{
+		{
+			Address: "10.0.0.1", Port: 4415, Hostname: "A",
+			LastConnected: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Presets: map[string]DevicePreset{
+				"normal": {Devices: []PresetDevice{
+					{
+						ID: 99, Name: "EchoWarp", Virtual: true,
+						VirtualSink: &VirtualSinkPreset{
+							ModuleType: "module-null-sink",
+							SinkName:   "EchoWarp",
+							OnStop:     SinkDelete,
+							OnStart:    SinkRecreate,
+						},
+					},
+					{ID: 1, Name: "Mic", IsInput: true, MixInputID: &id, MixInputName: "Mic"},
+				}},
+			},
+		},
+	}
+	require.NoError(t, Save(servers))
+
+	loaded, err := Load()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+
+	preset := loaded[0].Presets["normal"]
+	require.Len(t, preset.Devices, 2)
+
+	// Virtual device with VirtualSinkPreset
+	vd := preset.Devices[0]
+	require.NotNil(t, vd.VirtualSink)
+	assert.Equal(t, "module-null-sink", vd.VirtualSink.ModuleType)
+	assert.Equal(t, "EchoWarp", vd.VirtualSink.SinkName)
+	assert.Equal(t, SinkDelete, vd.VirtualSink.OnStop)
+	assert.Equal(t, SinkRecreate, vd.VirtualSink.OnStart)
+
+	// Non-virtual device: VirtualSink should be nil
+	assert.Nil(t, preset.Devices[1].VirtualSink)
+}
+
+func TestTopLevelVirtualSinkPresetYAMLRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	servers := []Server{{
+		Address: "10.0.0.1", Port: 4415, Hostname: "A",
+		LastConnected: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		Presets: map[string]DevicePreset{"normal": {
+			Devices:      []PresetDevice{{ID: 1, Name: "Mic", IsInput: true}},
+			VirtualSinks: []VirtualSinkPreset{echoWarpVirtualSinkPreset()},
+		}},
+	}}
+	require.NoError(t, Save(servers))
+
+	loaded, err := Load()
+	require.NoError(t, err)
+	preset := loaded[0].Presets["normal"]
+
+	require.Len(t, preset.Devices, 1)
+	require.Len(t, preset.VirtualSinks, 1)
+	assert.Equal(t, "EchoWarp", preset.VirtualSinks[0].SinkName)
+	assert.Equal(t, SinkRecreate, preset.VirtualSinks[0].OnStart)
+}
+
+func echoWarpVirtualSinkPreset() VirtualSinkPreset {
+	return VirtualSinkPreset{
+		ModuleType: "module-null-sink",
+		SinkName:   "EchoWarp",
+		OnStop:     SinkDelete,
+		OnStart:    SinkRecreate,
+	}
+}
+
+func TestVirtualSinkPresetYAML_BackwardCompat_NoVirtualSink(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+
+	// Old-format YAML without virtual_sink field
+	yamlData := `- address: "10.0.0.1"
+  port: 4415
+  hostname: "A"
+  last_connected: 2026-01-01T00:00:00Z
+  presets:
+    normal:
+      devices:
+        - id: 5
+          name: "Speaker"
+          is_input: false
+          virtual: true
+`
+	p := filepath.Join(dir, "recent_servers.yaml")
+	require.NoError(t, os.WriteFile(p, []byte(yamlData), 0600))
+
+	loaded, err := Load()
+	require.NoError(t, err)
+	require.Len(t, loaded, 1)
+	d := loaded[0].Presets["normal"].Devices[0]
+	assert.True(t, d.Virtual)
+	assert.Nil(t, d.VirtualSink, "old presets without virtual_sink should deserialize with nil")
 }
 
 func TestLoadJSONFallbackWithNickname(t *testing.T) {

@@ -2,6 +2,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
@@ -139,12 +142,19 @@ type Config struct {
 	// RecordMode starts recording immediately: "mix", "tracks", or "both". Empty = no recording.
 	RecordMode string `yaml:"record_mode,omitempty"`
 
+	// RecordDir overrides the default recording output directory.
+	// When empty, recordings are stored in ~/Documents/EchoWarp_records.
+	RecordDir string `yaml:"record_dir,omitempty"`
+
 	// Nickname is the chat display name (client only). Empty = server assigns "Client-N".
 	Nickname string `yaml:"nickname,omitempty" json:"nickname,omitempty"`
 
 	// HWIDRequired when true, server requires clients to send a hardware identifier (for bans).
 	// Server only, default false.
 	HWIDRequired bool `yaml:"hwid_required" json:"hwid_required"`
+
+	// RateLimit is the maximum number of connections per second per IP (0=disabled).
+	RateLimit int `yaml:"rate_limit"`
 
 	NoSIMDOptimization bool `yaml:"no_simd_optimization"`
 	NoPoolWarmup       bool `yaml:"no_pool_warmup"`
@@ -292,6 +302,7 @@ func (c Config) toNested() nestedConfig {
 			MaxAuthFailures: c.MaxFailedAttempts,
 			BanFile:         c.BanFilePath,
 			TrustedProxies:  c.TrustedProxies,
+			RateLimit:       c.RateLimit,
 		},
 		Connection: nestedConnectionConfig{
 			MaxClients:            c.MaxClients,
@@ -378,6 +389,7 @@ func fromNested(base Config, n nestedConfig) Config {
 	}
 	base.BanFilePath = n.Security.BanFile
 	base.TrustedProxies = n.Security.TrustedProxies
+	base.RateLimit = n.Security.RateLimit
 
 	// Connection
 	if n.Connection.MaxClients != 0 {
@@ -460,6 +472,17 @@ func DefaultConfig() Config {
 }
 
 // ── IsTLSEnabled ─────────────────────────────────────────────────────────────
+
+// EffectiveRecordDir returns the recording output directory.
+// If RecordDir is set, it is returned as-is. Otherwise falls back to
+// ~/Documents/EchoWarp_records.
+func (c Config) EffectiveRecordDir() string {
+	if c.RecordDir != "" {
+		return c.RecordDir
+	}
+	homeDir, _ := os.UserHomeDir() //nolint:errcheck
+	return filepath.Join(homeDir, "Documents", "EchoWarp_records")
+}
 
 // EffectiveAudioBufferFrames returns the mode-based jitter buffer target depth.
 // If AudioBufferFrames was explicitly set (non-zero), it is used as an override.
