@@ -48,6 +48,7 @@ type VirtualDeviceOverlay struct {
 	RowIdx             int    // selected existing device or create-new row in manage mode
 	Error              string // error from pactl (if any)
 	Devices            []VirtualOverlayDevice
+	UsedBaseNames      map[string]bool
 	NameEdited         bool
 	NonActionableError bool
 	mode               virtualOverlayMode
@@ -365,7 +366,10 @@ func (v *VirtualDeviceOverlay) suggestCreateBaseName() string {
 }
 
 func (v *VirtualDeviceOverlay) usedVirtualBaseNames() map[string]bool {
-	used := make(map[string]bool, len(v.Devices))
+	used := make(map[string]bool, len(v.Devices)+len(v.UsedBaseNames))
+	for baseName := range v.UsedBaseNames {
+		used[baseName] = true
+	}
 	for _, device := range v.Devices {
 		if baseName := virtualOverlayDeviceBaseName(device); baseName != "" {
 			used[baseName] = true

@@ -12,6 +12,8 @@ import (
 	"github.com/lHumaNl/echowarp/internal/virtualstate"
 )
 
+const genericPlaybackMonitorName = "Monitor of Playback"
+
 // DeviceRoleSet tracks assigned roles for a device in multi-select mode.
 type DeviceRoleSet struct {
 	Capture  bool
@@ -126,6 +128,7 @@ func (m *SetupModel) rebuildDeviceGroups() {
 	}
 	sortDevices(m.inputDevices)
 	sortDevices(m.outputDevices)
+	disambiguateDuplicateGenericMonitors(m.inputDevices)
 	m.syncVirtualMicState()
 }
 
@@ -248,10 +251,36 @@ func truncatedCaptureAliasMatches(
 	vs recent.VirtualSinkPreset,
 	context managedVirtualAliasContext,
 ) bool {
-	if name != "Monitor of Playback" {
+	if name != genericPlaybackMonitorName {
+		return false
+	}
+	if context.deviceNameCounts[genericPlaybackMonitorName] > 1 {
 		return false
 	}
 	return context.moduleBackedSinks[vs.SinkName] || playbackAliasInDeviceList(vs, context.deviceNames)
+}
+
+func disambiguateDuplicateGenericMonitors(devices []deviceRow) {
+	if countGenericMonitorRows(devices) < 2 {
+		return
+	}
+	index := 1
+	for i := range devices {
+		if devices[i].Name == genericPlaybackMonitorName && !devices[i].IsVirtual {
+			devices[i].Name = fmt.Sprintf("%s #%d", genericPlaybackMonitorName, index)
+			index++
+		}
+	}
+}
+
+func countGenericMonitorRows(devices []deviceRow) int {
+	count := 0
+	for _, device := range devices {
+		if device.Name == genericPlaybackMonitorName && !device.IsVirtual {
+			count++
+		}
+	}
+	return count
 }
 
 func playbackAliasInDeviceList(vs recent.VirtualSinkPreset, deviceNames map[string]bool) bool {

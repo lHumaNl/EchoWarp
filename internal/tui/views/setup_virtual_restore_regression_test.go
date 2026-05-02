@@ -376,6 +376,38 @@ func TestFreshLaunchOverlayDiscoversAllManagedVirtualSinks(t *testing.T) {
 	assert.Contains(t, m.trackedVirtualSinks, first.SinkName)
 }
 
+func TestCreateSuggestionUsesExistingDeviceListNames(t *testing.T) {
+	stubVirtualAudioFuncs(t)
+	m := newTestSetupModel(config.ModeServer)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Playback EchoWarp", id: 10, isInput: false},
+	})
+
+	m, _ = m.openVirtualMicOverlay()
+
+	require.NotNil(t, m.virtualDeviceOverlay)
+	assert.True(t, m.virtualDeviceOverlay.IsCreateMode())
+	assert.Equal(t, "EchoWarp 2", m.virtualDeviceOverlay.BaseName())
+}
+
+func TestCreateSuggestionUsesTrackedStateAndDeviceListNames(t *testing.T) {
+	stubVirtualAudioFuncs(t)
+	m := newTestSetupModel(config.ModeServer)
+	tracked := customVirtualSinkPreset("tracked_echo", "EchoWarp")
+	stateOnly := customVirtualSinkPreset("state_echo2", "EchoWarp 2")
+	m.trackVirtualSink("41", tracked, true)
+	writeCustomVirtualState(t, virtualstate.RoleServer, "42", stateOnly)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Capture EchoWarp 3", id: 11, isInput: true},
+	})
+
+	m, _ = m.openVirtualMicOverlay()
+	m.virtualDeviceOverlay.RowIdx = len(m.virtualDeviceOverlay.Devices)
+	m.virtualDeviceOverlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Equal(t, "EchoWarp 4", m.virtualDeviceOverlay.BaseName())
+}
+
 func TestVirtualOverlayUsesCustomCaptureNameForExistingSink(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	m := newTestSetupModel(config.ModeServer)
@@ -593,6 +625,46 @@ func TestTruncatedMonitorOfPlaybackAliasUsesPlaybackPair(t *testing.T) {
 	require.Len(t, m.inputDevices, 1)
 	assert.Equal(t, vs.CaptureName, m.inputDevices[0].Name)
 	assert.True(t, m.inputDevices[0].IsVirtual)
+}
+
+func TestManagedVirtualCaptureDescriptionsDisplayDistinctVirtualDevices(t *testing.T) {
+	m := newTestSetupModel(config.ModeServer)
+	ads := customVirtualSinkPreset("custom_ads", "Ads")
+	echowarp := customVirtualSinkPreset("custom_echowarp", "EchoWarp")
+	m.trackVirtualSink("41", ads, true)
+	m.trackVirtualSink("42", echowarp, true)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: ads.CaptureName, id: 9, isInput: true},
+		audioDeviceItem{name: echowarp.CaptureName, id: 10, isInput: true},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.inputDevices, 2)
+	assert.Equal(t, "Capture Ads", m.inputDevices[0].Name)
+	assert.Equal(t, "Capture EchoWarp", m.inputDevices[1].Name)
+	assert.True(t, m.inputDevices[0].IsVirtual)
+	assert.True(t, m.inputDevices[1].IsVirtual)
+	assert.Contains(t, formatDeviceInfo(m.inputDevices[0]), "adaptive")
+	assert.Contains(t, formatDeviceInfo(m.inputDevices[1]), "adaptive")
+}
+
+func TestDuplicateGenericMonitorNamesAreDisambiguatedAndNotMisMapped(t *testing.T) {
+	m := newTestSetupModel(config.ModeServer)
+	m.trackVirtualSink("41", customVirtualSinkPreset("custom_ads", "Ads"), true)
+	m.trackVirtualSink("42", customVirtualSinkPreset("custom_echo", "EchoWarp"), true)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: genericPlaybackMonitorName, id: 9, isInput: true},
+		audioDeviceItem{name: genericPlaybackMonitorName, id: 10, isInput: true},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.inputDevices, 2)
+	assert.Equal(t, genericPlaybackMonitorName+" #1", m.inputDevices[0].Name)
+	assert.Equal(t, genericPlaybackMonitorName+" #2", m.inputDevices[1].Name)
+	assert.False(t, m.inputDevices[0].IsVirtual)
+	assert.False(t, m.inputDevices[1].IsVirtual)
 }
 
 func TestTruncatedPlaybackAliasUsesModuleEvidence(t *testing.T) {

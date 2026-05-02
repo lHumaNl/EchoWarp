@@ -112,42 +112,38 @@ func TestClientOwnedDeleteRecreateSinkDeletesOnClientCleanup(t *testing.T) {
 	assert.Equal(t, "99", plan.ModuleID)
 }
 
-func TestClientCannotExplicitlyRemoveServerOwnedSink(t *testing.T) {
+func TestClientCanExplicitlyRemoveServerOwnedManagedSink(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	writeVirtualState(t, virtualstate.RoleServer, "42", recent.SinkKeep, recent.SinkKeep)
 	client := newVirtualStateModel(config.ModeClient)
+	stub.foundModuleID = "42"
 	client.virtualMicManageable = true
 	client.virtualMicManagedModule = "42"
 
 	err := client.removeManagedVirtualMic()
-	device := mustLoadVirtualStateDevice(t)
+	_, ok, loadErr := virtualstate.LoadDevice(echowarpSinkName)
 
-	require.EqualError(t, err, "EchoWarp virtual audio device is owned by server")
-	assert.Empty(t, stub.removedIDs)
-	assert.Equal(t, virtualstate.DesiredPresent, device.State.Desired)
-	assert.Equal(t, virtualstate.RoleServer, device.Ownership.CreatedBy)
-	assert.Equal(t, "42", device.State.ModuleID)
-	assert.Equal(t, recent.SinkKeep, device.Policy.OnStop)
-	assert.Equal(t, recent.SinkKeep, device.Policy.OnStart)
+	require.NoError(t, err)
+	require.NoError(t, loadErr)
+	assert.False(t, ok)
+	assert.Equal(t, []string{"42"}, stub.removedIDs)
 }
 
-func TestServerCannotExplicitlyRemoveClientOwnedSink(t *testing.T) {
+func TestServerCanExplicitlyRemoveClientOwnedManagedSink(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	writeVirtualState(t, virtualstate.RoleClient, "24", recent.SinkKeep, recent.SinkKeep)
 	server := newVirtualStateModel(config.ModeServer)
+	stub.foundModuleID = "24"
 	server.virtualMicManageable = true
 	server.virtualMicManagedModule = "24"
 
 	err := server.removeManagedVirtualMic()
-	device := mustLoadVirtualStateDevice(t)
+	_, ok, loadErr := virtualstate.LoadDevice(echowarpSinkName)
 
-	require.EqualError(t, err, "EchoWarp virtual audio device is owned by client")
-	assert.Empty(t, stub.removedIDs)
-	assert.Equal(t, virtualstate.DesiredPresent, device.State.Desired)
-	assert.Equal(t, virtualstate.RoleClient, device.Ownership.CreatedBy)
-	assert.Equal(t, "24", device.State.ModuleID)
-	assert.Equal(t, recent.SinkKeep, device.Policy.OnStop)
-	assert.Equal(t, recent.SinkKeep, device.Policy.OnStart)
+	require.NoError(t, err)
+	require.NoError(t, loadErr)
+	assert.False(t, ok)
+	assert.Equal(t, []string{"24"}, stub.removedIDs)
 }
 
 func TestClientDiscoversServerOwnedCustomSinkButCleanupIsEmpty(t *testing.T) {
@@ -169,10 +165,10 @@ func TestClientDiscoversServerOwnedCustomSinkButCleanupIsEmpty(t *testing.T) {
 	require.NotNil(t, m.virtualDeviceOverlay)
 	require.Len(t, m.virtualDeviceOverlay.Devices, 1)
 	assert.Equal(t, vs.SinkName, m.virtualDeviceOverlay.Devices[0].SinkName)
-	assert.False(t, m.virtualDeviceOverlay.Devices[0].Removable)
+	assert.True(t, m.virtualDeviceOverlay.Devices[0].Removable)
 }
 
-func TestClientOverlayShowsServerOwnedSinkAsNonRemovable(t *testing.T) {
+func TestClientOverlayShowsServerOwnedSinkAsRemovable(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	vs := customVirtualSinkPreset("echowarp_server_owned", "Server Owned")
 	writeCustomVirtualState(t, virtualstate.RoleServer, "42", vs)
@@ -183,9 +179,10 @@ func TestClientOverlayShowsServerOwnedSinkAsNonRemovable(t *testing.T) {
 	view := m.virtualDeviceOverlay.View(90)
 	action := m.virtualDeviceOverlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	assert.Contains(t, view, "owned by server (not removable)")
-	assert.Equal(t, VirtualActionNone, action)
-	assert.Contains(t, m.virtualDeviceOverlay.Error, "owned by server")
+	assert.Contains(t, view, "Remove Playback Server Owned / Capture Server")
+	assert.Contains(t, view, "Owned")
+	assert.Equal(t, VirtualActionRemove, action)
+	assert.Equal(t, vs.SinkName, m.virtualDeviceOverlay.SinkName)
 	assert.Empty(t, stub.removedIDs)
 }
 

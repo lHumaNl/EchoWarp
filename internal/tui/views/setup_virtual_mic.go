@@ -18,12 +18,16 @@ import (
 
 const echowarpSinkName = "EchoWarp"
 const echowarpMonitorName = "Monitor of " + echowarpSinkName
+const pulseAudioMonitorUpdateAttempts = 5
 
 var (
-	isLinuxRuntime         = runtime.GOOS == "linux"
-	createPulseAudioSinkFn = createPulseAudioSink
-	removePulseAudioSinkFn = RemovePulseAudioSink
-	findPulseAudioModuleFn = FindPulseAudioSinkModule
+	isLinuxRuntime               = runtime.GOOS == "linux"
+	createPulseAudioSinkFn       = createPulseAudioSink
+	removePulseAudioSinkFn       = RemovePulseAudioSink
+	findPulseAudioModuleFn       = FindPulseAudioSinkModule
+	pulseAudioCommandOutputFn    = runPulseAudioOutput
+	pulseAudioCommandRunFn       = runPulseAudioCommand
+	pulseAudioMonitorUpdateDelay = 100 * time.Millisecond
 )
 
 type pulseAudioModule struct {
@@ -43,8 +47,56 @@ func (m SetupModel) openVirtualMicOverlay() (SetupModel, tea.Cmd) {
 	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(len(devices) > 0, sinkName)
 	m.virtualDeviceOverlay.CaptureName = m.virtualOverlayCaptureName(sinkName)
 	m.virtualDeviceOverlay.SetDevices(devices)
+	m.virtualDeviceOverlay.UsedBaseNames = m.usedVirtualOverlayBaseNames()
+	if m.virtualDeviceOverlay.IsCreateMode() {
+		m.virtualDeviceOverlay.NameInput = m.virtualDeviceOverlay.suggestCreateBaseName()
+	}
 	m.overlay = SetupOverlayVirtualDevice
 	return m, nil
+}
+
+func (m SetupModel) usedVirtualOverlayBaseNames() map[string]bool {
+	used := make(map[string]bool)
+	for _, vs := range m.managedVirtualSinkPresets() {
+		addVirtualBaseName(used, virtualSinkPresetBaseName(vs))
+	}
+	for name := range m.currentDeviceListNames() {
+		addVirtualBaseName(used, virtualBaseNameFromDeviceName(name))
+	}
+	return used
+}
+
+func addVirtualBaseName(used map[string]bool, baseName string) {
+	if strings.TrimSpace(baseName) == "" {
+		return
+	}
+	baseName = normalizeVirtualBaseName(baseName)
+	used[baseName] = true
+}
+
+func virtualSinkPresetBaseName(vs recent.VirtualSinkPreset) string {
+	if vs.BaseName != "" {
+		return vs.BaseName
+	}
+	if baseName, ok := strings.CutPrefix(vs.PlaybackName, "Playback "); ok {
+		return baseName
+	}
+	if vs.SinkName == echowarpSinkName {
+		return defaultVirtualBaseName
+	}
+	return ""
+}
+
+func virtualBaseNameFromDeviceName(name string) string {
+	for _, prefix := range []string{"Playback ", "Capture ", "Monitor of Playback "} {
+		if baseName, ok := strings.CutPrefix(name, prefix); ok {
+			return baseName
+		}
+	}
+	if name == echowarpSinkName || name == echowarpMonitorName {
+		return defaultVirtualBaseName
+	}
+	return ""
 }
 
 func (m SetupModel) virtualOverlayDevices() []VirtualOverlayDevice {
@@ -59,20 +111,20 @@ func (m SetupModel) virtualOverlayDevices() []VirtualOverlayDevice {
 }
 
 func (m SetupModel) virtualOverlayDevice(vs recent.VirtualSinkPreset) VirtualOverlayDevice {
-	owner, removable := m.virtualOverlayDeviceOwnership(vs.SinkName)
+	owner := m.virtualOverlayDeviceOwner(vs.SinkName)
 	return VirtualOverlayDevice{
 		SinkName: vs.SinkName, BaseName: vs.BaseName,
 		PlaybackName: virtualSinkPlaybackName(vs), CaptureName: virtualSinkCaptureName(vs),
-		Owner: owner, Removable: removable,
+		Owner: owner, Removable: true,
 	}
 }
 
-func (m SetupModel) virtualOverlayDeviceOwnership(sinkName string) (string, bool) {
+func (m SetupModel) virtualOverlayDeviceOwner(sinkName string) string {
 	device, ok, err := virtualstate.LoadDevice(sinkName)
 	if err != nil || !ok {
-		return "", true
+		return ""
 	}
-	return device.Ownership.CreatedBy, !virtualstate.IsOtherRoleOwner(device, m.virtualStateRole())
+	return device.Ownership.CreatedBy
 }
 
 func (m SetupModel) virtualOverlayCaptureName(sinkName string) string {
@@ -109,19 +161,50 @@ func (m SetupModel) virtualDeviceOverlayPreset() recent.VirtualSinkPreset {
 func createPulseAudioSink(vs recent.VirtualSinkPreset) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "pactl", pulseAudioLoadModuleArgs(vs)...).Output()
+	out, err := pulseAudioCommandOutputFn(ctx, pulseAudioLoadModuleArgs(vs))
 	if err != nil {
 		return "", fmt.Errorf("pactl failed: %w", err)
 	}
 	moduleID := strings.TrimSpace(string(out))
-	_ = updatePulseAudioMonitorDescription(vs)
+	if err := updatePulseAudioMonitorDescription(vs); err != nil {
+		return "", cleanupCreatedPulseAudioSink(moduleID, err)
+	}
 	return moduleID, nil
 }
 
 func updatePulseAudioMonitorDescription(vs recent.VirtualSinkPreset) error {
+	var err error
+	for attempt := 1; attempt <= pulseAudioMonitorUpdateAttempts; attempt++ {
+		err = updatePulseAudioMonitorDescriptionOnce(vs)
+		if err == nil {
+			return nil
+		}
+		if attempt < pulseAudioMonitorUpdateAttempts && pulseAudioMonitorUpdateDelay > 0 {
+			time.Sleep(pulseAudioMonitorUpdateDelay)
+		}
+	}
+	return err
+}
+
+func updatePulseAudioMonitorDescriptionOnce(vs recent.VirtualSinkPreset) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "pactl", pulseAudioUpdateMonitorArgs(vs)...).Run()
+	return pulseAudioCommandRunFn(ctx, pulseAudioUpdateMonitorArgs(vs))
+}
+
+func cleanupCreatedPulseAudioSink(moduleID string, cause error) error {
+	if removeErr := RemovePulseAudioSink(moduleID); removeErr != nil {
+		return fmt.Errorf("update monitor description: %w; cleanup failed: %v", cause, removeErr)
+	}
+	return fmt.Errorf("update monitor description: %w", cause)
+}
+
+func runPulseAudioOutput(ctx context.Context, args []string) ([]byte, error) {
+	return exec.CommandContext(ctx, "pactl", args...).Output()
+}
+
+func runPulseAudioCommand(ctx context.Context, args []string) error {
+	return exec.CommandContext(ctx, "pactl", args...).Run()
 }
 
 func pulseAudioLoadModuleArgs(vs recent.VirtualSinkPreset) []string {
@@ -152,7 +235,7 @@ func pulseAudioQuotedValue(value string) string {
 func RemovePulseAudioSink(moduleID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, "pactl", "unload-module", moduleID).Run()
+	return pulseAudioCommandRunFn(ctx, []string{"unload-module", moduleID})
 }
 
 // FindPulseAudioSinkModule returns the module ID for an exact null-sink name.
@@ -172,7 +255,7 @@ func FindPulseAudioSinkModule(sinkName string) (string, bool, error) {
 func listPulseAudioModules() ([]pulseAudioModule, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "pactl", "list", "short", "modules").Output()
+	out, err := pulseAudioCommandOutputFn(ctx, []string{"list", "short", "modules"})
 	if err != nil {
 		return nil, fmt.Errorf("pactl list modules failed: %w", err)
 	}
@@ -500,18 +583,11 @@ func (m *SetupModel) removeManagedVirtualSink(sinkName string) error {
 }
 
 func (m SetupModel) ensureVirtualSinkRemovalAllowed(sinkName string) error {
-	device, ok, err := virtualstate.LoadDevice(sinkName)
+	_, _, err := virtualstate.LoadDevice(sinkName)
 	if err != nil {
 		return fmt.Errorf("load virtual audio device state: %w", err)
 	}
-	if ok && virtualstate.IsOtherRoleOwner(device, m.virtualStateRole()) {
-		return otherRoleVirtualMicRemoveError(sinkName, device.Ownership.CreatedBy)
-	}
 	return nil
-}
-
-func otherRoleVirtualMicRemoveError(sinkName, owner string) error {
-	return virtualSinkOwnershipError{sinkName: sinkName, owner: owner, reason: "is owned by"}
 }
 
 func isVirtualSinkOwnershipError(err error) bool {
