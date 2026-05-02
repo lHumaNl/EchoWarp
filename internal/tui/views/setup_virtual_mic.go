@@ -166,9 +166,10 @@ func createPulseAudioSink(vs recent.VirtualSinkPreset) (string, error) {
 		return "", fmt.Errorf("pactl failed: %w", err)
 	}
 	moduleID := strings.TrimSpace(string(out))
-	if err := updatePulseAudioMonitorDescription(vs); err != nil {
-		return "", cleanupCreatedPulseAudioSink(moduleID, err)
+	if moduleID == "" {
+		return "", errors.New("pactl load-module returned empty module ID")
 	}
+	_ = updatePulseAudioMonitorDescription(vs)
 	return moduleID, nil
 }
 
@@ -190,13 +191,6 @@ func updatePulseAudioMonitorDescriptionOnce(vs recent.VirtualSinkPreset) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return pulseAudioCommandRunFn(ctx, pulseAudioUpdateMonitorArgs(vs))
-}
-
-func cleanupCreatedPulseAudioSink(moduleID string, cause error) error {
-	if removeErr := RemovePulseAudioSink(moduleID); removeErr != nil {
-		return fmt.Errorf("update monitor description: %w; cleanup failed: %v", cause, removeErr)
-	}
-	return fmt.Errorf("update monitor description: %w", cause)
 }
 
 func runPulseAudioOutput(ctx context.Context, args []string) ([]byte, error) {

@@ -159,9 +159,9 @@ func TestVirtualOverlay_Esc(t *testing.T) {
 	assert.Equal(t, VirtualActionCancel, action)
 }
 
-func TestVirtualOverlay_ErrorState(t *testing.T) {
+func TestVirtualOverlay_MissingPulseAudioUtilityErrorShowsInstallGuidance(t *testing.T) {
 	overlay := NewVirtualDeviceOverlay(false, "EchoWarp")
-	overlay.Error = "pactl failed: command not found"
+	overlay.Error = `pactl failed: exec: "pactl": executable file not found in $PATH`
 	view := overlay.View(80)
 	assert.Contains(t, view, "pactl failed")
 	assert.Contains(t, view, "pulseaudio-utils")
@@ -170,6 +170,24 @@ func TestVirtualOverlay_ErrorState(t *testing.T) {
 	// Enter on error dismisses
 	action := overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	assert.Equal(t, VirtualActionCancel, action)
+}
+
+func TestVirtualOverlay_NonInstallErrorDoesNotShowInstallGuidance(t *testing.T) {
+	overlay := NewVirtualDeviceOverlay(false, "EchoWarp")
+	overlay.Error = "pactl failed: exit status 1"
+
+	view := overlay.View(80)
+
+	assert.Contains(t, view, "pactl failed")
+	assert.NotContains(t, view, "pulseaudio-utils")
+	assert.NotContains(t, view, "Make sure PulseAudio is installed")
+	assert.Contains(t, view, "[OK]")
+}
+
+func TestPulseAudioInstallGuidanceClassifier(t *testing.T) {
+	assert.True(t, shouldShowPulseAudioInstallGuidance("pactl: command not found"))
+	assert.True(t, shouldShowPulseAudioInstallGuidance("install pulseaudio-utils"))
+	assert.False(t, shouldShowPulseAudioInstallGuidance("pactl failed: exit status 1"))
 }
 
 func TestVirtualOverlay_ButtonNavigation(t *testing.T) {

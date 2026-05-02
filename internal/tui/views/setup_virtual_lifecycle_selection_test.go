@@ -69,10 +69,33 @@ func TestManualCreateDoesNotSelectVirtualMonitor(t *testing.T) {
 	assert.Empty(t, m.SelectedDeviceName())
 }
 
+func TestManualCreateWithGenericMonitorNormalizesWithoutAutoSelect(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newInputOnlyRestoreModel().WithDeviceRefreshFunc(refreshedGenericEchoWarpItems)
+	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(false, echowarpSinkName)
+	m.overlay = SetupOverlayVirtualDevice
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Len(t, stub.createdNames, 1)
+	assert.Len(t, m.inputDevices, 1)
+	assert.Equal(t, "Capture EchoWarp", m.inputDevices[0].Name)
+	assert.True(t, m.inputDevices[0].IsVirtual)
+	assert.Empty(t, m.multiSelect)
+	assert.Empty(t, m.SelectedDeviceName())
+}
+
 func refreshedMicAndEchoWarpItems() ([]list.Item, error) {
 	return []list.Item{
 		mockDeviceItem{name: "Mic", id: 1, isInput: true},
 		mockDeviceItem{name: echowarpMonitorName, id: 11, isInput: true},
+		mockDeviceItem{name: echowarpSinkName, id: 12, isInput: false},
+	}, nil
+}
+
+func refreshedGenericEchoWarpItems() ([]list.Item, error) {
+	return []list.Item{
+		mockDeviceItem{name: genericPlaybackMonitorName, id: 11, isInput: true},
 		mockDeviceItem{name: echowarpSinkName, id: 12, isInput: false},
 	}, nil
 }

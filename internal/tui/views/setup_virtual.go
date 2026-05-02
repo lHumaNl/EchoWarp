@@ -415,10 +415,38 @@ func (v *VirtualDeviceOverlay) renderErrorGuidance(sb *strings.Builder) {
 		sb.WriteString("\n\n")
 		return
 	}
+	if !shouldShowPulseAudioInstallGuidance(v.Error) {
+		return
+	}
 	sb.WriteString(styles.SetupDimValue.Render("Make sure PulseAudio is installed:"))
 	sb.WriteString("\n")
 	sb.WriteString(styles.ConnParamValue.Render("  sudo apt install pulseaudio-utils"))
 	sb.WriteString("\n\n")
+}
+
+func shouldShowPulseAudioInstallGuidance(message string) bool {
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "pulseaudio-utils") {
+		return true
+	}
+	for _, utility := range []string{"pactl", "pulseaudio"} {
+		if missingPulseAudioUtility(lower, utility) {
+			return true
+		}
+	}
+	return false
+}
+
+func missingPulseAudioUtility(message, utility string) bool {
+	if !strings.Contains(message, utility) {
+		return false
+	}
+	for _, marker := range []string{"command not found", "executable file not found", "not found in $path"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *VirtualDeviceOverlay) renderButtons(leftLabel, rightLabel string, contentW int) string {

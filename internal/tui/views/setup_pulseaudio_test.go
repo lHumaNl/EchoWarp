@@ -9,18 +9,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCreatePulseAudioSinkReturnsErrorAndUnloadsWhenMonitorUpdateFails(t *testing.T) {
+func TestCreatePulseAudioSinkIgnoresMonitorUpdateFailure(t *testing.T) {
 	stub := stubPulseAudioCommands(t)
 	stub.runErr = errors.New("source not ready")
 	vs := customVirtualSinkPreset("custom_ads", "Ads")
 
 	moduleID, err := createPulseAudioSink(vs)
 
+	require.NoError(t, err)
+	assert.Equal(t, "77", moduleID)
+	assert.Empty(t, stub.unloadedModules)
+	assert.Equal(t, pulseAudioMonitorUpdateAttempts, stub.updateAttempts)
+}
+
+func TestCreatePulseAudioSinkLoadModuleFailureIsFatal(t *testing.T) {
+	stub := stubPulseAudioCommands(t)
+	stub.outputErr = errors.New("load failed")
+	vs := customVirtualSinkPreset("custom_load_fail", "Load Fail")
+
+	moduleID, err := createPulseAudioSink(vs)
+
 	require.Error(t, err)
 	assert.Empty(t, moduleID)
-	assert.Contains(t, err.Error(), "update monitor description")
-	assert.Equal(t, []string{"77"}, stub.unloadedModules)
-	assert.Equal(t, pulseAudioMonitorUpdateAttempts, stub.updateAttempts)
+	assert.Contains(t, err.Error(), "pactl failed")
+	assert.Empty(t, stub.unloadedModules)
+	assert.Zero(t, stub.updateAttempts)
+}
+
+func TestCreatePulseAudioSinkEmptyModuleIDIsFatal(t *testing.T) {
+	stub := stubPulseAudioCommands(t)
+	stub.outputValue = "\n"
+	vs := customVirtualSinkPreset("custom_empty", "Empty")
+
+	moduleID, err := createPulseAudioSink(vs)
+
+	require.Error(t, err)
+	assert.Empty(t, moduleID)
+	assert.Contains(t, err.Error(), "empty module ID")
+	assert.Empty(t, stub.unloadedModules)
+	assert.Zero(t, stub.updateAttempts)
 }
 
 func TestMonitorDescriptionUpdateRetrySucceedsAfterInitialFailure(t *testing.T) {
@@ -37,6 +64,8 @@ func TestMonitorDescriptionUpdateRetrySucceedsAfterInitialFailure(t *testing.T) 
 }
 
 type pulseAudioCommandStub struct {
+	outputErr          error
+	outputValue        string
 	runErr             error
 	failUpdateAttempts int
 	updateAttempts     int
@@ -62,6 +91,12 @@ func stubPulseAudioCommands(t *testing.T) *pulseAudioCommandStub {
 
 func (s *pulseAudioCommandStub) output(_ context.Context, args []string) ([]byte, error) {
 	if len(args) > 0 && args[0] == "load-module" {
+		if s.outputErr != nil {
+			return nil, s.outputErr
+		}
+		if s.outputValue != "" {
+			return []byte(s.outputValue), nil
+		}
 		return []byte("77\n"), nil
 	}
 	return nil, errors.New("unexpected output command")
