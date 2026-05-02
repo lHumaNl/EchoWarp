@@ -16,10 +16,10 @@ func TestVirtualOverlay_CreateConfirmation(t *testing.T) {
 
 	view := overlay.View(80)
 	assert.Contains(t, view, "Create Virtual Audio Device")
-	assert.Contains(t, view, "audio output named")
+	assert.Contains(t, view, "Playback EchoWarp")
 	assert.Contains(t, view, "[Create]")
 	assert.Contains(t, view, "[Cancel]")
-	assert.Contains(t, view, "Monitor of EchoWarp")
+	assert.Contains(t, view, "Capture EchoWarp")
 }
 
 func TestVirtualOverlay_CreateCompositeNotClippedAtSmallHeight(t *testing.T) {

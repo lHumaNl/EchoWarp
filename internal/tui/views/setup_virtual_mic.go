@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,24 +37,77 @@ func (m SetupModel) openVirtualMicOverlay() (SetupModel, tea.Cmd) {
 		return m, nil
 	}
 	m.syncVirtualMicState()
-	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicManageable, echowarpSinkName)
+	sinkName := m.defaultVirtualOverlaySinkName()
+	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicManageable, sinkName)
+	m.virtualDeviceOverlay.CaptureName = m.virtualOverlayCaptureName(sinkName)
 	m.overlay = SetupOverlayVirtualDevice
 	return m, nil
 }
 
-// createPulseAudioSink creates a PulseAudio null-sink with the given name.
+func (m SetupModel) virtualOverlayCaptureName(sinkName string) string {
+	if tracked, ok := m.trackedVirtualSinks[sinkName]; ok {
+		return virtualSinkCaptureName(tracked.Preset)
+	}
+	return ""
+}
+
+func (m SetupModel) defaultVirtualOverlaySinkName() string {
+	if m.virtualMicManageable {
+		if sinkName, _, ok := m.firstTrackedManageableVirtualSink(); ok {
+			return sinkName
+		}
+	}
+	return echowarpSinkName
+}
+
+func (m SetupModel) virtualDeviceOverlayPreset() recent.VirtualSinkPreset {
+	if m.virtualDeviceOverlay == nil {
+		return *m.defaultVirtualSinkPreset()
+	}
+	if m.virtualDeviceOverlay.Exists {
+		if tracked, ok := m.trackedVirtualSinks[m.virtualDeviceOverlay.SinkName]; ok {
+			return tracked.Preset
+		}
+		return *m.defaultVirtualSinkPreset()
+	}
+	return m.virtualSinkPresetForBaseName(m.virtualDeviceOverlay.BaseName())
+}
+
+// createPulseAudioSink creates a PulseAudio null-sink with the given preset.
 // Returns the module ID (for later removal) or an error.
-func createPulseAudioSink(name string) (string, error) {
+func createPulseAudioSink(vs recent.VirtualSinkPreset) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "pactl", "load-module", "module-null-sink",
-		fmt.Sprintf("sink_name=%s", name),
-		fmt.Sprintf("sink_properties=device.description=%s", name),
-	).Output()
+	out, err := exec.CommandContext(ctx, "pactl", pulseAudioLoadModuleArgs(vs)...).Output()
 	if err != nil {
 		return "", fmt.Errorf("pactl failed: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	moduleID := strings.TrimSpace(string(out))
+	_ = updatePulseAudioMonitorDescription(vs)
+	return moduleID, nil
+}
+
+func updatePulseAudioMonitorDescription(vs recent.VirtualSinkPreset) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "pactl", pulseAudioUpdateMonitorArgs(vs)...).Run()
+}
+
+func pulseAudioLoadModuleArgs(vs recent.VirtualSinkPreset) []string {
+	return []string{
+		"load-module",
+		"module-null-sink",
+		fmt.Sprintf("sink_name=%s", vs.SinkName),
+		fmt.Sprintf("sink_properties=device.description=%s", virtualSinkPlaybackName(vs)),
+	}
+}
+
+func pulseAudioUpdateMonitorArgs(vs recent.VirtualSinkPreset) []string {
+	return []string{
+		"update-source-proplist",
+		virtualSinkMonitorName(vs),
+		fmt.Sprintf("device.description=%s", virtualSinkCaptureName(vs)),
+	}
 }
 
 // RemovePulseAudioSink unloads a PulseAudio module by ID.
@@ -171,25 +225,6 @@ func (m *SetupModel) selectVirtualOutputSink(sinkName string) bool {
 	return false
 }
 
-func (m *SetupModel) rememberPendingVirtualSinkSelection(sinkName string) {
-	if sinkName == "" {
-		return
-	}
-	if m.pendingVirtualSinkSelection == nil {
-		m.pendingVirtualSinkSelection = make(map[string]bool)
-	}
-	m.pendingVirtualSinkSelection[sinkName] = true
-}
-
-func (m *SetupModel) selectPendingVirtualSink(sinkName string) {
-	if !m.pendingVirtualSinkSelection[sinkName] {
-		return
-	}
-	if m.autoSelectVirtualDevice(sinkName) {
-		delete(m.pendingVirtualSinkSelection, sinkName)
-	}
-}
-
 func (m *SetupModel) setSelectedRole(d deviceRow, capture bool) {
 	key := d.selectKey()
 	role := m.multiSelect[key]
@@ -205,13 +240,11 @@ func (m *SetupModel) syncVirtualMicState() {
 	if !isLinuxRuntime {
 		return
 	}
-	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
-	if err == nil && found {
-		vs := *m.defaultVirtualSinkPreset()
-		m.markVirtualSinkFound(moduleID, vs)
-		if persistErr := m.persistFoundVirtualSink(moduleID, vs, virtualSinkEnsureOptions{}); persistErr != nil {
-			m.clearVirtualMicManageState()
-		}
+	if m.refreshVirtualMicStateFromTrackedSinks() {
+		return
+	}
+	found, err := m.discoverManageableVirtualSink()
+	if found {
 		return
 	}
 	if err != nil && m.hasVirtualMicModuleState() {
@@ -219,7 +252,7 @@ func (m *SetupModel) syncVirtualMicState() {
 		m.updateVirtualMicField(true)
 		return
 	}
-	if m.hasExactEchoWarpOutput() && m.hasVirtualMicModuleState() {
+	if m.hasKnownVirtualOutput() && m.hasVirtualMicModuleState() {
 		m.virtualMicManageable = true
 		m.updateVirtualMicField(true)
 		return
@@ -228,17 +261,145 @@ func (m *SetupModel) syncVirtualMicState() {
 	m.updateVirtualMicField(false)
 }
 
+func (m *SetupModel) discoverManageableVirtualSink() (bool, error) {
+	for _, vs := range m.virtualSinkDiscoveryPresets() {
+		moduleID, found, err := findPulseAudioModuleFn(vs.SinkName)
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			continue
+		}
+		m.markVirtualSinkFound(moduleID, vs)
+		if err := m.persistFoundVirtualSink(moduleID, vs, virtualSinkEnsureOptions{}); err != nil {
+			m.clearVirtualMicManageState()
+			return false, nil
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 func (m SetupModel) hasVirtualMicModuleState() bool {
 	return m.virtualMicManagedModule != "" || m.virtualMicModule != ""
 }
 
-func (m SetupModel) hasExactEchoWarpOutput() bool {
+func (m SetupModel) hasKnownVirtualOutput() bool {
+	knownNames := m.virtualSinkOutputNames()
 	for _, d := range m.outputDevices {
-		if d.Name == echowarpSinkName {
+		if knownNames[d.Name] {
 			return true
 		}
 	}
 	return false
+}
+
+func (m SetupModel) virtualSinkOutputNames() map[string]bool {
+	names := make(map[string]bool)
+	for _, vs := range m.virtualSinkDiscoveryPresets() {
+		for _, name := range uniqueStrings(virtualSinkPlaybackName(vs), vs.SinkName) {
+			names[name] = true
+		}
+	}
+	return names
+}
+
+func (m SetupModel) virtualSinkDiscoveryPresets() []recent.VirtualSinkPreset {
+	seen := make(map[string]bool)
+	presets := make([]recent.VirtualSinkPreset, 0, len(m.trackedVirtualSinks)+1)
+	addPreset := func(vs recent.VirtualSinkPreset) {
+		if vs.SinkName == "" || seen[vs.SinkName] {
+			return
+		}
+		seen[vs.SinkName] = true
+		presets = append(presets, vs)
+	}
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		addPreset(m.trackedVirtualSinks[sinkName].Preset)
+	}
+	for _, device := range m.currentRoleVirtualStateDevices() {
+		addPreset(virtualSinkPresetFromStateDevice(device))
+	}
+	addPreset(*m.defaultVirtualSinkPreset())
+	return presets
+}
+
+func (m SetupModel) currentRoleVirtualStateDevices() []virtualstate.Device {
+	state, err := virtualstate.Load()
+	if err != nil {
+		return nil
+	}
+	devices := make([]virtualstate.Device, 0, len(state.Devices))
+	for _, device := range state.Devices {
+		if m.shouldDiscoverStateDevice(device) {
+			devices = append(devices, device)
+		}
+	}
+	sort.Slice(devices, func(i, j int) bool { return devices[i].SinkName < devices[j].SinkName })
+	return devices
+}
+
+func (m SetupModel) shouldDiscoverStateDevice(device virtualstate.Device) bool {
+	if !m.isDiscoverableStateDevice(device) {
+		return false
+	}
+	if shouldPreserveSessionVirtualSink(device.SinkName) {
+		return true
+	}
+	return device.Ownership.SessionID == "" || device.Ownership.SessionID == m.virtualSessionID
+}
+
+func (m SetupModel) isDiscoverableStateDevice(device virtualstate.Device) bool {
+	return (device.ModuleType == "" || device.ModuleType == virtualstate.ModuleNullSink) &&
+		virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole()) &&
+		device.State.Desired != virtualstate.DesiredAbsent
+}
+
+func (m SetupModel) sortedTrackedVirtualSinkNames() []string {
+	names := make([]string, 0, len(m.trackedVirtualSinks))
+	for sinkName := range m.trackedVirtualSinks {
+		names = append(names, sinkName)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (m SetupModel) firstTrackedManageableVirtualSink() (string, trackedVirtualSink, bool) {
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		tracked := m.trackedVirtualSinks[sinkName]
+		if tracked.Manageable && tracked.ModuleID != "" {
+			return sinkName, tracked, true
+		}
+	}
+	return "", trackedVirtualSink{}, false
+}
+
+func (m *SetupModel) refreshVirtualMicStateFromTrackedSinks() bool {
+	_, tracked, ok := m.firstTrackedManageableVirtualSink()
+	if !ok {
+		return false
+	}
+	m.refreshSessionVirtualMicModule()
+	m.virtualMicManageable = true
+	m.virtualMicManagedModule = tracked.ModuleID
+	m.virtualSinkOnStop = tracked.Preset.OnStop
+	m.virtualSinkOnStart = tracked.Preset.OnStart
+	m.virtualSinkLifecycleConfigured = true
+	m.updateVirtualMicField(true)
+	return true
+}
+
+func (m *SetupModel) refreshSessionVirtualMicModule() {
+	m.virtualMicCreated = false
+	m.virtualMicModule = ""
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		tracked := m.trackedVirtualSinks[sinkName]
+		if tracked.CreatedThisSession && tracked.ModuleID != "" {
+			m.virtualMicCreated = true
+			m.virtualMicModule = tracked.ModuleID
+			return
+		}
+	}
 }
 
 func (m *SetupModel) clearVirtualMicManageState() {
@@ -255,64 +416,111 @@ func (m *SetupModel) clearVirtualSinkLifecycleState() {
 }
 
 func (m *SetupModel) removeManagedVirtualMic() error {
-	if err := m.ensureVirtualMicRemovalAllowed(); err != nil {
+	return m.removeManagedVirtualSink(echowarpSinkName)
+}
+
+func (m *SetupModel) removeManagedVirtualSink(sinkName string) error {
+	if err := m.ensureVirtualSinkRemovalAllowed(sinkName); err != nil {
 		return err
 	}
-	moduleID, err := m.resolveVirtualMicModuleForRemoval()
+	moduleID, err := m.resolveVirtualSinkModuleForRemoval(sinkName)
 	if err != nil {
 		return err
 	}
 	if err := removePulseAudioSinkFn(moduleID); err != nil {
 		return err
 	}
-	if err := virtualstate.MarkAbsent(echowarpSinkName, virtualstate.RoleUser); err != nil {
+	if err := virtualstate.MarkAbsent(sinkName, virtualstate.RoleUser); err != nil {
 		return fmt.Errorf("persist virtual audio device removal: %w", err)
 	}
-	m.clearVirtualMicManageState()
-	m.clearVirtualSinkLifecycleState()
+	delete(m.trackedVirtualSinks, sinkName)
+	if !m.refreshVirtualMicStateFromTrackedSinks() {
+		m.clearVirtualMicManageState()
+		m.clearVirtualSinkLifecycleState()
+	}
 	return nil
 }
 
-func (m SetupModel) ensureVirtualMicRemovalAllowed() error {
-	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
+func (m SetupModel) ensureVirtualSinkRemovalAllowed(sinkName string) error {
+	device, ok, err := virtualstate.LoadDevice(sinkName)
 	if err != nil {
 		return fmt.Errorf("load virtual audio device state: %w", err)
 	}
 	if ok && virtualstate.IsOtherRoleOwner(device, m.virtualStateRole()) {
-		return otherRoleVirtualMicRemoveError(device.Ownership.CreatedBy)
+		return otherRoleVirtualMicRemoveError(sinkName, device.Ownership.CreatedBy)
 	}
 	return nil
 }
 
-func otherRoleVirtualMicRemoveError(owner string) error {
-	return fmt.Errorf("%s virtual audio device is owned by %s", echowarpSinkName, owner)
+func otherRoleVirtualMicRemoveError(sinkName, owner string) error {
+	return fmt.Errorf("%s virtual audio device is owned by %s", sinkName, owner)
 }
 
 func (m *SetupModel) persistVirtualSinkPresent(moduleID string, vs recent.VirtualSinkPreset) error {
 	policy := virtualstate.DevicePolicy{OnStop: vs.OnStop, OnStart: vs.OnStart}
-	return virtualstate.UpsertPresent(vs.SinkName, echowarpMonitorName, moduleID, m.virtualStateRole(), policy)
+	metadata := virtualstate.DeviceMetadata{
+		ID: vs.ID, BaseName: vs.BaseName, PlaybackName: vs.PlaybackName,
+		CaptureName: vs.CaptureName, SessionID: m.ensureVirtualSessionID(),
+	}
+	return virtualstate.UpsertPresentWithMetadata(
+		vs.SinkName, virtualSinkMonitorName(vs), moduleID, m.virtualStateRole(), policy, metadata,
+	)
 }
 
 func (m *SetupModel) persistVirtualSinkPolicy() error {
 	if m.virtualMicManagedModule == "" && m.virtualMicModule == "" {
 		return nil
 	}
-	return m.persistVirtualSinkPresent(m.virtualSinkCleanupModuleID(), *m.defaultVirtualSinkPreset())
+	vs := m.pendingLifecycleSink
+	if vs.SinkName == "" {
+		vs = *m.defaultVirtualSinkPreset()
+	}
+	return m.persistVirtualSinkPresent(m.virtualSinkCleanupModuleID(), vs)
 }
 
-func (m SetupModel) resolveVirtualMicModuleForRemoval() (string, error) {
-	if m.virtualMicManagedModule != "" {
-		return m.virtualMicManagedModule, nil
+func (m *SetupModel) applyPendingVirtualSinkLifecycle() {
+	if m.pendingLifecycleSink.SinkName == "" {
+		return
 	}
-	if m.virtualMicModule != "" {
-		return m.virtualMicModule, nil
+	m.pendingLifecycleSink.OnStop = m.virtualSinkOnStop
+	m.pendingLifecycleSink.OnStart = m.virtualSinkOnStart
+	tracked := m.trackedVirtualSinks[m.pendingLifecycleSink.SinkName]
+	tracked.Preset = m.pendingLifecycleSink
+	m.trackedVirtualSinks[m.pendingLifecycleSink.SinkName] = tracked
+}
+
+func (m SetupModel) virtualSinkCreatedFlashMessage() string {
+	vs := m.pendingLifecycleSink
+	if vs.SinkName == "" {
+		vs = *m.defaultVirtualSinkPreset()
 	}
-	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
+	return "✓ Virtual audio device created — " + virtualSinkPlaybackName(vs)
+}
+
+func (m SetupModel) resolveVirtualSinkModuleForRemoval(sinkName string) (string, error) {
+	moduleID, found, err := findPulseAudioModuleFn(sinkName)
 	if err != nil {
 		return "", err
 	}
-	if !found {
-		return "", fmt.Errorf("virtual audio device %q was not found", echowarpSinkName)
+	if found {
+		return moduleID, nil
 	}
-	return moduleID, nil
+	if tracked, ok := m.trackedVirtualSinks[sinkName]; ok && tracked.ModuleID != "" {
+		return "", fmt.Errorf("virtual audio device %q was not found for module %s", sinkName, tracked.ModuleID)
+	}
+	if m.virtualMicManagedModule != "" || m.virtualMicModule != "" {
+		moduleID = firstNonEmpty(m.virtualMicManagedModule, m.virtualMicModule)
+		return "", fmt.Errorf("virtual audio device %q was not found for module %s", sinkName, moduleID)
+	}
+	if !found {
+		return "", fmt.Errorf("virtual audio device %q was not found", sinkName)
+	}
+	return "", fmt.Errorf("virtual audio device %q was not found", sinkName)
+}
+
+func (m *SetupModel) ensureVirtualSessionID() string {
+	if m.virtualSessionID == "" {
+		m.virtualSessionID = virtualstate.NewSessionID()
+	}
+	return m.virtualSessionID
 }

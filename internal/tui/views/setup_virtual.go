@@ -22,18 +22,32 @@ const (
 // VirtualDeviceOverlay shows a confirmation screen for creating/removing
 // a Linux virtual audio device.
 type VirtualDeviceOverlay struct {
-	Exists    bool   // true if virtual mic already created
-	SinkName  string // e.g. "EchoWarp"
-	ButtonIdx int    // 0=Create/Remove, 1=Cancel
-	Error     string // error from pactl (if any)
+	Exists      bool   // true if virtual mic already created
+	SinkName    string // e.g. "EchoWarp"
+	CaptureName string // user-facing capture device name for existing sinks
+	NameInput   string // user-provided base name for new virtual devices
+	ButtonIdx   int    // 0=Create/Remove, 1=Cancel
+	Error       string // error from pactl (if any)
 }
 
 // NewVirtualDeviceOverlay creates the overlay.
 func NewVirtualDeviceOverlay(exists bool, sinkName string) *VirtualDeviceOverlay {
 	return &VirtualDeviceOverlay{
-		Exists:   exists,
-		SinkName: sinkName,
+		Exists:    exists,
+		SinkName:  sinkName,
+		NameInput: defaultVirtualBaseName,
 	}
+}
+
+func (v *VirtualDeviceOverlay) BaseName() string {
+	return normalizeVirtualBaseName(v.NameInput)
+}
+
+func (v *VirtualDeviceOverlay) ExistingCaptureName() string {
+	if v.CaptureName != "" {
+		return v.CaptureName
+	}
+	return "Monitor of " + v.SinkName
 }
 
 // Update handles key events and returns the resulting action.
@@ -64,6 +78,14 @@ func (v *VirtualDeviceOverlay) Update(msg tea.KeyMsg) VirtualAction {
 			return VirtualActionRemove
 		}
 		return VirtualActionCreate
+	case tea.KeyBackspace:
+		if !v.Exists && v.NameInput != "" {
+			v.NameInput = v.NameInput[:len(v.NameInput)-1]
+		}
+	case tea.KeyRunes:
+		if !v.Exists {
+			v.NameInput += string(msg.Runes)
+		}
 	}
 
 	return VirtualActionNone
@@ -106,8 +128,16 @@ func (v *VirtualDeviceOverlay) viewCreate(contentW int) string {
 	var sb strings.Builder
 
 	sb.WriteString(styles.SetupDimValue.Render(
-		"Creates audio output named \"EchoWarp\".\n" +
-			"Use \"Monitor of EchoWarp\" as microphone."))
+		"Creates playback/capture virtual devices."))
+	sb.WriteString("\n\n")
+	sb.WriteString(styles.SetupDimValue.Render("Name: "))
+	sb.WriteString(styles.ConnParamValue.Render(v.BaseName()))
+	sb.WriteString("\n")
+	sb.WriteString(styles.SetupDimValue.Render("Playback: "))
+	sb.WriteString(styles.ConnParamValue.Render("Playback " + v.BaseName()))
+	sb.WriteString("\n")
+	sb.WriteString(styles.SetupDimValue.Render("Capture:  "))
+	sb.WriteString(styles.ConnParamValue.Render("Capture " + v.BaseName()))
 	sb.WriteString("\n\n")
 
 	sb.WriteString(v.renderButtons("[Create]", "[Cancel]", contentW))
@@ -124,7 +154,7 @@ func (v *VirtualDeviceOverlay) viewExists(contentW int) string {
 	sb.WriteString("\n\n")
 	sb.WriteString(styles.SetupDimValue.Render("In Discord / Zoom / OBS select:"))
 	sb.WriteString("\n")
-	sb.WriteString(styles.ConnParamValue.Render("  \"Monitor of " + v.SinkName + "\" as microphone"))
+	sb.WriteString(styles.ConnParamValue.Render("  \"" + v.ExistingCaptureName() + "\" as microphone"))
 	sb.WriteString("\n\n")
 
 	sb.WriteString(v.renderButtons("[Remove]", "[OK]", contentW))

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -51,14 +50,12 @@ func TestClientManualCreateServerOwnedSinkReturnsOwnershipError(t *testing.T) {
 	writeVirtualState(t, virtualstate.RoleServer, "42", recent.SinkKeep, recent.SinkKeep)
 	stub.foundModuleID = "42"
 	client := newVirtualStateModel(config.ModeClient)
-	client.virtualDeviceOverlay = NewVirtualDeviceOverlay(false, echowarpSinkName)
-	client.overlay = SetupOverlayVirtualDevice
 
-	client, _ = client.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	err := client.ensureVirtualSink(*client.defaultVirtualSinkPreset(), virtualSinkEnsureOptions{explicitCreate: true})
 	device := mustLoadVirtualStateDevice(t)
 	plan := client.VirtualSinkCleanupPlan()
 
-	assert.Equal(t, "EchoWarp virtual audio device already exists and is owned by server", client.virtualDeviceOverlay.Error)
+	require.EqualError(t, err, "EchoWarp virtual audio device already exists and is owned by server")
 	assert.Equal(t, virtualstate.RoleServer, device.Ownership.CreatedBy)
 	assert.Equal(t, recent.SinkKeep, device.Policy.OnStop)
 	assert.Empty(t, stub.createdNames)
@@ -71,13 +68,12 @@ func TestServerManualCreateClientOwnedSinkDoesNotStealOwnership(t *testing.T) {
 	writeVirtualState(t, virtualstate.RoleClient, "24", recent.SinkKeep, recent.SinkKeep)
 	stub.foundModuleID = "24"
 	server := newVirtualStateModel(config.ModeServer)
-	server.virtualDeviceOverlay = NewVirtualDeviceOverlay(false, echowarpSinkName)
-	server.overlay = SetupOverlayVirtualDevice
 
-	server, _ = server.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	err := server.ensureVirtualSink(*server.defaultVirtualSinkPreset(), virtualSinkEnsureOptions{explicitCreate: true})
 	device := mustLoadVirtualStateDevice(t)
 
-	assert.Contains(t, server.virtualDeviceOverlay.Error, "owned by client")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "owned by client")
 	assert.Equal(t, virtualstate.RoleClient, device.Ownership.CreatedBy)
 	assert.Equal(t, recent.SinkKeep, device.Policy.OnStop)
 	assert.Empty(t, stub.createdNames)
@@ -157,6 +153,7 @@ func TestCurrentRoleExplicitRemoveMarksAbsentAndSuppressesLegacyRecreate(t *test
 	stub := stubVirtualAudioFuncs(t)
 	writeVirtualState(t, virtualstate.RoleClient, "42", recent.SinkKeep, recent.SinkKeep)
 	client := newVirtualStateModel(config.ModeClient)
+	stub.foundModuleID = "42"
 	client.virtualMicManageable = true
 	client.virtualMicManagedModule = "42"
 
@@ -174,6 +171,7 @@ func TestImportedExplicitRemoveMarksAbsent(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	writeVirtualState(t, virtualstate.RoleImported, "51", recent.SinkKeep, recent.SinkKeep)
 	server := newVirtualStateModel(config.ModeServer)
+	stub.foundModuleID = "51"
 	server.virtualMicManageable = true
 	server.virtualMicManagedModule = "51"
 
@@ -222,6 +220,70 @@ func TestServerKeepNoRecreateStateKeepsMonitorUnchecked(t *testing.T) {
 	assert.Empty(t, stub.createdNames)
 	assert.Empty(t, m.SelectedDeviceName())
 	assert.False(t, plan.Delete)
+}
+
+func TestTrackedVirtualSinkCleanupPlansIncludeEachCreatedDeleteSink(t *testing.T) {
+	m := newVirtualStateModel(config.ModeServer)
+	keep := m.virtualSinkPresetForBaseName("Keep Device")
+	keep.OnStop = recent.SinkKeep
+	deleteOne := m.virtualSinkPresetForBaseName("Delete One")
+	deleteTwo := m.virtualSinkPresetForBaseName("Delete Two")
+	m.trackVirtualSink("41", keep, true)
+	m.trackVirtualSink("42", deleteOne, true)
+	m.trackVirtualSink("43", deleteTwo, true)
+
+	plans := m.VirtualSinkCleanupPlans()
+
+	require.Len(t, plans, 2)
+	assert.ElementsMatch(t, []string{deleteOne.SinkName, deleteTwo.SinkName}, []string{plans[0].SinkName, plans[1].SinkName})
+	assert.ElementsMatch(t, []string{"42", "43"}, []string{plans[0].ModuleID, plans[1].ModuleID})
+	for _, plan := range plans {
+		assert.True(t, plan.Delete)
+		assert.True(t, plan.AllowNameFallback)
+	}
+}
+
+func TestMarkVirtualSinkCleanedByNameOnlyMarksTargetDeviceAbsent(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newVirtualStateModel(config.ModeServer)
+	first := m.virtualSinkPresetForBaseName("Studio One")
+	second := m.virtualSinkPresetForBaseName("Studio Two")
+	require.NoError(t, m.persistVirtualSinkPresent("41", first))
+	require.NoError(t, m.persistVirtualSinkPresent("42", second))
+	m.trackVirtualSink("41", first, true)
+	m.trackVirtualSink("42", second, true)
+
+	require.NoError(t, m.MarkVirtualSinkCleanedByName(first.SinkName))
+	firstDevice, ok, err := virtualstate.LoadDevice(first.SinkName)
+	require.NoError(t, err)
+	require.True(t, ok)
+	secondDevice, ok, err := virtualstate.LoadDevice(second.SinkName)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	assert.Equal(t, virtualstate.DesiredAbsent, firstDevice.State.Desired)
+	assert.Equal(t, virtualstate.DesiredPresent, secondDevice.State.Desired)
+	assert.NotContains(t, m.trackedVirtualSinks, first.SinkName)
+	assert.Contains(t, m.trackedVirtualSinks, second.SinkName)
+}
+
+func TestStateVirtualSinkCleanupPlanRequiresExactSessionID(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newVirtualStateModel(config.ModeServer)
+	vs := m.virtualSinkPresetForBaseName("Session Scoped")
+	policy := virtualstate.DevicePolicy{OnStop: recent.SinkDelete, OnStart: recent.SinkRecreate}
+	require.NoError(t, virtualstate.UpsertPresentWithMetadata(
+		vs.SinkName,
+		virtualSinkMonitorName(vs),
+		"51",
+		virtualstate.RoleServer,
+		policy,
+		virtualstate.DeviceMetadata{ID: vs.ID, BaseName: vs.BaseName, SessionID: virtualstate.NewSessionID()},
+	))
+
+	plans := m.VirtualSinkCleanupPlans()
+
+	assert.Empty(t, plans)
 }
 
 func TestCreateVirtualSinkReturnsPersistenceError(t *testing.T) {

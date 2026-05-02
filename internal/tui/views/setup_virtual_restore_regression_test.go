@@ -12,6 +12,7 @@ import (
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 )
 
 func TestExistingEchoWarpSinkIsManageableAndRemovable(t *testing.T) {
@@ -166,7 +167,7 @@ func TestServerRestoreWithOnlyVirtualLifecycleBypassesEmptyDeviceReturn(t *testi
 	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
 }
 
-func TestRefreshInjectionAfterAutoRecreateSelectsMonitor(t *testing.T) {
+func TestRefreshInjectionAfterAutoRecreateDoesNotSelectMonitor(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	m := newInputOnlyRestoreModel()
 	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
@@ -178,7 +179,7 @@ func TestRefreshInjectionAfterAutoRecreateSelectsMonitor(t *testing.T) {
 	stub.foundModuleID = "99"
 	m = m.WithDeviceRefreshFunc(refreshedEchoWarpItems)
 
-	assert.Equal(t, echowarpMonitorName, m.SelectedDeviceName())
+	assert.Empty(t, m.SelectedDeviceName())
 	assert.Len(t, m.inputDevices, 1)
 	assert.Len(t, m.outputDevices, 1)
 }
@@ -263,6 +264,126 @@ func TestExplicitRemoveClearsVirtualLifecyclePersistence(t *testing.T) {
 	assert.False(t, m.virtualSinkLifecycleConfigured)
 }
 
+func TestRemoveManagedVirtualSinkPreservesRemainingTrackedSink(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	stub.foundModules = map[string]string{"custom_a": "42"}
+	m := newTestSetupModel(config.ModeServer)
+	first := customVirtualSinkPreset("custom_a", "Studio A")
+	second := customVirtualSinkPreset("custom_b", "Studio B")
+	m.trackVirtualSink("42", first, true)
+	m.trackVirtualSink("43", second, true)
+
+	require.NoError(t, m.removeManagedVirtualSink(first.SinkName))
+
+	assert.Equal(t, []string{"42"}, stub.removedIDs)
+	assert.NotContains(t, m.trackedVirtualSinks, first.SinkName)
+	assert.Contains(t, m.trackedVirtualSinks, second.SinkName)
+	assert.True(t, m.virtualMicManageable)
+	assert.Equal(t, "43", m.virtualMicManagedModule)
+	assert.Equal(t, second.SinkName, m.defaultVirtualOverlaySinkName())
+}
+
+func TestClientResetPreservesCurrentSessionTrackedVirtualSinks(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newVirtualStateModel(config.ModeClient)
+	vs := customVirtualSinkPreset("custom_session", "Session Device")
+	require.NoError(t, m.persistVirtualSinkPresent("88", vs))
+	m.trackedVirtualSinks = nil
+
+	m.clearClientVirtualRestoreState()
+
+	tracked, ok := m.trackedVirtualSinks[vs.SinkName]
+	require.True(t, ok)
+	assert.True(t, tracked.CreatedThisSession)
+	assert.Equal(t, "88", tracked.ModuleID)
+	assert.Len(t, m.VirtualSinkCleanupPlans(), 1)
+}
+
+func TestSyncVirtualMicStateDiscoversTrackedCustomSink(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	stub.foundModules = map[string]string{"custom_b": "43"}
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_b", "Studio B")
+	m.trackVirtualSink("", vs, false)
+
+	m.syncVirtualMicState()
+
+	assert.Equal(t, []string{vs.SinkName}, stub.findNames[:1])
+	assert.True(t, m.virtualMicManageable)
+	assert.Equal(t, "43", m.virtualMicManagedModule)
+}
+
+func TestSyncVirtualMicStateDiscoversPreviousSessionCustomSinkSafely(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	vs := customVirtualSinkPreset("custom_previous", "Previous Studio")
+	stub.foundModules = map[string]string{vs.SinkName: "44"}
+	previousSessionID := virtualstate.NewSessionID()
+	policy := virtualstate.DevicePolicy{OnStop: recent.SinkDelete, OnStart: recent.SinkRecreate}
+	require.NoError(t, virtualstate.UpsertPresentWithMetadata(
+		vs.SinkName,
+		virtualSinkMonitorName(vs),
+		"43",
+		virtualstate.RoleServer,
+		policy,
+		virtualstate.DeviceMetadata{
+			ID: vs.ID, BaseName: vs.BaseName, PlaybackName: vs.PlaybackName,
+			CaptureName: vs.CaptureName, SessionID: previousSessionID,
+		},
+	))
+	m := newTestSetupModel(config.ModeServer)
+
+	m.syncVirtualMicState()
+	device, ok, err := virtualstate.LoadDevice(vs.SinkName)
+
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Contains(t, stub.findNames, vs.SinkName)
+	assert.True(t, m.virtualMicManageable)
+	assert.Equal(t, "44", m.virtualMicManagedModule)
+	assert.Empty(t, m.VirtualSinkCleanupPlans())
+	assert.Equal(t, previousSessionID, device.Ownership.SessionID)
+}
+
+func TestVirtualOverlayUsesCustomCaptureNameForExistingSink(t *testing.T) {
+	stubVirtualAudioFuncs(t)
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_capture", "Capture Rig")
+	m.trackVirtualSink("45", vs, false)
+	m.syncVirtualMicState()
+
+	m, _ = m.openVirtualMicOverlay()
+
+	require.NotNil(t, m.virtualDeviceOverlay)
+	assert.Equal(t, vs.CaptureName, m.virtualDeviceOverlay.CaptureName)
+	assert.Contains(t, m.virtualDeviceOverlay.View(80), vs.CaptureName)
+}
+
+func TestCollectVirtualSinkPresetsUsesDeterministicSinkOrder(t *testing.T) {
+	m := newTestSetupModel(config.ModeServer)
+	second := customVirtualSinkPreset("custom_b", "Studio B")
+	first := customVirtualSinkPreset("custom_a", "Studio A")
+	m.trackVirtualSink("2", second, true)
+	m.trackVirtualSink("1", first, true)
+
+	presets := m.CollectVirtualSinkPresets()
+
+	require.Len(t, presets, 2)
+	assert.Equal(t, []string{first.SinkName, second.SinkName}, []string{presets[0].SinkName, presets[1].SinkName})
+}
+
+func TestCurrentSelectionMatchesPresetUsesVirtualAliases(t *testing.T) {
+	m := newTestSetupModel(config.ModeClient)
+	vs := customVirtualSinkPreset("custom_playback", "Studio Playback")
+	row := deviceRow{ID: 8, Name: vs.PlaybackName, IsVirtual: true}
+	m.outputDevices = []deviceRow{row}
+	m.multiSelect = map[string]DeviceRoleSet{row.selectKey(): {Playback: true}}
+	preset := recent.DevicePreset{Devices: []recent.PresetDevice{{
+		Name: vs.SinkName, IsInput: false, Virtual: true, VirtualSink: &vs,
+	}}}
+
+	assert.True(t, m.currentSelectionMatchesPreset(preset))
+}
+
 func TestHiddenOutputRecreateRunsBeforeSelectionMatchSkip(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	m := newInputOnlyRestoreModel()
@@ -317,7 +438,7 @@ func TestInputOnlyRestoreIgnoresOutputEchoWarpPreset(t *testing.T) {
 	assert.Empty(t, m.selectedVisibleRows())
 }
 
-func TestInputOnlyVirtualCreationSelectsMonitor(t *testing.T) {
+func TestInputOnlyVirtualCreationSelectionHelperIsUnused(t *testing.T) {
 	m := newInputOnlyRestoreModel()
 	monitor := deviceRow{ID: 1, Name: echowarpMonitorName, IsInput: true, IsVirtual: true}
 	sink := deviceRow{ID: 2, Name: echowarpSinkName, IsVirtual: true}
@@ -382,6 +503,7 @@ func virtualSinkPreset(onStart recent.SinkLifecycle) *recent.VirtualSinkPreset {
 
 type virtualAudioStub struct {
 	foundModuleID string
+	foundModules  map[string]string
 	createErr     error
 	findNames     []string
 	createdNames  []string
@@ -398,8 +520,8 @@ func stubVirtualAudioFuncs(t *testing.T) *virtualAudioStub {
 	stub := &virtualAudioStub{}
 
 	isLinuxRuntime = true
-	createPulseAudioSinkFn = func(name string) (string, error) {
-		stub.createdNames = append(stub.createdNames, name)
+	createPulseAudioSinkFn = func(vs recent.VirtualSinkPreset) (string, error) {
+		stub.createdNames = append(stub.createdNames, vs.SinkName)
 		return "99", stub.createErr
 	}
 	removePulseAudioSinkFn = func(moduleID string) error {
@@ -409,6 +531,9 @@ func stubVirtualAudioFuncs(t *testing.T) *virtualAudioStub {
 	}
 	findPulseAudioModuleFn = func(sinkName string) (string, bool, error) {
 		stub.findNames = append(stub.findNames, sinkName)
+		if moduleID, ok := stub.foundModules[sinkName]; ok {
+			return moduleID, moduleID != "", nil
+		}
 		return stub.foundModuleID, stub.foundModuleID != "", nil
 	}
 
@@ -426,4 +551,13 @@ func refreshedEchoWarpItems() ([]list.Item, error) {
 		mockDeviceItem{name: echowarpMonitorName, id: 11, isInput: true},
 		mockDeviceItem{name: echowarpSinkName, id: 12, isInput: false},
 	}, nil
+}
+
+func customVirtualSinkPreset(sinkName, baseName string) recent.VirtualSinkPreset {
+	return recent.VirtualSinkPreset{
+		ID: sinkName + "_id", BaseName: baseName, ModuleType: "module-null-sink",
+		SinkName: sinkName, MonitorName: sinkName + ".monitor",
+		PlaybackName: "Playback " + baseName, CaptureName: "Capture " + baseName,
+		OnStop: recent.SinkDelete, OnStart: recent.SinkRecreate,
+	}
 }

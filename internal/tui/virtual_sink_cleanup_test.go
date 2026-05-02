@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/tui/views"
 	"github.com/lHumaNl/echowarp/internal/virtualstate"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 )
@@ -49,8 +51,8 @@ func TestCleanupUnloadsKnownVirtualSinkModuleID(t *testing.T) {
 	m = updated.(Model)
 
 	assert.True(t, m.quitting)
-	assert.Empty(t, stub.findSinkNames)
-	assert.Equal(t, []string{"7"}, stub.removedIDs)
+	assert.Equal(t, []string{"EchoWarp"}, stub.findSinkNames)
+	assert.Equal(t, []string{"42"}, stub.removedIDs)
 }
 
 func TestCleanupRunsAgainAfterNewSessionVirtualSinkRecorded(t *testing.T) {
@@ -59,13 +61,13 @@ func TestCleanupRunsAgainAfterNewSessionVirtualSinkRecorded(t *testing.T) {
 	stub := stubVirtualSinkCleanup(t, "42")
 
 	m.cleanupVirtualSinks()
-	beforePlan := m.setupModel.VirtualSinkCleanupPlan()
+	beforePlans := m.setupModel.VirtualSinkCleanupPlans()
 	m.setupModel = m.setupModel.WithVirtualSinkCreatedForSession("8")
-	m.resetVirtualSinkCleanupLatchIfSessionSinkRecorded(beforePlan)
+	m.resetVirtualSinkCleanupLatchIfSessionSinkRecorded(beforePlans)
 	m.cleanupVirtualSinks()
 
-	assert.Equal(t, []string{"7", "8"}, stub.removedIDs)
-	assert.Empty(t, stub.findSinkNames)
+	assert.Equal(t, []string{"42", "42"}, stub.removedIDs)
+	assert.Equal(t, []string{"EchoWarp", "EchoWarp"}, stub.findSinkNames)
 }
 
 func TestDirectQuitKeepsVirtualSinkWhenConfigured(t *testing.T) {
@@ -99,6 +101,36 @@ func TestClientShutdownDoesNotDeleteServerOwnedVirtualSink(t *testing.T) {
 	assert.Empty(t, stub.removedIDs)
 }
 
+func TestCleanupSkipsRemovalWhenExactSinkLookupDoesNotFindCurrentSink(t *testing.T) {
+	m := newVirtualSinkCleanupModel(t, recent.SinkDelete)
+	m.setupModel = m.setupModel.WithVirtualSinkCreatedForSession("stale-module")
+	stub := stubVirtualSinkCleanupLookup(t, map[string]virtualSinkCleanupLookupResult{})
+
+	m.cleanupVirtualSinks()
+
+	assert.Equal(t, []string{"EchoWarp"}, stub.findSinkNames)
+	assert.Empty(t, stub.removedIDs)
+}
+
+func TestCleanupLatchStaysRetryableAfterPartialPlanFailure(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := Model{}
+	stub := stubVirtualSinkCleanupLookup(t, map[string]virtualSinkCleanupLookupResult{
+		"good": {moduleID: "41", found: true},
+		"bad":  {moduleID: "42", found: true},
+	})
+	stub.removeErrByID = map[string]error{"42": errors.New("remove failed")}
+	plans := []views.VirtualSinkCleanupPlan{
+		{Delete: true, SinkName: "good"},
+		{Delete: true, SinkName: "bad"},
+	}
+
+	cleaned := m.cleanupVirtualSinkPlans(plans)
+
+	assert.False(t, cleaned)
+	assert.Equal(t, []string{"41", "42"}, stub.removedIDs)
+}
+
 func newVirtualSinkCleanupModel(t *testing.T, onStop recent.SinkLifecycle) Model {
 	t.Helper()
 	devices := []audio.AudioDevice{{ID: 99, Name: "EchoWarp", IsInput: false, Channels: 2, SampleRate: 48000}}
@@ -114,9 +146,22 @@ func newVirtualSinkCleanupModel(t *testing.T, onStop recent.SinkLifecycle) Model
 type virtualSinkCleanupStub struct {
 	findSinkNames []string
 	removedIDs    []string
+	removeErrByID map[string]error
+}
+
+type virtualSinkCleanupLookupResult struct {
+	moduleID string
+	found    bool
 }
 
 func stubVirtualSinkCleanup(t *testing.T, resolvedID string) *virtualSinkCleanupStub {
+	t.Helper()
+	return stubVirtualSinkCleanupLookup(t, map[string]virtualSinkCleanupLookupResult{
+		"EchoWarp": {moduleID: resolvedID, found: true},
+	})
+}
+
+func stubVirtualSinkCleanupLookup(t *testing.T, resolved map[string]virtualSinkCleanupLookupResult) *virtualSinkCleanupStub {
 	t.Helper()
 	oldRemove := removePulseAudioSink
 	oldFind := findPulseAudioSinkModule
@@ -124,11 +169,18 @@ func stubVirtualSinkCleanup(t *testing.T, resolvedID string) *virtualSinkCleanup
 
 	removePulseAudioSink = func(moduleID string) error {
 		stub.removedIDs = append(stub.removedIDs, moduleID)
+		if err := stub.removeErrByID[moduleID]; err != nil {
+			return err
+		}
 		return nil
 	}
 	findPulseAudioSinkModule = func(sinkName string) (string, bool, error) {
 		stub.findSinkNames = append(stub.findSinkNames, sinkName)
-		return resolvedID, true, nil
+		result, ok := resolved[sinkName]
+		if !ok {
+			return "", false, nil
+		}
+		return result.moduleID, result.found, nil
 	}
 
 	t.Cleanup(func() {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,6 +252,54 @@ func TestAddServerIDRoundtrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, loaded, 1)
 	assert.Equal(t, uid, loaded[0].ServerID)
+}
+
+func TestLoadYAMLMigratesLegacyAndPreservesMultiVirtualDeviceMetadata(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+	yamlData := strings.TrimSpace(`
+- address: 127.0.0.1
+  port: 4415
+  hostname: Server
+  presets:
+    reverse:
+      devices:
+        - id: 11
+          name: Monitor of EchoWarp
+          is_input: true
+          virtual: true
+          virtual_sink:
+            module_type: module-null-sink
+            sink_name: EchoWarp
+            on_stop: delete
+            on_start: recreate
+      virtual_sinks:
+        - id: virtual-deadbeef
+          base_name: Studio
+          module_type: module-null-sink
+          sink_name: echowarp_Studio_deadbeef
+          monitor_name: echowarp_Studio_deadbeef.monitor
+          playback_name: Playback Studio
+          capture_name: Capture Studio
+          on_stop: keep
+          on_start: recreate
+`) + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "recent_servers.yaml"), []byte(yamlData), 0o600))
+
+	servers, err := Load()
+
+	require.NoError(t, err)
+	require.Len(t, servers, 1)
+	preset := servers[0].Presets["reverse"]
+	require.Len(t, preset.Devices, 1)
+	require.NotNil(t, preset.Devices[0].VirtualSink)
+	assert.Equal(t, "EchoWarp", preset.Devices[0].VirtualSink.SinkName)
+	require.Len(t, preset.VirtualSinks, 1)
+	assert.Equal(t, "virtual-deadbeef", preset.VirtualSinks[0].ID)
+	assert.Equal(t, "Studio", preset.VirtualSinks[0].BaseName)
+	assert.Equal(t, "echowarp_Studio_deadbeef.monitor", preset.VirtualSinks[0].MonitorName)
+	assert.Equal(t, "Playback Studio", preset.VirtualSinks[0].PlaybackName)
+	assert.Equal(t, "Capture Studio", preset.VirtualSinks[0].CaptureName)
 }
 
 func TestSaveCreatesDirectory(t *testing.T) {

@@ -32,7 +32,7 @@ func TestLifecycleOnlyRecreateRefreshDoesNotSelectVirtualMonitor(t *testing.T) {
 	assert.NotContains(t, m.multiSelect, virtualMonitorRow().selectKey())
 }
 
-func TestSelectedVirtualMonitorRecreateSelectsAfterRefresh(t *testing.T) {
+func TestSelectedVirtualMonitorRecreateDoesNotSelectAfterRefresh(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	m := newInputOnlyRestoreModel()
 	preset := recent.DevicePreset{
@@ -50,11 +50,11 @@ func TestSelectedVirtualMonitorRecreateSelectsAfterRefresh(t *testing.T) {
 
 	assert.Nil(t, cmd)
 	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
-	assert.Contains(t, m.multiSelect, virtualMonitorRow().selectKey())
-	assert.Equal(t, echowarpMonitorName, m.SelectedDeviceName())
+	assert.NotContains(t, m.multiSelect, virtualMonitorRow().selectKey())
+	assert.Empty(t, m.SelectedDeviceName())
 }
 
-func TestManualCreateStillSelectsVirtualMonitor(t *testing.T) {
+func TestManualCreateDoesNotSelectVirtualMonitor(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	m := newInputOnlyRestoreModel().WithDeviceRefreshFunc(refreshedEchoWarpItems)
 	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(false, echowarpSinkName)
@@ -62,11 +62,11 @@ func TestManualCreateStillSelectsVirtualMonitor(t *testing.T) {
 
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	assert.Equal(t, []string{echowarpSinkName}, stub.createdNames)
+	assert.Len(t, stub.createdNames, 1)
 	assert.True(t, m.virtualMicManageable)
 	assert.Equal(t, SetupOverlayVirtualSinkLifecycle, m.overlay)
-	assert.Contains(t, m.multiSelect, virtualMonitorRow().selectKey())
-	assert.Equal(t, echowarpMonitorName, m.SelectedDeviceName())
+	assert.NotContains(t, m.multiSelect, virtualMonitorRow().selectKey())
+	assert.Empty(t, m.SelectedDeviceName())
 }
 
 func refreshedMicAndEchoWarpItems() ([]list.Item, error) {

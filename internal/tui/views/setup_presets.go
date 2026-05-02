@@ -1,9 +1,18 @@
 package views
 
 import (
+	"regexp"
+	"strings"
+	"unicode"
+
 	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 )
+
+const defaultVirtualBaseName = "EchoWarp"
+
+var unsafePulseAudioNameChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 
 // CollectPresetDevices returns a DevicePreset containing all currently selected devices.
 // It iterates over input and output device lists in order, including any device
@@ -21,8 +30,8 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 				Volume:  d.Volume,
 				AGC:     d.AGC,
 			}
-			if isEchoWarpMonitorDevice(d) {
-				pd.VirtualSink = m.defaultVirtualSinkPreset()
+			if d.IsVirtual {
+				pd.VirtualSink = m.virtualSinkPresetForDevice(d)
 			}
 			devices = append(devices, pd)
 		}
@@ -40,7 +49,7 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 			}
 			// Save virtual sink preset for virtual output devices.
 			if d.IsVirtual {
-				pd.VirtualSink = m.defaultVirtualSinkPreset()
+				pd.VirtualSink = m.virtualSinkPresetForDevice(d)
 			}
 			// Save mix input for virtual output devices.
 			if d.IsVirtual {
@@ -66,6 +75,13 @@ func (m *SetupModel) CollectPresetDevices() recent.DevicePreset {
 // It is independent from device selection so unchecking EchoWarp does not drop
 // Delete/Recreate lifecycle state from persisted presets.
 func (m SetupModel) CollectVirtualSinkPresets() []recent.VirtualSinkPreset {
+	if len(m.trackedVirtualSinks) > 0 {
+		result := make([]recent.VirtualSinkPreset, 0, len(m.trackedVirtualSinks))
+		for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+			result = append(result, m.trackedVirtualSinks[sinkName].Preset)
+		}
+		return result
+	}
 	if !m.shouldPersistVirtualSinkLifecycle() {
 		return nil
 	}
@@ -80,6 +96,22 @@ func isEchoWarpMonitorDevice(d deviceRow) bool {
 	return d.IsVirtual && d.IsInput && d.Name == echowarpMonitorName
 }
 
+func (m SetupModel) virtualSinkPresetForDevice(d deviceRow) *recent.VirtualSinkPreset {
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		vs := m.trackedVirtualSinks[sinkName].Preset
+		if d.IsInput && d.Name == virtualSinkCaptureName(vs) {
+			return &vs
+		}
+		if !d.IsInput && d.Name == virtualSinkPlaybackName(vs) {
+			return &vs
+		}
+	}
+	if isEchoWarpMonitorDevice(d) || (!d.IsInput && d.Name == echowarpSinkName) {
+		return m.defaultVirtualSinkPreset()
+	}
+	return nil
+}
+
 func (m SetupModel) defaultVirtualSinkPreset() *recent.VirtualSinkPreset {
 	onStop := m.virtualSinkOnStop
 	if onStop == "" {
@@ -90,6 +122,44 @@ func (m SetupModel) defaultVirtualSinkPreset() *recent.VirtualSinkPreset {
 		onStart = recent.SinkRecreate
 	}
 	return virtualSinkPresetWithLifecycle(onStop, onStart)
+}
+
+func (m SetupModel) virtualSinkPresetForBaseName(baseName string) recent.VirtualSinkPreset {
+	baseName = normalizeVirtualBaseName(baseName)
+	id := virtualstate.NewVirtualDeviceID()
+	sinkName := safePulseAudioSinkName(baseName, id)
+	return recent.VirtualSinkPreset{
+		ID: id, BaseName: baseName, ModuleType: "module-null-sink",
+		SinkName: sinkName, MonitorName: sinkName + ".monitor",
+		PlaybackName: "Playback " + baseName, CaptureName: "Capture " + baseName,
+		OnStop: recent.SinkDelete, OnStart: recent.SinkRecreate,
+	}
+}
+
+func normalizeVirtualBaseName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return defaultVirtualBaseName
+	}
+	return strings.Join(strings.Fields(name), " ")
+}
+
+func safePulseAudioSinkName(baseName, id string) string {
+	safeBase := unsafePulseAudioNameChars.ReplaceAllString(baseName, "_")
+	safeBase = strings.Trim(safeBase, "_.-")
+	if safeBase == "" || !isPulseAudioNameStart(rune(safeBase[0])) {
+		safeBase = "device_" + safeBase
+	}
+	return "echowarp_" + safeBase + "_" + idSuffix(id)
+}
+
+func isPulseAudioNameStart(r rune) bool {
+	return unicode.IsLetter(r) || r == '_'
+}
+
+func idSuffix(id string) string {
+	parts := strings.Split(id, "-")
+	return parts[len(parts)-1]
 }
 
 func defaultVirtualSinkPreset() *recent.VirtualSinkPreset {
@@ -103,6 +173,36 @@ func virtualSinkPresetWithLifecycle(onStop, onStart recent.SinkLifecycle) *recen
 		OnStop:     onStop,
 		OnStart:    onStart,
 	}
+}
+
+func virtualSinkMonitorName(vs recent.VirtualSinkPreset) string {
+	if vs.MonitorName != "" {
+		return vs.MonitorName
+	}
+	if vs.BaseName != "" || vs.PlaybackName != "" || vs.CaptureName != "" {
+		return vs.SinkName + ".monitor"
+	}
+	return "Monitor of " + vs.SinkName
+}
+
+func virtualSinkPlaybackName(vs recent.VirtualSinkPreset) string {
+	if vs.PlaybackName != "" {
+		return vs.PlaybackName
+	}
+	if vs.BaseName != "" {
+		return "Playback " + vs.BaseName
+	}
+	return vs.SinkName
+}
+
+func virtualSinkCaptureName(vs recent.VirtualSinkPreset) string {
+	if vs.CaptureName != "" {
+		return vs.CaptureName
+	}
+	if vs.BaseName != "" {
+		return "Capture " + vs.BaseName
+	}
+	return "Monitor of " + vs.SinkName
 }
 
 // CollectModePreset returns a full ModePreset snapshot for the given mode,

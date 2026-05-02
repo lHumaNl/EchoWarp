@@ -139,33 +139,60 @@ func (m *SetupModel) clearClientVirtualRestoreState() {
 func (m *SetupModel) clearSessionVirtualSinkPersistence() {
 	m.virtualMicCreated = false
 	m.virtualMicModule = ""
+	m.trackedVirtualSinks = m.currentSessionTrackedVirtualSinks()
 }
 
 func (m *SetupModel) refreshVirtualMicManageStateAfterClientReset() {
-	if !isLinuxRuntime {
-		return
-	}
-	moduleID, found, err := findPulseAudioModuleFn(echowarpSinkName)
-	if err == nil && found {
-		m.markVirtualMicManageable(moduleID)
-		return
-	}
-	if err != nil && m.virtualMicManagedModule != "" {
-		m.updateVirtualMicField(true)
-		return
-	}
-	if m.hasExactEchoWarpOutput() && m.virtualMicManagedModule != "" {
-		m.updateVirtualMicField(true)
-		return
-	}
-	m.clearVirtualMicManageState()
-	m.updateVirtualMicField(false)
+	m.syncVirtualMicState()
 }
 
-func (m *SetupModel) markVirtualMicManageable(moduleID string) {
-	m.virtualMicManageable = true
-	m.virtualMicManagedModule = moduleID
-	m.updateVirtualMicField(true)
+func (m SetupModel) currentSessionTrackedVirtualSinks() map[string]trackedVirtualSink {
+	tracked := make(map[string]trackedVirtualSink)
+	m.copyCreatedSessionSinks(tracked)
+	m.copyCurrentSessionStateSinks(tracked)
+	return tracked
+}
+
+func (m SetupModel) copyCreatedSessionSinks(tracked map[string]trackedVirtualSink) {
+	for sinkName, sink := range m.trackedVirtualSinks {
+		if sink.CreatedThisSession && shouldPreserveSessionVirtualSink(sink.Preset.SinkName) {
+			tracked[sinkName] = sink
+		}
+	}
+}
+
+func (m SetupModel) copyCurrentSessionStateSinks(tracked map[string]trackedVirtualSink) {
+	for _, device := range m.currentSessionVirtualStateDevices() {
+		tracked[device.SinkName] = trackedVirtualSink{
+			Preset: virtualSinkPresetFromStateDevice(device), ModuleID: device.State.ModuleID,
+			CreatedThisSession: true, Manageable: device.State.ModuleID != "",
+		}
+	}
+}
+
+func (m SetupModel) currentSessionVirtualStateDevices() []virtualstate.Device {
+	state, err := virtualstate.Load()
+	if err != nil {
+		return nil
+	}
+	devices := make([]virtualstate.Device, 0, len(state.Devices))
+	for _, device := range state.Devices {
+		if m.isCurrentSessionStateDevice(device) {
+			devices = append(devices, device)
+		}
+	}
+	return devices
+}
+
+func (m SetupModel) isCurrentSessionStateDevice(device virtualstate.Device) bool {
+	return virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole()) &&
+		device.Ownership.SessionID == m.virtualSessionID &&
+		shouldPreserveSessionVirtualSink(device.SinkName) &&
+		device.State.Desired == virtualstate.DesiredPresent
+}
+
+func shouldPreserveSessionVirtualSink(sinkName string) bool {
+	return sinkName != "" && sinkName != echowarpSinkName
 }
 
 func splitProbeAddress(addr string) (string, int) {
@@ -325,18 +352,12 @@ func (m *SetupModel) currentSelectionMatchesPreset(preset recent.DevicePreset) b
 	if len(m.multiSelect) == 0 {
 		return false
 	}
-	allDevices := append(append([]deviceRow{}, m.inputDevices...), m.outputDevices...)
-	for _, pd := range visiblePreset.Devices {
-		found := false
-		for _, d := range allDevices {
-			if d.Name == pd.Name && d.IsInput == pd.IsInput {
-				if _, selected := m.multiSelect[d.selectKey()]; selected {
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
+	matched, unmatched := matchPresetDevices(visiblePreset, m.inputDevices, m.outputDevices)
+	if len(unmatched) > 0 {
+		return false
+	}
+	for _, d := range matched {
+		if _, selected := m.multiSelect[d.selectKey()]; !selected {
 			return false
 		}
 	}
@@ -404,9 +425,8 @@ func (m SetupModel) filterPresetForVisibleSections(preset recent.DevicePreset) r
 }
 
 type virtualSinkEnsureOptions struct {
-	selectAfterEnsure bool
-	explicitCreate    bool
-	stateDriven       bool
+	explicitCreate bool
+	stateDriven    bool
 }
 
 func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
@@ -417,8 +437,7 @@ func (m *SetupModel) recreateMissingVirtualSinks(preset recent.DevicePreset) {
 	for _, pd := range preset.Devices {
 		vs, ok := recreateVirtualSinkPreset(pd)
 		if ok {
-			options := virtualSinkEnsureOptions{selectAfterEnsure: true}
-			m.recreateVirtualSink(*vs, seen, options)
+			m.recreateVirtualSink(*vs, seen, virtualSinkEnsureOptions{})
 		}
 	}
 	m.recreateVirtualSinksFromState(seen)
@@ -434,7 +453,6 @@ func (m *SetupModel) recreateVirtualSink(
 	}
 	m.rememberVirtualSinkLifecycle(vs)
 	if vs.OnStart != recent.SinkRecreate || vs.SinkName == "" || seen[vs.SinkName] {
-		m.selectVirtualSinkIfRequested(vs.SinkName, options)
 		return
 	}
 	seen[vs.SinkName] = true
@@ -484,7 +502,6 @@ func (m *SetupModel) createMissingVirtualSink(
 		return
 	}
 	if m.hasTrackedVirtualSink(vs.SinkName) {
-		m.selectVirtualSinkIfRequested(vs.SinkName, options)
 		return
 	}
 	if err := m.ensureVirtualSink(vs, options); err != nil {
@@ -493,16 +510,20 @@ func (m *SetupModel) createMissingVirtualSink(
 }
 
 func (m *SetupModel) recreateVirtualSinksFromState(seen map[string]bool) {
-	device, ok := m.stateDeviceForRecreate()
-	if !ok || (seen != nil && seen[device.SinkName]) {
+	devices := m.stateDevicesForRecreate()
+	for _, device := range devices {
+		if seen != nil && seen[device.SinkName] {
+			continue
+		}
+		m.recreateVirtualSinkFromStateDevice(device, seen)
+	}
+}
+
+func (m *SetupModel) recreateVirtualSinkFromStateDevice(device virtualstate.Device, seen map[string]bool) {
+	if device.SinkName == "" {
 		return
 	}
-	vs := recent.VirtualSinkPreset{
-		ModuleType: device.ModuleType,
-		SinkName:   device.SinkName,
-		OnStop:     device.Policy.OnStop,
-		OnStart:    device.Policy.OnStart,
-	}
+	vs := virtualSinkPresetFromStateDevice(device)
 	m.rememberVirtualSinkLifecycle(vs)
 	m.createMissingVirtualSink(vs, virtualSinkEnsureOptions{stateDriven: true})
 	if seen != nil {
@@ -510,15 +531,40 @@ func (m *SetupModel) recreateVirtualSinksFromState(seen map[string]bool) {
 	}
 }
 
-func (m SetupModel) stateDeviceForRecreate() (virtualstate.Device, bool) {
-	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
-	if err != nil || !ok || !virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole()) {
-		return virtualstate.Device{}, false
+func virtualSinkPresetFromStateDevice(device virtualstate.Device) recent.VirtualSinkPreset {
+	return recent.VirtualSinkPreset{
+		ID: device.ID, BaseName: device.BaseName, ModuleType: device.ModuleType,
+		SinkName: device.SinkName, MonitorName: virtualStateMonitorName(device),
+		PlaybackName: device.PlaybackName, CaptureName: device.CaptureName,
+		OnStop: device.Policy.OnStop, OnStart: device.Policy.OnStart,
 	}
-	if device.State.Desired != virtualstate.DesiredPresent {
-		return virtualstate.Device{}, false
+}
+
+func virtualStateMonitorName(device virtualstate.Device) string {
+	if device.MonitorName != "" {
+		return device.MonitorName
 	}
-	return device, device.Policy.OnStart == recent.SinkRecreate
+	return device.SinkName + ".monitor"
+}
+
+func (m SetupModel) stateDevicesForRecreate() []virtualstate.Device {
+	state, err := virtualstate.Load()
+	if err != nil {
+		return nil
+	}
+	var devices []virtualstate.Device
+	for _, device := range state.Devices {
+		if m.shouldRecreateStateDevice(device) {
+			devices = append(devices, device)
+		}
+	}
+	return devices
+}
+
+func (m SetupModel) shouldRecreateStateDevice(device virtualstate.Device) bool {
+	return virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole()) &&
+		device.State.Desired == virtualstate.DesiredPresent &&
+		device.Policy.OnStart == recent.SinkRecreate
 }
 
 func (m SetupModel) virtualStateSuppressesLegacy(vs recent.VirtualSinkPreset) bool {
@@ -543,15 +589,19 @@ func (m SetupModel) virtualStateAllowsCreate(
 	return !virtualstate.IsOtherRoleOwner(device, m.virtualStateRole())
 }
 
-func (m SetupModel) currentRoleOwnsPresentVirtualState() bool {
-	device, ok, err := virtualstate.LoadDevice(echowarpSinkName)
+func (m SetupModel) currentRoleOwnsCurrentSessionPresentVirtualState(sinkName string) bool {
+	device, ok, err := virtualstate.LoadDevice(sinkName)
 	if err != nil || !ok || device.State.Desired == virtualstate.DesiredAbsent {
 		return false
 	}
-	return virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole())
+	return virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole()) &&
+		device.Ownership.SessionID == m.virtualSessionID
 }
 
 func (m SetupModel) hasTrackedVirtualSink(sinkName string) bool {
+	if tracked, ok := m.trackedVirtualSinks[sinkName]; ok {
+		return tracked.ModuleID != ""
+	}
 	return sinkName == echowarpSinkName && m.virtualMicCreated
 }
 
@@ -572,17 +622,12 @@ func (m *SetupModel) ensureVirtualSink(
 			return err
 		}
 		m.refreshDevicesAfterVirtualSinkEnsure()
-		m.selectVirtualSinkIfRequested(vs.SinkName, options)
 		return nil
 	}
 	if !m.virtualStateAllowsCreate(vs, options) {
 		return m.disallowedVirtualSinkCreateError(vs.SinkName, options)
 	}
-	if err := m.createAndTrackVirtualSink(vs); err != nil {
-		return err
-	}
-	m.selectVirtualSinkIfRequested(vs.SinkName, options)
-	return nil
+	return m.createAndTrackVirtualSink(vs)
 }
 
 func (m *SetupModel) persistFoundVirtualSink(
@@ -595,12 +640,12 @@ func (m *SetupModel) persistFoundVirtualSink(
 		return err
 	}
 	if ok && virtualstate.IsOtherRoleOwner(device, m.virtualStateRole()) {
-		return virtualstate.ImportObservedPresent(vs.SinkName, echowarpMonitorName, moduleID)
+		return virtualstate.ImportObservedPresent(vs.SinkName, virtualSinkMonitorName(vs), moduleID)
 	}
-	if options.explicitCreate || options.stateDriven || m.currentRoleOwnsPresentVirtualState() {
+	if options.explicitCreate || m.currentRoleOwnsCurrentSessionPresentVirtualState(vs.SinkName) {
 		return m.persistVirtualSinkPresent(moduleID, vs)
 	}
-	return virtualstate.ImportObservedPresent(vs.SinkName, echowarpMonitorName, moduleID)
+	return virtualstate.ImportObservedPresent(vs.SinkName, virtualSinkMonitorName(vs), moduleID)
 }
 
 func (m SetupModel) rejectOtherRoleExplicitCreate(
@@ -639,19 +684,8 @@ func (m SetupModel) otherRoleVirtualSinkOwner(sinkName string) (string, bool, er
 	return device.Ownership.CreatedBy, true, nil
 }
 
-func (m *SetupModel) selectVirtualSinkIfRequested(
-	sinkName string,
-	options virtualSinkEnsureOptions,
-) {
-	if !options.selectAfterEnsure {
-		return
-	}
-	m.rememberPendingVirtualSinkSelection(sinkName)
-	m.selectPendingVirtualSink(sinkName)
-}
-
 func (m *SetupModel) createAndTrackVirtualSink(vs recent.VirtualSinkPreset) error {
-	moduleID, err := createPulseAudioSinkFn(vs.SinkName)
+	moduleID, err := createPulseAudioSinkFn(vs)
 	if err != nil {
 		return err
 	}
@@ -684,6 +718,7 @@ func (m *SetupModel) refreshDevicesAfterVirtualSinkCreate() {
 }
 
 func (m *SetupModel) markVirtualSinkCreated(moduleID string, vs recent.VirtualSinkPreset) {
+	m.trackVirtualSink(moduleID, vs, true)
 	m.virtualMicCreated = true
 	m.virtualMicModule = moduleID
 	m.virtualMicManageable = true
@@ -694,6 +729,7 @@ func (m *SetupModel) markVirtualSinkCreated(moduleID string, vs recent.VirtualSi
 }
 
 func (m *SetupModel) markVirtualSinkFound(moduleID string, vs recent.VirtualSinkPreset) {
+	m.trackVirtualSink(moduleID, vs, false)
 	if m.virtualMicCreated {
 		m.virtualMicModule = moduleID
 	}
@@ -702,6 +738,15 @@ func (m *SetupModel) markVirtualSinkFound(moduleID string, vs recent.VirtualSink
 	m.virtualSinkOnStop = vs.OnStop
 	m.virtualSinkOnStart = vs.OnStart
 	m.updateVirtualMicField(true)
+}
+
+func (m *SetupModel) trackVirtualSink(moduleID string, vs recent.VirtualSinkPreset, created bool) {
+	if m.trackedVirtualSinks == nil {
+		m.trackedVirtualSinks = make(map[string]trackedVirtualSink)
+	}
+	m.trackedVirtualSinks[vs.SinkName] = trackedVirtualSink{
+		Preset: vs, ModuleID: moduleID, CreatedThisSession: created, Manageable: true,
+	}
 }
 
 // restoreLastMode applies the saved top-level last_mode to the Mode field, if set.

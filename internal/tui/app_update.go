@@ -654,9 +654,9 @@ func (m Model) updateDeviceSelect(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.C
 
 	// Forward everything else to the setup model
 	var cmd tea.Cmd
-	beforeCleanupPlan := m.setupModel.VirtualSinkCleanupPlan()
+	beforeCleanupPlans := m.setupModel.VirtualSinkCleanupPlans()
 	m.setupModel, cmd = m.setupModel.Update(msg)
-	m.resetVirtualSinkCleanupLatchIfSessionSinkRecorded(beforeCleanupPlan)
+	m.resetVirtualSinkCleanupLatchIfSessionSinkRecorded(beforeCleanupPlans)
 	if cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -918,42 +918,71 @@ func (m *Model) cleanupVirtualSinks() {
 	if m.virtualSinkCleanupDone {
 		return
 	}
-	plan := m.setupModel.VirtualSinkCleanupPlan()
-	if !plan.Delete {
+	plans := m.setupModel.VirtualSinkCleanupPlans()
+	if len(plans) == 0 {
 		return
 	}
-	moduleID := plan.ModuleID
-	if moduleID == "" {
-		if !plan.AllowNameFallback {
-			return
-		}
-		resolvedID, found, err := findPulseAudioSinkModule(plan.SinkName)
-		if err != nil || !found {
-			return
-		}
-		moduleID = resolvedID
-	}
-	if moduleID == "" {
-		return
-	}
-	if err := removePulseAudioSink(moduleID); err != nil {
-		return
-	}
-	if err := m.setupModel.MarkVirtualSinkCleaned(); err != nil {
-		return
-	}
-	m.virtualSinkCleanupDone = true
+	m.virtualSinkCleanupDone = m.cleanupVirtualSinkPlans(plans)
 }
 
-func (m *Model) resetVirtualSinkCleanupLatchIfSessionSinkRecorded(before views.VirtualSinkCleanupPlan) {
-	after := m.setupModel.VirtualSinkCleanupPlan()
-	if !after.AllowNameFallback {
-		return
+func (m *Model) cleanupVirtualSinkPlans(plans []views.VirtualSinkCleanupPlan) bool {
+	allCleaned := true
+	attempted := false
+	for _, plan := range plans {
+		if !plan.Delete {
+			continue
+		}
+		attempted = true
+		allCleaned = m.cleanupVirtualSink(plan) && allCleaned
 	}
-	if before.AllowNameFallback && before.ModuleID == after.ModuleID {
-		return
+	return attempted && allCleaned
+}
+
+func (m *Model) cleanupVirtualSink(plan views.VirtualSinkCleanupPlan) bool {
+	if !plan.Delete {
+		return false
 	}
-	m.virtualSinkCleanupDone = false
+	moduleID := m.resolveVirtualSinkCleanupModule(plan)
+	if moduleID == "" {
+		return false
+	}
+	if err := removePulseAudioSink(moduleID); err != nil {
+		return false
+	}
+	if err := m.setupModel.MarkVirtualSinkCleanedByName(plan.SinkName); err != nil {
+		return false
+	}
+	return true
+}
+
+func (m *Model) resolveVirtualSinkCleanupModule(plan views.VirtualSinkCleanupPlan) string {
+	resolvedID, found, err := findPulseAudioSinkModule(plan.SinkName)
+	if err == nil && found {
+		return resolvedID
+	}
+	return ""
+}
+
+func (m *Model) resetVirtualSinkCleanupLatchIfSessionSinkRecorded(before []views.VirtualSinkCleanupPlan) {
+	if hasNewSessionCleanupPlan(before, m.setupModel.VirtualSinkCleanupPlans()) {
+		m.virtualSinkCleanupDone = false
+	}
+}
+
+func hasNewSessionCleanupPlan(before, after []views.VirtualSinkCleanupPlan) bool {
+	known := make(map[string]string, len(before))
+	for _, plan := range before {
+		if plan.AllowNameFallback {
+			known[plan.SinkName] = plan.ModuleID
+		}
+	}
+	for _, plan := range after {
+		moduleID, exists := known[plan.SinkName]
+		if plan.AllowNameFallback && (!exists || moduleID != plan.ModuleID) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) requestQuit() {

@@ -643,18 +643,20 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 			action := m.virtualDeviceOverlay.Update(msg)
 			switch action {
 			case VirtualActionCreate:
-				options := virtualSinkEnsureOptions{selectAfterEnsure: true, explicitCreate: true}
-				if err := m.ensureVirtualSink(*m.defaultVirtualSinkPreset(), options); err != nil {
+				vs := m.virtualDeviceOverlayPreset()
+				options := virtualSinkEnsureOptions{explicitCreate: true}
+				if err := m.ensureVirtualSink(vs, options); err != nil {
 					m.virtualDeviceOverlay.Error = err.Error()
 					return m, nil
 				}
+				m.pendingLifecycleSink = vs
 				m.virtualDeviceOverlay = nil
 				// Show lifecycle options overlay
 				m.virtualSinkLifecycleOverlay = NewVirtualSinkLifecycleOverlay()
 				m.overlay = SetupOverlayVirtualSinkLifecycle
 				return m, nil
 			case VirtualActionRemove:
-				if err := m.removeManagedVirtualMic(); err != nil {
+				if err := m.removeManagedVirtualSink(m.virtualDeviceOverlay.SinkName); err != nil {
 					m.virtualDeviceOverlay.Error = err.Error()
 					return m, nil
 				}
@@ -760,26 +762,28 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				m.virtualSinkOnStop = m.virtualSinkLifecycleOverlay.OnStop()
 				m.virtualSinkOnStart = m.virtualSinkLifecycleOverlay.OnStart()
 				m.virtualSinkLifecycleConfigured = true
+				m.applyPendingVirtualSinkLifecycle()
 				if err := m.persistVirtualSinkPolicy(); err != nil {
 					flashCmd := m.SetFlash("Save failed: "+err.Error(), 5*time.Second)
 					return m, flashCmd
 				}
 				m.overlay = SetupOverlayNone
 				m.virtualSinkLifecycleOverlay = nil
-				flashCmd := m.SetFlash("✓ Virtual audio device created — EchoWarp", 3*time.Second)
+				flashCmd := m.SetFlash(m.virtualSinkCreatedFlashMessage(), 3*time.Second)
 				return m, flashCmd
 			case VSLifecycleCancel:
 				// Use defaults
 				m.virtualSinkOnStop = recent.SinkDelete
 				m.virtualSinkOnStart = recent.SinkRecreate
 				m.virtualSinkLifecycleConfigured = true
+				m.applyPendingVirtualSinkLifecycle()
 				if err := m.persistVirtualSinkPolicy(); err != nil {
 					flashCmd := m.SetFlash("Save failed: "+err.Error(), 5*time.Second)
 					return m, flashCmd
 				}
 				m.overlay = SetupOverlayNone
 				m.virtualSinkLifecycleOverlay = nil
-				flashCmd := m.SetFlash("✓ Virtual audio device created — EchoWarp", 3*time.Second)
+				flashCmd := m.SetFlash(m.virtualSinkCreatedFlashMessage(), 3*time.Second)
 				return m, flashCmd
 			}
 		}

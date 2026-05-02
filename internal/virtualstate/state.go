@@ -2,6 +2,8 @@
 package virtualstate
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -62,14 +64,17 @@ type State struct {
 
 // Device describes a single managed virtual audio device.
 type Device struct {
-	ID          string             `yaml:"id" json:"id"`
-	Backend     string             `yaml:"backend" json:"backend"`
-	ModuleType  string             `yaml:"module_type" json:"module_type"`
-	SinkName    string             `yaml:"sink_name" json:"sink_name"`
-	MonitorName string             `yaml:"monitor_name" json:"monitor_name"`
-	State       DeviceRuntimeState `yaml:"state" json:"state"`
-	Ownership   DeviceOwnership    `yaml:"ownership" json:"ownership"`
-	Policy      DevicePolicy       `yaml:"policy" json:"policy"`
+	ID           string             `yaml:"id" json:"id"`
+	BaseName     string             `yaml:"base_name,omitempty" json:"base_name,omitempty"`
+	Backend      string             `yaml:"backend" json:"backend"`
+	ModuleType   string             `yaml:"module_type" json:"module_type"`
+	SinkName     string             `yaml:"sink_name" json:"sink_name"`
+	MonitorName  string             `yaml:"monitor_name" json:"monitor_name"`
+	PlaybackName string             `yaml:"playback_name,omitempty" json:"playback_name,omitempty"`
+	CaptureName  string             `yaml:"capture_name,omitempty" json:"capture_name,omitempty"`
+	State        DeviceRuntimeState `yaml:"state" json:"state"`
+	Ownership    DeviceOwnership    `yaml:"ownership" json:"ownership"`
+	Policy       DevicePolicy       `yaml:"policy" json:"policy"`
 }
 
 type DeviceRuntimeState struct {
@@ -80,6 +85,15 @@ type DeviceRuntimeState struct {
 
 type DeviceOwnership struct {
 	CreatedBy string `yaml:"created_by" json:"created_by"`
+	SessionID string `yaml:"session_id,omitempty" json:"session_id,omitempty"`
+}
+
+type DeviceMetadata struct {
+	ID           string
+	BaseName     string
+	PlaybackName string
+	CaptureName  string
+	SessionID    string
 }
 
 type DevicePolicy struct {
@@ -303,17 +317,29 @@ func isNullSinkModule(moduleType string) bool {
 }
 
 func UpsertPresent(sinkName, monitorName, moduleID, owner string, policy DevicePolicy) error {
+	return UpsertPresentWithMetadata(sinkName, monitorName, moduleID, owner, policy, DeviceMetadata{})
+}
+
+func UpsertPresentWithMetadata(
+	sinkName, monitorName, moduleID, owner string,
+	policy DevicePolicy,
+	metadata DeviceMetadata,
+) error {
 	return withStateLock(func() error {
-		return upsertPresentUnlocked(sinkName, monitorName, moduleID, owner, policy)
+		return upsertPresentUnlocked(sinkName, monitorName, moduleID, owner, policy, metadata)
 	})
 }
 
-func upsertPresentUnlocked(sinkName, monitorName, moduleID, owner string, policy DevicePolicy) error {
+func upsertPresentUnlocked(
+	sinkName, monitorName, moduleID, owner string,
+	policy DevicePolicy,
+	metadata DeviceMetadata,
+) error {
 	state, err := Load()
 	if err != nil {
 		return err
 	}
-	upsertDevice(&state, presentDevice(sinkName, monitorName, moduleID, owner, policy))
+	upsertDevice(&state, presentDevice(sinkName, monitorName, moduleID, owner, policy, metadata))
 	return saveUnlocked(state)
 }
 
@@ -379,7 +405,7 @@ func upsertDevice(state *State, device Device) {
 func markObservedPresent(state *State, sinkName, monitorName, moduleID string) {
 	device, idx, ok := Find(*state, sinkName)
 	if !ok {
-		device = presentDevice(sinkName, monitorName, moduleID, RoleImported, safePolicy())
+		device = presentDevice(sinkName, monitorName, moduleID, RoleImported, safePolicy(), DeviceMetadata{})
 		state.Devices = append(state.Devices, device)
 		return
 	}
@@ -391,7 +417,7 @@ func markObservedPresent(state *State, sinkName, monitorName, moduleID string) {
 func markAbsent(state *State, sinkName, owner string) {
 	device, idx, ok := Find(*state, sinkName)
 	if !ok {
-		device = presentDevice(sinkName, "", "", owner, safePolicy())
+		device = presentDevice(sinkName, "", "", owner, safePolicy(), DeviceMetadata{})
 		idx = len(state.Devices)
 		state.Devices = append(state.Devices, device)
 	}
@@ -400,16 +426,27 @@ func markAbsent(state *State, sinkName, owner string) {
 	state.Devices[idx] = device
 }
 
-func presentDevice(sinkName, monitorName, moduleID, owner string, policy DevicePolicy) Device {
+func presentDevice(
+	sinkName, monitorName, moduleID, owner string,
+	policy DevicePolicy,
+	metadata DeviceMetadata,
+) Device {
+	id := metadata.ID
+	if id == "" {
+		id = DeviceID(sinkName)
+	}
 	return Device{
-		ID:          DeviceID(sinkName),
-		Backend:     BackendPulseAudio,
-		ModuleType:  ModuleNullSink,
-		SinkName:    sinkName,
-		MonitorName: monitorName,
-		State:       DeviceRuntimeState{Desired: DesiredPresent, Observed: ObservedPresent, ModuleID: moduleID},
-		Ownership:   DeviceOwnership{CreatedBy: owner},
-		Policy:      normalizePolicy(policy),
+		ID:           id,
+		BaseName:     metadata.BaseName,
+		Backend:      BackendPulseAudio,
+		ModuleType:   ModuleNullSink,
+		SinkName:     sinkName,
+		MonitorName:  monitorName,
+		PlaybackName: metadata.PlaybackName,
+		CaptureName:  metadata.CaptureName,
+		State:        DeviceRuntimeState{Desired: DesiredPresent, Observed: ObservedPresent, ModuleID: moduleID},
+		Ownership:    DeviceOwnership{CreatedBy: owner, SessionID: metadata.SessionID},
+		Policy:       normalizePolicy(policy),
 	}
 }
 
@@ -443,4 +480,20 @@ func safePolicy() DevicePolicy {
 
 func DeviceID(sinkName string) string {
 	return BackendPulseAudio + ":" + ModuleNullSink + ":" + sinkName
+}
+
+func NewSessionID() string {
+	return randomHexID("session")
+}
+
+func NewVirtualDeviceID() string {
+	return randomHexID("virtual")
+}
+
+func randomHexID(prefix string) string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	}
+	return prefix + "-" + hex.EncodeToString(b[:])
 }

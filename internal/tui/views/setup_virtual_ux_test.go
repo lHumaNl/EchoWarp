@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -26,8 +27,8 @@ func TestVirtualDeviceOverlayCopyUsesUserFriendlyTerms(t *testing.T) {
 	view := NewVirtualDeviceOverlay(false, echowarpSinkName).View(80)
 
 	assert.Contains(t, view, "Create Virtual Audio Device")
-	assert.Contains(t, view, "audio output named")
-	assert.Contains(t, view, "Monitor of EchoWarp")
+	assert.Contains(t, view, "Playback EchoWarp")
+	assert.Contains(t, view, "Capture EchoWarp")
 	assert.Contains(t, view, "[Create]")
 	assert.NotContains(t, view, "Virtual Microphone")
 	assert.NotContains(t, view, "PulseAudio virtual sink")
@@ -111,4 +112,40 @@ func TestFindPulseAudioSinkModuleMatchesOnlyExactEchoWarpSink(t *testing.T) {
 	}
 
 	assert.Equal(t, "12", moduleID)
+}
+
+func TestPulseAudioLoadModuleArgsUseSupportedNullSinkProperties(t *testing.T) {
+	vs := recent.VirtualSinkPreset{
+		SinkName:     "echowarp_studio_deadbeef",
+		PlaybackName: "Playback Studio",
+		CaptureName:  "Capture Studio",
+	}
+
+	args := pulseAudioLoadModuleArgs(vs)
+
+	assert.Equal(t, []string{
+		"load-module",
+		"module-null-sink",
+		"sink_name=echowarp_studio_deadbeef",
+		"sink_properties=device.description=Playback Studio",
+	}, args)
+	assert.NotContains(t, strings.Join(args, " "), "source_name=")
+	assert.NotContains(t, strings.Join(args, " "), "source_properties=")
+}
+
+func TestPulseAudioMonitorUpdateArgsUseMonitorProplistUpdate(t *testing.T) {
+	vs := recent.VirtualSinkPreset{
+		SinkName:     "echowarp_studio_deadbeef",
+		MonitorName:  "echowarp_studio_deadbeef.monitor",
+		CaptureName:  "Capture Studio",
+		PlaybackName: "Playback Studio",
+	}
+
+	args := pulseAudioUpdateMonitorArgs(vs)
+
+	assert.Equal(t, []string{
+		"update-source-proplist",
+		"echowarp_studio_deadbeef.monitor",
+		fmt.Sprintf("device.description=%s", vs.CaptureName),
+	}, args)
 }

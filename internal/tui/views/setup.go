@@ -164,6 +164,9 @@ type SetupModel struct {
 	virtualMicModule        string // PulseAudio module ID for automatic cleanup
 	virtualMicManageable    bool   // true when an exact EchoWarp sink can be managed
 	virtualMicManagedModule string // PulseAudio module ID for explicit user removal
+	virtualSessionID        string
+	trackedVirtualSinks     map[string]trackedVirtualSink
+	pendingLifecycleSink    recent.VirtualSinkPreset
 
 	// Virtual sink lifecycle preferences (set via overlay after creation)
 	virtualSinkOnStop              recent.SinkLifecycle // default: SinkDelete
@@ -178,6 +181,13 @@ type SetupModel struct {
 	// refreshDevicesFn re-enumerates audio devices from the OS.
 	// Set via WithDeviceRefreshFunc. Used after creating a virtual sink.
 	refreshDevicesFn func() ([]list.Item, error)
+}
+
+type trackedVirtualSink struct {
+	Preset             recent.VirtualSinkPreset
+	ModuleID           string
+	CreatedThisSession bool
+	Manageable         bool
 }
 
 // InputMode tracks the current keyboard input routing priority.
@@ -195,16 +205,18 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 	advFields := buildAdvancedFields(cfg)
 
 	m := SetupModel{
-		activeColumn:    ColumnDevices,
-		DeviceList:      deviceList,
-		IsInput:         isInput,
-		Fields:          fields,
-		AdvancedFields:  advFields,
-		cfg:             cfg,
-		width:           width,
-		height:          height,
-		serverList:      NewServerListModel(width/2, height),
-		presetDismissed: make(map[string]bool),
+		activeColumn:        ColumnDevices,
+		DeviceList:          deviceList,
+		IsInput:             isInput,
+		Fields:              fields,
+		AdvancedFields:      advFields,
+		cfg:                 cfg,
+		width:               width,
+		height:              height,
+		serverList:          NewServerListModel(width/2, height),
+		presetDismissed:     make(map[string]bool),
+		virtualSessionID:    virtualstate.NewSessionID(),
+		trackedVirtualSinks: make(map[string]trackedVirtualSink),
 	}
 
 	// Load recent servers (client mode only) before mDNS discovery
@@ -372,7 +384,6 @@ func (m *SetupModel) refreshTrackedVirtualSinkAfterEnumeratorInstall() {
 		return
 	}
 	m.refreshDevicesAfterVirtualSinkEnsure()
-	m.selectPendingVirtualSink(echowarpSinkName)
 }
 
 // WithVirtualSinkLifecycle sets cleanup/startup behavior for the virtual sink.
@@ -390,6 +401,8 @@ func (m SetupModel) WithVirtualSinkCreatedForSession(moduleID string) SetupModel
 	m.virtualMicManageable = true
 	m.virtualMicManagedModule = moduleID
 	m.virtualSinkLifecycleConfigured = true
+	m.ensureVirtualSessionID()
+	m.trackVirtualSink(moduleID, *m.defaultVirtualSinkPreset(), true)
 	return m
 }
 
@@ -409,14 +422,39 @@ type VirtualSinkCleanupPlan struct {
 
 // VirtualSinkCleanupPlan returns the safe cleanup action for the EchoWarp sink.
 func (m SetupModel) VirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
+	plans := m.VirtualSinkCleanupPlans()
+	if len(plans) > 0 {
+		return plans[0]
+	}
+	return VirtualSinkCleanupPlan{SinkName: echowarpSinkName}
+}
+
+func (m SetupModel) VirtualSinkCleanupPlans() []VirtualSinkCleanupPlan {
+	if len(m.trackedVirtualSinks) > 0 {
+		return m.trackedVirtualSinkCleanupPlans()
+	}
 	if m.virtualMicCreated {
-		return m.sessionVirtualSinkCleanupPlan()
+		return []VirtualSinkCleanupPlan{m.sessionVirtualSinkCleanupPlan()}
 	}
 	if plan, ok := m.stateVirtualSinkCleanupPlan(); ok {
-		return plan
+		return []VirtualSinkCleanupPlan{plan}
 	}
+	return nil
+}
 
-	return VirtualSinkCleanupPlan{SinkName: echowarpSinkName}
+func (m SetupModel) trackedVirtualSinkCleanupPlans() []VirtualSinkCleanupPlan {
+	plans := make([]VirtualSinkCleanupPlan, 0, len(m.trackedVirtualSinks))
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		tracked := m.trackedVirtualSinks[sinkName]
+		if !tracked.CreatedThisSession || tracked.Preset.OnStop != recent.SinkDelete {
+			continue
+		}
+		plans = append(plans, VirtualSinkCleanupPlan{
+			Delete: true, SinkName: tracked.Preset.SinkName,
+			ModuleID: tracked.ModuleID, AllowNameFallback: true,
+		})
+	}
+	return plans
 }
 
 func (m SetupModel) sessionVirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
@@ -432,6 +470,9 @@ func (m SetupModel) sessionVirtualSinkCleanupPlan() VirtualSinkCleanupPlan {
 func (m SetupModel) stateVirtualSinkCleanupPlan() (VirtualSinkCleanupPlan, bool) {
 	device, ok := m.currentRoleVirtualStateDevice()
 	if !ok || device.State.Desired != virtualstate.DesiredPresent {
+		return VirtualSinkCleanupPlan{}, false
+	}
+	if device.Ownership.SessionID == "" || device.Ownership.SessionID != m.virtualSessionID {
 		return VirtualSinkCleanupPlan{}, false
 	}
 	return VirtualSinkCleanupPlan{
@@ -451,9 +492,14 @@ func (m SetupModel) currentRoleVirtualStateDevice() (virtualstate.Device, bool) 
 
 // MarkVirtualSinkCleaned clears session-local module state after cleanup.
 func (m *SetupModel) MarkVirtualSinkCleaned() error {
-	if err := virtualstate.MarkAbsent(echowarpSinkName, m.virtualStateRole()); err != nil {
+	return m.MarkVirtualSinkCleanedByName(echowarpSinkName)
+}
+
+func (m *SetupModel) MarkVirtualSinkCleanedByName(sinkName string) error {
+	if err := virtualstate.MarkAbsent(sinkName, m.virtualStateRole()); err != nil {
 		return fmt.Errorf("persist virtual audio device cleanup: %w", err)
 	}
+	delete(m.trackedVirtualSinks, sinkName)
 	m.virtualMicCreated = false
 	m.virtualMicModule = ""
 	m.syncVirtualMicState()

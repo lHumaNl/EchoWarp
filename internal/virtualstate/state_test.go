@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,7 +56,7 @@ func TestMarkAbsentSuppressesFutureRecreate(t *testing.T) {
 
 func TestSaveAtomicFailureKeepsExistingYAML(t *testing.T) {
 	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
-	initial := State{Devices: []Device{presentDevice("existing", "monitor", "1", RoleServer, safePolicy())}}
+	initial := State{Devices: []Device{presentDevice("existing", "monitor", "1", RoleServer, safePolicy(), DeviceMetadata{})}}
 	require.NoError(t, Save(initial))
 
 	replaceErr := errors.New("replace failed")
@@ -63,7 +64,7 @@ func TestSaveAtomicFailureKeepsExistingYAML(t *testing.T) {
 	atomicReplaceFile = func(_, _ string) error { return replaceErr }
 	t.Cleanup(func() { atomicReplaceFile = replace })
 
-	err := Save(State{Devices: []Device{presentDevice("new", "monitor", "2", RoleClient, safePolicy())}})
+	err := Save(State{Devices: []Device{presentDevice("new", "monitor", "2", RoleClient, safePolicy(), DeviceMetadata{})}})
 
 	require.ErrorIs(t, err, replaceErr)
 	state := mustLoadState(t)
@@ -122,6 +123,62 @@ func TestFreshLockFileBlocksAcquire(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "acquire virtual state lock")
 	assert.FileExists(t, lockPath)
+}
+
+func TestLoadLegacyAndMultiDeviceStateMigration(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ECHOWARP_CONFIG_DIR", dir)
+	yamlData := strings.TrimSpace(`
+devices:
+  - sink_name: EchoWarp
+    monitor_name: Monitor of EchoWarp
+    state:
+      desired: present
+      observed: present
+      module_id: "42"
+    ownership:
+      created_by: server
+    policy:
+      on_stop: delete
+      on_start: recreate
+  - id: virtual-beefcafe
+    base_name: Studio
+    backend: pulseaudio
+    module_type: module-null-sink
+    sink_name: echowarp_studio_beefcafe
+    monitor_name: echowarp_studio_beefcafe.monitor
+    playback_name: Playback Studio
+    capture_name: Capture Studio
+    state:
+      desired: present
+      observed: present
+      module_id: "77"
+    ownership:
+      created_by: client
+      session_id: session-123
+    policy:
+      on_stop: keep
+      on_start: recreate
+`) + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, FileName), []byte(yamlData), 0o600))
+
+	state, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, Version, state.Version)
+	legacy, ok, err := LoadDevice("EchoWarp")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, DeviceID("EchoWarp"), legacy.ID)
+	assert.Equal(t, BackendPulseAudio, legacy.Backend)
+	assert.Equal(t, ModuleNullSink, legacy.ModuleType)
+	studio, ok, err := LoadDevice("echowarp_studio_beefcafe")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "virtual-beefcafe", studio.ID)
+	assert.Equal(t, "Studio", studio.BaseName)
+	assert.Equal(t, "Playback Studio", studio.PlaybackName)
+	assert.Equal(t, "Capture Studio", studio.CaptureName)
+	assert.Equal(t, "session-123", studio.Ownership.SessionID)
 }
 
 func concurrentUpsert(wg *sync.WaitGroup, start <-chan struct{}, errs chan<- error, index int) {

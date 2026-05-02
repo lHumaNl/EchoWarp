@@ -37,10 +37,15 @@ const (
 // VirtualSinkPreset stores parameters for a PulseAudio virtual sink
 // that was created alongside a device preset.
 type VirtualSinkPreset struct {
-	ModuleType string        `json:"module_type" yaml:"module_type"`
-	SinkName   string        `json:"sink_name" yaml:"sink_name"`
-	OnStop     SinkLifecycle `json:"on_stop" yaml:"on_stop"`
-	OnStart    SinkLifecycle `json:"on_start" yaml:"on_start"`
+	ID           string        `json:"id,omitempty" yaml:"id,omitempty"`
+	BaseName     string        `json:"base_name,omitempty" yaml:"base_name,omitempty"`
+	ModuleType   string        `json:"module_type" yaml:"module_type"`
+	SinkName     string        `json:"sink_name" yaml:"sink_name"`
+	MonitorName  string        `json:"monitor_name,omitempty" yaml:"monitor_name,omitempty"`
+	PlaybackName string        `json:"playback_name,omitempty" yaml:"playback_name,omitempty"`
+	CaptureName  string        `json:"capture_name,omitempty" yaml:"capture_name,omitempty"`
+	OnStop       SinkLifecycle `json:"on_stop" yaml:"on_stop"`
+	OnStart      SinkLifecycle `json:"on_start" yaml:"on_start"`
 }
 
 // PresetDevice represents a single device in a preset.

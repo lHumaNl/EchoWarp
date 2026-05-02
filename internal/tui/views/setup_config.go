@@ -468,25 +468,25 @@ func (m *SetupModel) applyDeviceSelection(devices []config.DeviceEntry) {
 	m.multiSelect = make(map[string]DeviceRoleSet)
 	m.mixInputs = make(map[string]map[string]bool)
 	// Build lookups: by ID and by Name, separated by device type.
-	inputByID := make(map[uint32]string, len(m.inputDevices))
+	inputByID := make(map[uint32]deviceRow, len(m.inputDevices))
 	inputByName := make(map[string]int)
 	for _, d := range m.inputDevices {
-		inputByID[d.ID] = d.Name
+		inputByID[d.ID] = d
 		inputByName[d.Name]++
 	}
-	outputByID := make(map[uint32]string, len(m.outputDevices))
+	outputByID := make(map[uint32]deviceRow, len(m.outputDevices))
 	outputByName := make(map[string]int)
 	for _, d := range m.outputDevices {
-		outputByID[d.ID] = d.Name
+		outputByID[d.ID] = d
 		outputByName[d.Name]++
 	}
 
 	for _, de := range devices {
-		var name string
+		var matched deviceRow
 		var ok bool
 		isInput := false
 
-		var byID map[uint32]string
+		var byID map[uint32]deviceRow
 		var byName map[string]int
 		switch de.Type {
 		case config.DeviceInput:
@@ -512,11 +512,11 @@ func (m *SetupModel) applyDeviceSelection(devices []config.DeviceEntry) {
 			}
 		}
 
-		name, ok = byID[de.ID]
+		matched, ok = byID[de.ID]
 		if !ok {
 			if de.Type == "" {
 				if de.Role != config.RoleCapture && de.Role != config.RolePlayback {
-					name, ok = outputByID[de.ID]
+					matched, ok = outputByID[de.ID]
 					if ok {
 						isInput = false
 					}
@@ -526,15 +526,14 @@ func (m *SetupModel) applyDeviceSelection(devices []config.DeviceEntry) {
 
 		if !ok && de.Name != "" {
 			if byName[de.Name] == 1 {
-				name = de.Name
-				ok = true
+				matched, ok = m.findDeviceByName(de.Name, isInput)
 			}
 		}
 
 		if !ok {
 			continue
 		}
-		key := deviceRow{Name: name, ID: de.ID, IsInput: isInput}.selectKey()
+		key := matched.selectKey()
 		roles := m.multiSelect[key]
 		if de.Role == config.RoleCapture {
 			roles.Capture = true
@@ -566,4 +565,17 @@ func (m *SetupModel) restoreMixInput(outputKey string, mixID uint32, mixName str
 			return
 		}
 	}
+}
+
+func (m SetupModel) findDeviceByName(name string, isInput bool) (deviceRow, bool) {
+	devices := m.outputDevices
+	if isInput {
+		devices = m.inputDevices
+	}
+	for _, device := range devices {
+		if device.Name == name {
+			return device, true
+		}
+	}
+	return deviceRow{}, false
 }
