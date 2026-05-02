@@ -134,12 +134,25 @@ func (m SetupModel) normalizeManagedVirtualDevice(
 	isInput bool,
 	context managedVirtualAliasContext,
 ) (string, bool) {
-	for _, vs := range context.presets {
-		if virtualSinkAliasMatches(name, isInput, vs, context) {
-			return managedVirtualDisplayName(isInput, vs), true
-		}
+	matches := matchingManagedVirtualPresets(name, isInput, context)
+	if len(matches) == 1 {
+		return managedVirtualDisplayName(isInput, matches[0]), true
 	}
 	return name, false
+}
+
+func matchingManagedVirtualPresets(
+	name string,
+	isInput bool,
+	context managedVirtualAliasContext,
+) []recent.VirtualSinkPreset {
+	matches := make([]recent.VirtualSinkPreset, 0, 1)
+	for _, vs := range context.presets {
+		if virtualSinkAliasMatches(name, isInput, vs, context) {
+			matches = append(matches, vs)
+		}
+	}
+	return matches
 }
 
 func (m SetupModel) managedVirtualSinkPresets() []recent.VirtualSinkPreset {
@@ -195,7 +208,7 @@ func virtualSinkAliasMatches(
 	if isInput {
 		return captureAliasMatches(name, vs, context)
 	}
-	return stringSetContains(playbackAliases(vs), name)
+	return playbackAliasMatches(name, vs, context)
 }
 
 func managedVirtualDisplayName(isInput bool, vs recent.VirtualSinkPreset) string {
@@ -207,6 +220,22 @@ func managedVirtualDisplayName(isInput bool, vs recent.VirtualSinkPreset) string
 
 func playbackAliases(vs recent.VirtualSinkPreset) []string {
 	return uniqueStrings(virtualSinkPlaybackName(vs), vs.SinkName)
+}
+
+func playbackAliasMatches(name string, vs recent.VirtualSinkPreset, context managedVirtualAliasContext) bool {
+	return stringSetContains(playbackAliases(vs), name) ||
+		truncatedPlaybackAliasMatches(name, vs, context)
+}
+
+func truncatedPlaybackAliasMatches(
+	name string,
+	vs recent.VirtualSinkPreset,
+	context managedVirtualAliasContext,
+) bool {
+	if name != "Playback" || virtualSinkPlaybackName(vs) == name {
+		return false
+	}
+	return context.moduleBackedSinks[vs.SinkName] || captureAliasInDeviceList(vs, context.deviceNames)
 }
 
 func captureAliasMatches(name string, vs recent.VirtualSinkPreset, context managedVirtualAliasContext) bool {
@@ -227,6 +256,15 @@ func truncatedCaptureAliasMatches(
 
 func playbackAliasInDeviceList(vs recent.VirtualSinkPreset, deviceNames map[string]bool) bool {
 	for _, alias := range playbackAliases(vs) {
+		if deviceNames[alias] {
+			return true
+		}
+	}
+	return false
+}
+
+func captureAliasInDeviceList(vs recent.VirtualSinkPreset, deviceNames map[string]bool) bool {
+	for _, alias := range captureAliases(vs) {
 		if deviceNames[alias] {
 			return true
 		}

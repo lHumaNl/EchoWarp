@@ -600,7 +600,7 @@ func (m SetupModel) currentRoleOwnsCurrentSessionPresentVirtualState(sinkName st
 
 func (m SetupModel) hasTrackedVirtualSink(sinkName string) bool {
 	if tracked, ok := m.trackedVirtualSinks[sinkName]; ok {
-		return tracked.ModuleID != ""
+		return tracked.isLiveModuleBacked()
 	}
 	return sinkName == echowarpSinkName && m.virtualMicCreated
 }
@@ -673,7 +673,7 @@ func (m SetupModel) virtualSinkOwnershipConflictError(sinkName string) error {
 	if err != nil || !conflict {
 		return err
 	}
-	return fmt.Errorf("%s virtual audio device already exists and is owned by %s", sinkName, owner)
+	return virtualSinkOwnershipError{sinkName: sinkName, owner: owner, reason: "already exists and is owned by"}
 }
 
 func (m SetupModel) otherRoleVirtualSinkOwner(sinkName string) (string, bool, error) {
@@ -730,6 +730,9 @@ func (m *SetupModel) markVirtualSinkCreated(moduleID string, vs recent.VirtualSi
 
 func (m *SetupModel) markVirtualSinkFound(moduleID string, vs recent.VirtualSinkPreset) {
 	m.trackVirtualSink(moduleID, vs, false)
+	tracked := m.trackedVirtualSinks[vs.SinkName]
+	tracked.LiveConfirmed = true
+	m.trackedVirtualSinks[vs.SinkName] = tracked
 	if m.virtualMicCreated {
 		m.virtualMicModule = moduleID
 	}
@@ -746,6 +749,7 @@ func (m *SetupModel) trackVirtualSink(moduleID string, vs recent.VirtualSinkPres
 	}
 	m.trackedVirtualSinks[vs.SinkName] = trackedVirtualSink{
 		Preset: vs, ModuleID: moduleID, CreatedThisSession: created, Manageable: true,
+		LiveConfirmed: created,
 	}
 }
 

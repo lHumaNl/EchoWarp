@@ -188,6 +188,7 @@ type trackedVirtualSink struct {
 	ModuleID           string
 	CreatedThisSession bool
 	Manageable         bool
+	LiveConfirmed      bool
 }
 
 // InputMode tracks the current keyboard input routing priority.

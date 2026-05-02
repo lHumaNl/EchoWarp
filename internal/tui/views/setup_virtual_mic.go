@@ -2,6 +2,7 @@ package views
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -38,9 +39,10 @@ func (m SetupModel) openVirtualMicOverlay() (SetupModel, tea.Cmd) {
 	}
 	m.syncVirtualMicState()
 	sinkName := m.defaultVirtualOverlaySinkName()
-	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicManageable, sinkName)
+	devices := m.virtualOverlayDevices()
+	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(len(devices) > 0, sinkName)
 	m.virtualDeviceOverlay.CaptureName = m.virtualOverlayCaptureName(sinkName)
-	m.virtualDeviceOverlay.SetDevices(m.virtualOverlayDevices())
+	m.virtualDeviceOverlay.SetDevices(devices)
 	m.overlay = SetupOverlayVirtualDevice
 	return m, nil
 }
@@ -49,18 +51,28 @@ func (m SetupModel) virtualOverlayDevices() []VirtualOverlayDevice {
 	devices := make([]VirtualOverlayDevice, 0, len(m.trackedVirtualSinks))
 	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
 		tracked := m.trackedVirtualSinks[sinkName]
-		if tracked.Manageable && tracked.ModuleID != "" {
-			devices = append(devices, virtualOverlayDevice(tracked.Preset))
+		if tracked.isLiveModuleBacked() {
+			devices = append(devices, m.virtualOverlayDevice(tracked.Preset))
 		}
 	}
 	return devices
 }
 
-func virtualOverlayDevice(vs recent.VirtualSinkPreset) VirtualOverlayDevice {
+func (m SetupModel) virtualOverlayDevice(vs recent.VirtualSinkPreset) VirtualOverlayDevice {
+	owner, removable := m.virtualOverlayDeviceOwnership(vs.SinkName)
 	return VirtualOverlayDevice{
-		SinkName: vs.SinkName, PlaybackName: virtualSinkPlaybackName(vs),
-		CaptureName: virtualSinkCaptureName(vs),
+		SinkName: vs.SinkName, BaseName: vs.BaseName,
+		PlaybackName: virtualSinkPlaybackName(vs), CaptureName: virtualSinkCaptureName(vs),
+		Owner: owner, Removable: removable,
 	}
+}
+
+func (m SetupModel) virtualOverlayDeviceOwnership(sinkName string) (string, bool) {
+	device, ok, err := virtualstate.LoadDevice(sinkName)
+	if err != nil || !ok {
+		return "", true
+	}
+	return device.Ownership.CreatedBy, !virtualstate.IsOtherRoleOwner(device, m.virtualStateRole())
 }
 
 func (m SetupModel) virtualOverlayCaptureName(sinkName string) string {
@@ -117,7 +129,7 @@ func pulseAudioLoadModuleArgs(vs recent.VirtualSinkPreset) []string {
 		"load-module",
 		"module-null-sink",
 		fmt.Sprintf("sink_name=%s", vs.SinkName),
-		fmt.Sprintf("sink_properties=device.description=%s", virtualSinkPlaybackName(vs)),
+		fmt.Sprintf("sink_properties=device.description=%s", pulseAudioQuotedValue(virtualSinkPlaybackName(vs))),
 	}
 }
 
@@ -125,8 +137,15 @@ func pulseAudioUpdateMonitorArgs(vs recent.VirtualSinkPreset) []string {
 	return []string{
 		"update-source-proplist",
 		virtualSinkMonitorName(vs),
-		fmt.Sprintf("device.description=%s", virtualSinkCaptureName(vs)),
+		fmt.Sprintf("device.description=%s", pulseAudioQuotedValue(virtualSinkCaptureName(vs))),
 	}
+}
+
+func pulseAudioQuotedValue(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `"`, `\"`)
+	return `"` + value + `"`
 }
 
 // RemovePulseAudioSink unloads a PulseAudio module by ID.
@@ -319,7 +338,11 @@ func (m *SetupModel) discoverManageableVirtualSink() (bool, error) {
 
 func (m SetupModel) hasModuleBackedTrackedVirtualSink(sinkName string) bool {
 	tracked, ok := m.trackedVirtualSinks[sinkName]
-	return ok && tracked.Manageable && tracked.ModuleID != ""
+	return ok && tracked.isLiveModuleBacked()
+}
+
+func (tracked trackedVirtualSink) isLiveModuleBacked() bool {
+	return tracked.Manageable && tracked.ModuleID != "" && tracked.LiveConfirmed
 }
 
 func (m *SetupModel) trackDiscoveredVirtualSink(moduleID string, vs recent.VirtualSinkPreset) error {
@@ -364,41 +387,29 @@ func (m SetupModel) virtualSinkDiscoveryPresets() []recent.VirtualSinkPreset {
 	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
 		addPreset(m.trackedVirtualSinks[sinkName].Preset)
 	}
-	for _, device := range m.currentRoleVirtualStateDevices() {
+	for _, device := range m.virtualStateDiscoveryDevices() {
 		addPreset(virtualSinkPresetFromStateDevice(device))
 	}
 	addPreset(*m.defaultVirtualSinkPreset())
 	return presets
 }
 
-func (m SetupModel) currentRoleVirtualStateDevices() []virtualstate.Device {
+func (m SetupModel) virtualStateDiscoveryDevices() []virtualstate.Device {
 	state, err := virtualstate.Load()
 	if err != nil {
 		return nil
 	}
 	devices := make([]virtualstate.Device, 0, len(state.Devices))
 	for _, device := range state.Devices {
-		if m.shouldDiscoverStateDevice(device) {
+		if isDiscoverableStateDevice(device) {
 			devices = append(devices, device)
 		}
 	}
 	sort.Slice(devices, func(i, j int) bool { return devices[i].SinkName < devices[j].SinkName })
 	return devices
 }
-
-func (m SetupModel) shouldDiscoverStateDevice(device virtualstate.Device) bool {
-	if !m.isDiscoverableStateDevice(device) {
-		return false
-	}
-	if shouldPreserveSessionVirtualSink(device.SinkName) {
-		return true
-	}
-	return device.Ownership.SessionID == "" || device.Ownership.SessionID == m.virtualSessionID
-}
-
-func (m SetupModel) isDiscoverableStateDevice(device virtualstate.Device) bool {
+func isDiscoverableStateDevice(device virtualstate.Device) bool {
 	return (device.ModuleType == "" || device.ModuleType == virtualstate.ModuleNullSink) &&
-		virtualstate.IsCurrentRoleOwner(device, m.virtualStateRole()) &&
 		device.State.Desired != virtualstate.DesiredAbsent
 }
 
@@ -414,7 +425,7 @@ func (m SetupModel) sortedTrackedVirtualSinkNames() []string {
 func (m SetupModel) firstTrackedManageableVirtualSink() (string, trackedVirtualSink, bool) {
 	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
 		tracked := m.trackedVirtualSinks[sinkName]
-		if tracked.Manageable && tracked.ModuleID != "" {
+		if tracked.isLiveModuleBacked() {
 			return sinkName, tracked, true
 		}
 	}
@@ -500,7 +511,22 @@ func (m SetupModel) ensureVirtualSinkRemovalAllowed(sinkName string) error {
 }
 
 func otherRoleVirtualMicRemoveError(sinkName, owner string) error {
-	return fmt.Errorf("%s virtual audio device is owned by %s", sinkName, owner)
+	return virtualSinkOwnershipError{sinkName: sinkName, owner: owner, reason: "is owned by"}
+}
+
+func isVirtualSinkOwnershipError(err error) bool {
+	var ownershipErr virtualSinkOwnershipError
+	return errors.As(err, &ownershipErr)
+}
+
+type virtualSinkOwnershipError struct {
+	sinkName string
+	owner    string
+	reason   string
+}
+
+func (e virtualSinkOwnershipError) Error() string {
+	return fmt.Sprintf("%s virtual audio device %s %s", e.sinkName, e.reason, e.owner)
 }
 
 func (m *SetupModel) persistVirtualSinkPresent(moduleID string, vs recent.VirtualSinkPreset) error {

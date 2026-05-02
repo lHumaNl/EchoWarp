@@ -16,10 +16,37 @@ func TestVirtualOverlay_CreateConfirmation(t *testing.T) {
 
 	view := overlay.View(80)
 	assert.Contains(t, view, "Create Virtual Audio Device")
+	assert.Contains(t, view, "ctrl+u clears")
+	assert.Contains(t, view, "EchoWarp▌")
 	assert.Contains(t, view, "Playback EchoWarp")
 	assert.Contains(t, view, "[Create]")
 	assert.Contains(t, view, "[Cancel]")
 	assert.Contains(t, view, "Capture EchoWarp")
+}
+
+func TestVirtualOverlay_CustomNameTypingUpdatesPreview(t *testing.T) {
+	overlay := NewVirtualDeviceOverlay(false, "EchoWarp")
+
+	action := overlay.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Discord")})
+	view := overlay.View(80)
+
+	assert.Equal(t, VirtualActionNone, action)
+	assert.Equal(t, "Discord", overlay.BaseName())
+	assert.Contains(t, view, "Discord▌")
+	assert.Contains(t, view, "Playback Discord")
+	assert.Contains(t, view, "Capture Discord")
+}
+
+func TestVirtualOverlay_NameEditingBackspaceAndClear(t *testing.T) {
+	overlay := NewVirtualDeviceOverlay(false, "EchoWarp")
+	overlay.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Discord")})
+
+	overlay.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	assert.Equal(t, "Discor", overlay.BaseName())
+	overlay.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+
+	assert.Empty(t, overlay.NameInput)
+	assert.Contains(t, overlay.View(80), "type name…▌")
 }
 
 func TestVirtualOverlay_CreateCompositeNotClippedAtSmallHeight(t *testing.T) {
@@ -62,28 +89,59 @@ func TestVirtualOverlay_Remove_Enter(t *testing.T) {
 
 func TestVirtualOverlay_CreateNewWhenDevicesExist(t *testing.T) {
 	overlay := NewVirtualDeviceOverlay(true, "EchoWarp")
-	overlay.SetDevices([]VirtualOverlayDevice{{SinkName: "EchoWarp"}})
+	overlay.SetDevices([]VirtualOverlayDevice{{SinkName: "EchoWarp", BaseName: "EchoWarp", Removable: true}})
 
 	action := overlay.Update(tea.KeyMsg{Type: tea.KeyDown})
 	assert.Equal(t, VirtualActionNone, action)
 	action = overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	assert.Equal(t, VirtualActionNone, action)
 	assert.True(t, overlay.IsCreateMode())
-	assert.Contains(t, overlay.View(80), "Playback EchoWarp")
+	assert.Equal(t, "EchoWarp 2", overlay.BaseName())
+	assert.Contains(t, overlay.View(80), "Playback EchoWarp 2")
 
 	action = overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	assert.Equal(t, VirtualActionCreate, action)
 }
 
+func TestVirtualOverlay_CreateNewSuggestsNextEchoWarpSuffix(t *testing.T) {
+	overlay := NewVirtualDeviceOverlay(true, "EchoWarp")
+	overlay.SetDevices([]VirtualOverlayDevice{
+		{SinkName: "EchoWarp", BaseName: "EchoWarp", Removable: true},
+		{SinkName: "custom", BaseName: "EchoWarp 2", Removable: true},
+	})
+	overlay.RowIdx = len(overlay.Devices)
+
+	action := overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Equal(t, VirtualActionNone, action)
+	assert.Equal(t, "EchoWarp 3", overlay.BaseName())
+}
+
 func TestVirtualOverlay_RemoveTargetsSelectedSink(t *testing.T) {
 	overlay := NewVirtualDeviceOverlay(true, "studio-a")
-	overlay.SetDevices([]VirtualOverlayDevice{{SinkName: "studio-a"}, {SinkName: "studio-b"}})
+	overlay.SetDevices([]VirtualOverlayDevice{
+		{SinkName: "studio-a", Removable: true},
+		{SinkName: "studio-b", Removable: true},
+	})
 
 	overlay.Update(tea.KeyMsg{Type: tea.KeyDown})
 	action := overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	assert.Equal(t, VirtualActionRemove, action)
 	assert.Equal(t, "studio-b", overlay.SinkName)
+}
+
+func TestVirtualOverlay_NonRemovableDeviceShowsOwnershipError(t *testing.T) {
+	overlay := NewVirtualDeviceOverlay(true, "studio-a")
+	overlay.SetDevices([]VirtualOverlayDevice{{SinkName: "studio-a", Owner: "server"}})
+
+	view := overlay.View(80)
+	action := overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Contains(t, view, "owned by server (not removable)")
+	assert.Equal(t, VirtualActionNone, action)
+	assert.Equal(t, "studio-a virtual audio device is owned by server", overlay.Error)
+	assert.NotContains(t, overlay.View(80), "pulseaudio-utils")
 }
 
 func TestVirtualOverlay_Cancel(t *testing.T) {

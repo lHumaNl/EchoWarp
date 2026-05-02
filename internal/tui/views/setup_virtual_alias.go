@@ -1,9 +1,6 @@
 package views
 
-import (
-	"github.com/lHumaNl/echowarp/internal/recent"
-	"github.com/lHumaNl/echowarp/internal/virtualstate"
-)
+import "github.com/lHumaNl/echowarp/internal/recent"
 
 type managedVirtualAliasContext struct {
 	presets           []recent.VirtualSinkPreset
@@ -32,21 +29,8 @@ func (m SetupModel) currentDeviceListNames() map[string]bool {
 func (m SetupModel) moduleBackedVirtualSinkNames() map[string]bool {
 	names := make(map[string]bool)
 	for sinkName, tracked := range m.trackedVirtualSinks {
-		if tracked.Manageable && tracked.ModuleID != "" {
+		if tracked.isLiveModuleBacked() {
 			names[sinkName] = true
-		}
-	}
-	return appendStateModuleBackedVirtualSinkNames(names)
-}
-
-func appendStateModuleBackedVirtualSinkNames(names map[string]bool) map[string]bool {
-	state, err := virtualstate.Load()
-	if err != nil {
-		return names
-	}
-	for _, device := range state.Devices {
-		if stateDeviceClassifiesVirtual(device) && device.State.ModuleID != "" {
-			names[device.SinkName] = true
 		}
 	}
 	return names

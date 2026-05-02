@@ -646,7 +646,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				vs := m.virtualDeviceOverlayPreset()
 				options := virtualSinkEnsureOptions{explicitCreate: true}
 				if err := m.ensureVirtualSink(vs, options); err != nil {
-					m.virtualDeviceOverlay.Error = err.Error()
+					m.virtualDeviceOverlay.SetError(err)
 					return m, nil
 				}
 				m.pendingLifecycleSink = vs
@@ -657,7 +657,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				return m, nil
 			case VirtualActionRemove:
 				if err := m.removeManagedVirtualSink(m.virtualDeviceOverlay.SinkName); err != nil {
-					m.virtualDeviceOverlay.Error = err.Error()
+					m.virtualDeviceOverlay.SetError(err)
 					return m, nil
 				}
 				m.overlay = SetupOverlayNone

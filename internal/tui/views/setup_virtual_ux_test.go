@@ -127,7 +127,7 @@ func TestPulseAudioLoadModuleArgsUseSupportedNullSinkProperties(t *testing.T) {
 		"load-module",
 		"module-null-sink",
 		"sink_name=echowarp_studio_deadbeef",
-		"sink_properties=device.description=Playback Studio",
+		`sink_properties=device.description="Playback Studio"`,
 	}, args)
 	assert.NotContains(t, strings.Join(args, " "), "source_name=")
 	assert.NotContains(t, strings.Join(args, " "), "source_properties=")
@@ -146,6 +146,17 @@ func TestPulseAudioMonitorUpdateArgsUseMonitorProplistUpdate(t *testing.T) {
 	assert.Equal(t, []string{
 		"update-source-proplist",
 		"echowarp_studio_deadbeef.monitor",
-		fmt.Sprintf("device.description=%s", vs.CaptureName),
+		fmt.Sprintf(`device.description="%s"`, vs.CaptureName),
 	}, args)
+}
+
+func TestPulseAudioDescriptionArgsEscapeQuotedValues(t *testing.T) {
+	vs := recent.VirtualSinkPreset{
+		SinkName:     "echowarp_studio_deadbeef",
+		PlaybackName: "Playback Studio \"A\" \\ Main",
+	}
+
+	args := pulseAudioLoadModuleArgs(vs)
+
+	assert.Equal(t, `sink_properties=device.description="Playback Studio \"A\" \\ Main"`, args[3])
 }

@@ -377,9 +377,10 @@ func TestFreshLaunchOverlayDiscoversAllManagedVirtualSinks(t *testing.T) {
 }
 
 func TestVirtualOverlayUsesCustomCaptureNameForExistingSink(t *testing.T) {
-	stubVirtualAudioFuncs(t)
+	stub := stubVirtualAudioFuncs(t)
 	m := newTestSetupModel(config.ModeServer)
 	vs := customVirtualSinkPreset("custom_capture", "Capture Rig")
+	stub.foundModules = map[string]string{vs.SinkName: "45"}
 	m.trackVirtualSink("45", vs, false)
 	m.syncVirtualMicState()
 
@@ -592,6 +593,75 @@ func TestTruncatedMonitorOfPlaybackAliasUsesPlaybackPair(t *testing.T) {
 	require.Len(t, m.inputDevices, 1)
 	assert.Equal(t, vs.CaptureName, m.inputDevices[0].Name)
 	assert.True(t, m.inputDevices[0].IsVirtual)
+}
+
+func TestTruncatedPlaybackAliasUsesModuleEvidence(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_playback_truncated", "EchoWarp")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "42", vs)
+	stub.foundModules = map[string]string{vs.SinkName: "42"}
+	m.syncVirtualMicState()
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Playback", id: 11, isInput: false},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.outputDevices, 1)
+	assert.Equal(t, vs.PlaybackName, m.outputDevices[0].Name)
+	assert.True(t, m.outputDevices[0].IsVirtual)
+	assert.Contains(t, formatDeviceInfo(m.outputDevices[0]), "adaptive")
+}
+
+func TestTruncatedPlaybackAliasIgnoresStaleStateModuleID(t *testing.T) {
+	stubVirtualAudioFuncs(t)
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_playback_stale", "EchoWarp")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "42", vs)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Playback", id: 11, isInput: false},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.outputDevices, 1)
+	assert.Equal(t, "Playback", m.outputDevices[0].Name)
+	assert.False(t, m.outputDevices[0].IsVirtual)
+}
+
+func TestTruncatedPlaybackAliasRequiresStrongEvidence(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_playback_state", "EchoWarp")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "", vs)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Playback", id: 11, isInput: false},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.outputDevices, 1)
+	assert.Equal(t, "Playback", m.outputDevices[0].Name)
+	assert.False(t, m.outputDevices[0].IsVirtual)
+}
+
+func TestTruncatedPlaybackAliasDoesNotMapWhenAmbiguous(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newTestSetupModel(config.ModeServer)
+	first := customVirtualSinkPreset("custom_playback_one", "EchoWarp One")
+	second := customVirtualSinkPreset("custom_playback_two", "EchoWarp Two")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "41", first)
+	writeCustomVirtualState(t, virtualstate.RoleServer, "42", second)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Playback", id: 11, isInput: false},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.outputDevices, 1)
+	assert.Equal(t, "Playback", m.outputDevices[0].Name)
+	assert.False(t, m.outputDevices[0].IsVirtual)
 }
 
 func newInputOnlyRestoreModel() SetupModel {

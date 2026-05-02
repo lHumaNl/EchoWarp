@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -147,6 +148,59 @@ func TestServerCannotExplicitlyRemoveClientOwnedSink(t *testing.T) {
 	assert.Equal(t, "24", device.State.ModuleID)
 	assert.Equal(t, recent.SinkKeep, device.Policy.OnStop)
 	assert.Equal(t, recent.SinkKeep, device.Policy.OnStart)
+}
+
+func TestClientDiscoversServerOwnedCustomSinkButCleanupIsEmpty(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	vs := customVirtualSinkPreset("echowarp_server_studio", "Server Studio")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "42", vs)
+	stub.foundModules = map[string]string{vs.SinkName: "42"}
+	client := newVirtualStateModel(config.ModeClient)
+
+	client.syncVirtualMicState()
+	m, _ := client.openVirtualMicOverlay()
+	tracked, ok := client.trackedVirtualSinks[vs.SinkName]
+
+	require.True(t, ok)
+	assert.True(t, tracked.Manageable)
+	assert.Equal(t, "42", tracked.ModuleID)
+	assert.True(t, client.virtualMicManageable)
+	assert.Empty(t, client.VirtualSinkCleanupPlans())
+	require.NotNil(t, m.virtualDeviceOverlay)
+	require.Len(t, m.virtualDeviceOverlay.Devices, 1)
+	assert.Equal(t, vs.SinkName, m.virtualDeviceOverlay.Devices[0].SinkName)
+	assert.False(t, m.virtualDeviceOverlay.Devices[0].Removable)
+}
+
+func TestClientOverlayShowsServerOwnedSinkAsNonRemovable(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	vs := customVirtualSinkPreset("echowarp_server_owned", "Server Owned")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "42", vs)
+	stub.foundModules = map[string]string{vs.SinkName: "42"}
+	client := newVirtualStateModel(config.ModeClient)
+	m, _ := client.openVirtualMicOverlay()
+
+	view := m.virtualDeviceOverlay.View(90)
+	action := m.virtualDeviceOverlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Contains(t, view, "owned by server (not removable)")
+	assert.Equal(t, VirtualActionNone, action)
+	assert.Contains(t, m.virtualDeviceOverlay.Error, "owned by server")
+	assert.Empty(t, stub.removedIDs)
+}
+
+func TestVirtualOverlayDoesNotListStaleStateSink(t *testing.T) {
+	stubVirtualAudioFuncs(t)
+	vs := customVirtualSinkPreset("echowarp_stale_state", "Stale State")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "42", vs)
+	m := newVirtualStateModel(config.ModeServer)
+
+	m, _ = m.openVirtualMicOverlay()
+
+	require.NotNil(t, m.virtualDeviceOverlay)
+	assert.Empty(t, m.virtualDeviceOverlay.Devices)
+	assert.True(t, m.virtualDeviceOverlay.IsCreateMode())
+	assert.NotContains(t, m.virtualDeviceOverlay.View(90), "Remove "+vs.PlaybackName)
 }
 
 func TestCurrentRoleExplicitRemoveDeletesVirtualStateRecord(t *testing.T) {

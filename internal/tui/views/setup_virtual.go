@@ -30,22 +30,27 @@ const (
 // VirtualOverlayDevice is an existing virtual audio device shown in manage mode.
 type VirtualOverlayDevice struct {
 	SinkName     string
+	BaseName     string
 	CaptureName  string
 	PlaybackName string
+	Owner        string
+	Removable    bool
 }
 
 // VirtualDeviceOverlay shows a confirmation screen for creating/removing
 // a Linux virtual audio device.
 type VirtualDeviceOverlay struct {
-	Exists      bool   // true if virtual mic already created
-	SinkName    string // e.g. "EchoWarp"
-	CaptureName string // user-facing capture device name for existing sinks
-	NameInput   string // user-provided base name for new virtual devices
-	ButtonIdx   int    // 0=Create/Remove, 1=Cancel
-	RowIdx      int    // selected existing device or create-new row in manage mode
-	Error       string // error from pactl (if any)
-	Devices     []VirtualOverlayDevice
-	mode        virtualOverlayMode
+	Exists             bool   // true if virtual mic already created
+	SinkName           string // e.g. "EchoWarp"
+	CaptureName        string // user-facing capture device name for existing sinks
+	NameInput          string // user-provided base name for new virtual devices
+	ButtonIdx          int    // 0=Create/Remove, 1=Cancel
+	RowIdx             int    // selected existing device or create-new row in manage mode
+	Error              string // error from pactl (if any)
+	Devices            []VirtualOverlayDevice
+	NameEdited         bool
+	NonActionableError bool
+	mode               virtualOverlayMode
 }
 
 // NewVirtualDeviceOverlay creates the overlay.
@@ -57,7 +62,7 @@ func NewVirtualDeviceOverlay(exists bool, sinkName string) *VirtualDeviceOverlay
 	}
 	if exists {
 		overlay.mode = virtualOverlayModeManage
-		overlay.SetDevices([]VirtualOverlayDevice{{SinkName: sinkName}})
+		overlay.SetDevices([]VirtualOverlayDevice{{SinkName: sinkName, Removable: true}})
 	}
 	return overlay
 }
@@ -65,7 +70,7 @@ func NewVirtualDeviceOverlay(exists bool, sinkName string) *VirtualDeviceOverlay
 func (v *VirtualDeviceOverlay) SetDevices(devices []VirtualOverlayDevice) {
 	v.Devices = devices
 	if len(v.Devices) == 0 && v.Exists && v.SinkName != "" {
-		v.Devices = []VirtualOverlayDevice{{SinkName: v.SinkName}}
+		v.Devices = []VirtualOverlayDevice{{SinkName: v.SinkName, Removable: true}}
 	}
 	if v.RowIdx > len(v.Devices) {
 		v.RowIdx = len(v.Devices)
@@ -127,13 +132,11 @@ func (v *VirtualDeviceOverlay) Update(msg tea.KeyMsg) VirtualAction {
 			v.RowIdx++
 		}
 	case tea.KeyBackspace:
-		if v.mode == virtualOverlayModeCreate && v.NameInput != "" {
-			v.NameInput = v.NameInput[:len(v.NameInput)-1]
-		}
+		v.backspaceNameInput()
+	case tea.KeyCtrlU:
+		v.clearNameInput()
 	case tea.KeyRunes:
-		if v.mode == virtualOverlayModeCreate {
-			v.NameInput += string(msg.Runes)
-		}
+		v.appendNameInput(string(msg.Runes))
 	}
 
 	return VirtualActionNone
@@ -143,9 +146,15 @@ func (v *VirtualDeviceOverlay) updateManageEnter() VirtualAction {
 	if v.RowIdx == len(v.Devices) {
 		v.mode = virtualOverlayModeCreate
 		v.ButtonIdx = 0
+		v.NameInput = v.suggestCreateBaseName()
+		v.NameEdited = false
 		return VirtualActionNone
 	}
 	if selected, ok := v.selectedDevice(); ok {
+		if !selected.Removable {
+			v.setNonActionableError(nonRemovableVirtualDeviceMessage(selected))
+			return VirtualActionNone
+		}
 		v.SinkName = selected.SinkName
 		v.CaptureName = selected.CaptureName
 		return VirtualActionRemove
@@ -198,9 +207,12 @@ func (v *VirtualDeviceOverlay) viewCreate(contentW int) string {
 
 	sb.WriteString(styles.SetupDimValue.Render(
 		"Creates playback/capture virtual devices."))
+	sb.WriteString("\n")
+	sb.WriteString(styles.SetupDimValue.Render(
+		"Type a custom name, backspace edits, ctrl+u clears."))
 	sb.WriteString("\n\n")
 	sb.WriteString(styles.SetupDimValue.Render("Name: "))
-	sb.WriteString(styles.ConnParamValue.Render(v.BaseName()))
+	sb.WriteString(styles.ConnParamValue.Render(v.renderNameInput()))
 	sb.WriteString("\n")
 	sb.WriteString(styles.SetupDimValue.Render("Playback: "))
 	sb.WriteString(styles.ConnParamValue.Render("Playback " + v.BaseName()))
@@ -233,11 +245,19 @@ func (v *VirtualDeviceOverlay) viewManage(contentW int) string {
 }
 
 func (v *VirtualDeviceOverlay) renderDeviceRow(index int, device VirtualOverlayDevice) string {
-	label := fmt.Sprintf("Remove %s", deviceDisplayName(device))
+	label := v.deviceRowLabel(device)
 	if v.RowIdx == index {
 		return styles.SetupReadyHint.Render("› " + label)
 	}
 	return styles.SetupDimValue.Render("  " + label)
+}
+
+func (v *VirtualDeviceOverlay) deviceRowLabel(device VirtualOverlayDevice) string {
+	name := deviceDisplayName(device)
+	if device.Removable {
+		return fmt.Sprintf("Remove %s", name)
+	}
+	return fmt.Sprintf("%s — owned by %s (not removable)", name, deviceOwner(device))
 }
 
 func (v *VirtualDeviceOverlay) renderCreateRow() string {
@@ -272,15 +292,107 @@ func deviceDisplayName(device VirtualOverlayDevice) string {
 	return device.SinkName
 }
 
+func nonRemovableVirtualDeviceMessage(device VirtualOverlayDevice) string {
+	return fmt.Sprintf("%s virtual audio device is owned by %s", device.SinkName, deviceOwner(device))
+}
+
+func (v *VirtualDeviceOverlay) SetError(err error) {
+	if err == nil {
+		return
+	}
+	v.Error = err.Error()
+	v.NonActionableError = isVirtualSinkOwnershipError(err)
+}
+
+func (v *VirtualDeviceOverlay) setNonActionableError(message string) {
+	v.Error = message
+	v.NonActionableError = true
+}
+
+func deviceOwner(device VirtualOverlayDevice) string {
+	if device.Owner != "" {
+		return device.Owner
+	}
+	return "another role"
+}
+
+func (v *VirtualDeviceOverlay) renderNameInput() string {
+	if strings.TrimSpace(v.NameInput) == "" {
+		return "type name…▌"
+	}
+	return v.BaseName() + "▌"
+}
+
+func (v *VirtualDeviceOverlay) appendNameInput(text string) {
+	if v.mode != virtualOverlayModeCreate {
+		return
+	}
+	if !v.NameEdited {
+		v.NameInput = ""
+		v.NameEdited = true
+	}
+	v.NameInput += text
+}
+
+func (v *VirtualDeviceOverlay) backspaceNameInput() {
+	if v.mode != virtualOverlayModeCreate || v.NameInput == "" {
+		return
+	}
+	v.NameEdited = true
+	runes := []rune(v.NameInput)
+	v.NameInput = string(runes[:len(runes)-1])
+}
+
+func (v *VirtualDeviceOverlay) clearNameInput() {
+	if v.mode != virtualOverlayModeCreate {
+		return
+	}
+	v.NameEdited = true
+	v.NameInput = ""
+}
+
+func (v *VirtualDeviceOverlay) suggestCreateBaseName() string {
+	used := v.usedVirtualBaseNames()
+	if !used[defaultVirtualBaseName] {
+		return defaultVirtualBaseName
+	}
+	for suffix := 2; ; suffix++ {
+		candidate := fmt.Sprintf("%s %d", defaultVirtualBaseName, suffix)
+		if !used[candidate] {
+			return candidate
+		}
+	}
+}
+
+func (v *VirtualDeviceOverlay) usedVirtualBaseNames() map[string]bool {
+	used := make(map[string]bool, len(v.Devices))
+	for _, device := range v.Devices {
+		if baseName := virtualOverlayDeviceBaseName(device); baseName != "" {
+			used[baseName] = true
+		}
+	}
+	return used
+}
+
+func virtualOverlayDeviceBaseName(device VirtualOverlayDevice) string {
+	if device.BaseName != "" {
+		return normalizeVirtualBaseName(device.BaseName)
+	}
+	if baseName, ok := strings.CutPrefix(device.PlaybackName, "Playback "); ok {
+		return normalizeVirtualBaseName(baseName)
+	}
+	if device.SinkName == echowarpSinkName {
+		return defaultVirtualBaseName
+	}
+	return ""
+}
+
 func (v *VirtualDeviceOverlay) viewError(contentW int) string {
 	var sb strings.Builder
 
 	sb.WriteString(styles.ConnParamValue.Render("✗ " + v.Error))
 	sb.WriteString("\n\n")
-	sb.WriteString(styles.SetupDimValue.Render("Make sure PulseAudio is installed:"))
-	sb.WriteString("\n")
-	sb.WriteString(styles.ConnParamValue.Render("  sudo apt install pulseaudio-utils"))
-	sb.WriteString("\n\n")
+	v.renderErrorGuidance(&sb)
 
 	okBtn := styles.SetupReadyHint.Render("[OK]")
 	btnW := lipgloss.Width(okBtn)
@@ -291,6 +403,18 @@ func (v *VirtualDeviceOverlay) viewError(contentW int) string {
 	sb.WriteString(strings.Repeat(" ", pad) + okBtn)
 
 	return sb.String()
+}
+
+func (v *VirtualDeviceOverlay) renderErrorGuidance(sb *strings.Builder) {
+	if v.NonActionableError {
+		sb.WriteString(styles.SetupDimValue.Render("This device cannot be removed from this EchoWarp role."))
+		sb.WriteString("\n\n")
+		return
+	}
+	sb.WriteString(styles.SetupDimValue.Render("Make sure PulseAudio is installed:"))
+	sb.WriteString("\n")
+	sb.WriteString(styles.ConnParamValue.Render("  sudo apt install pulseaudio-utils"))
+	sb.WriteString("\n\n")
 }
 
 func (v *VirtualDeviceOverlay) renderButtons(leftLabel, rightLabel string, contentW int) string {
