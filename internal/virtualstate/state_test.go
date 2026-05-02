@@ -200,6 +200,17 @@ devices:
 	assert.Equal(t, "session-123", studio.Ownership.SessionID)
 }
 
+func TestLoadReturnsErrorWhenConfigDirIsFile(t *testing.T) {
+	dirFile := filepath.Join(t.TempDir(), "config-file")
+	require.NoError(t, os.WriteFile(dirFile, []byte("not a directory"), 0o600))
+	t.Setenv("ECHOWARP_CONFIG_DIR", dirFile)
+
+	_, err := Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a directory")
+}
+
 func concurrentUpsert(wg *sync.WaitGroup, start <-chan struct{}, errs chan<- error, index int) {
 	defer wg.Done()
 	<-start

@@ -107,6 +107,9 @@ func FilePath() string {
 }
 
 func Load() (State, error) {
+	if err := validateStateDir(config.EchoWarpDir()); err != nil {
+		return State{}, err
+	}
 	data, err := os.ReadFile(FilePath())
 	if errors.Is(err, os.ErrNotExist) {
 		return State{Version: Version}, nil
@@ -115,6 +118,20 @@ func Load() (State, error) {
 		return State{}, err
 	}
 	return parseState(data)
+}
+
+func validateStateDir(dir string) error {
+	info, err := os.Stat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("virtual state directory %s is not a directory", dir)
+	}
+	return nil
 }
 
 func Save(state State) error {
