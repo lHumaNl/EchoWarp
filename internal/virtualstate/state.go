@@ -364,6 +364,21 @@ func MarkAbsent(sinkName, owner string) error {
 	})
 }
 
+func DeleteDevice(sinkName string) error {
+	return withStateLock(func() error {
+		return deleteDeviceUnlocked(sinkName)
+	})
+}
+
+func deleteDeviceUnlocked(sinkName string) error {
+	state, err := Load()
+	if err != nil {
+		return err
+	}
+	deleteDevice(&state, sinkName)
+	return saveUnlocked(state)
+}
+
 func markAbsentUnlocked(sinkName, owner string) error {
 	state, err := Load()
 	if err != nil {
@@ -424,6 +439,14 @@ func markAbsent(state *State, sinkName, owner string) {
 	device.State = DeviceRuntimeState{Desired: DesiredAbsent, Observed: ObservedAbsent}
 	device.Ownership.CreatedBy = owner
 	state.Devices[idx] = device
+}
+
+func deleteDevice(state *State, sinkName string) {
+	_, idx, ok := Find(*state, sinkName)
+	if !ok {
+		return
+	}
+	state.Devices = append(state.Devices[:idx], state.Devices[idx+1:]...)
 }
 
 func presentDevice(

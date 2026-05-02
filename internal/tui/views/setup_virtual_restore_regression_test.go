@@ -270,12 +270,21 @@ func TestRemoveManagedVirtualSinkPreservesRemainingTrackedSink(t *testing.T) {
 	m := newTestSetupModel(config.ModeServer)
 	first := customVirtualSinkPreset("custom_a", "Studio A")
 	second := customVirtualSinkPreset("custom_b", "Studio B")
+	require.NoError(t, m.persistVirtualSinkPresent("42", first))
+	require.NoError(t, m.persistVirtualSinkPresent("43", second))
 	m.trackVirtualSink("42", first, true)
 	m.trackVirtualSink("43", second, true)
 
 	require.NoError(t, m.removeManagedVirtualSink(first.SinkName))
+	_, firstOK, firstErr := virtualstate.LoadDevice(first.SinkName)
+	secondDevice, secondOK, secondErr := virtualstate.LoadDevice(second.SinkName)
 
 	assert.Equal(t, []string{"42"}, stub.removedIDs)
+	require.NoError(t, firstErr)
+	assert.False(t, firstOK)
+	require.NoError(t, secondErr)
+	require.True(t, secondOK)
+	assert.Equal(t, virtualstate.DesiredPresent, secondDevice.State.Desired)
 	assert.NotContains(t, m.trackedVirtualSinks, first.SinkName)
 	assert.Contains(t, m.trackedVirtualSinks, second.SinkName)
 	assert.True(t, m.virtualMicManageable)
@@ -342,6 +351,29 @@ func TestSyncVirtualMicStateDiscoversPreviousSessionCustomSinkSafely(t *testing.
 	assert.Equal(t, "44", m.virtualMicManagedModule)
 	assert.Empty(t, m.VirtualSinkCleanupPlans())
 	assert.Equal(t, previousSessionID, device.Ownership.SessionID)
+}
+
+func TestFreshLaunchOverlayDiscoversAllManagedVirtualSinks(t *testing.T) {
+	stub := stubVirtualAudioFuncs(t)
+	first := customVirtualSinkPreset("custom_a", "Studio A")
+	second := customVirtualSinkPreset("custom_b", "Studio B")
+	stub.foundModules = map[string]string{first.SinkName: "41", second.SinkName: "42"}
+	writeCustomVirtualState(t, virtualstate.RoleServer, "", first)
+	writeCustomVirtualState(t, virtualstate.RoleServer, "", second)
+	m := newTestSetupModel(config.ModeServer)
+
+	m, _ = m.openVirtualMicOverlay()
+	require.NotNil(t, m.virtualDeviceOverlay)
+	require.Len(t, m.virtualDeviceOverlay.Devices, 2)
+	view := m.virtualDeviceOverlay.View(80)
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Contains(t, view, first.PlaybackName)
+	assert.Contains(t, view, second.PlaybackName)
+	assert.Equal(t, []string{"42"}, stub.removedIDs)
+	assert.NotContains(t, m.trackedVirtualSinks, second.SinkName)
+	assert.Contains(t, m.trackedVirtualSinks, first.SinkName)
 }
 
 func TestVirtualOverlayUsesCustomCaptureNameForExistingSink(t *testing.T) {
@@ -465,6 +497,103 @@ func TestVirtualSinkMatchingAvoidsEchoWarpExtra(t *testing.T) {
 	assert.Equal(t, []string{echowarpSinkName}, unmatched)
 }
 
+func TestTrackedCustomCaptureMonitorDisplaysCaptureNameAndVirtual(t *testing.T) {
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_studio", "Studio")
+	m.trackVirtualSink("42", vs, true)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Monitor of " + vs.PlaybackName, id: 7, isInput: true, sampleRate: 48000},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.inputDevices, 1)
+	assert.Equal(t, vs.CaptureName, m.inputDevices[0].Name)
+	assert.True(t, m.inputDevices[0].IsVirtual)
+	assert.Contains(t, formatDeviceInfo(m.inputDevices[0]), "adaptive")
+	assert.NotContains(t, formatDeviceInfo(m.inputDevices[0]), "48 kHz")
+}
+
+func TestStateCustomCaptureMonitorDisplaysCaptureNameAndVirtual(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_state", "State Studio")
+	require.NoError(t, m.persistVirtualSinkPresent("52", vs))
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Monitor of " + vs.PlaybackName, id: 10, isInput: true},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.inputDevices, 1)
+	assert.Equal(t, vs.CaptureName, m.inputDevices[0].Name)
+	assert.True(t, m.inputDevices[0].IsVirtual)
+}
+
+func TestManagedVirtualPlaybackSinkNameDisplaysPlaybackAndAdaptive(t *testing.T) {
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_playback", "Studio Playback")
+	m.trackVirtualSink("42", vs, true)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: vs.SinkName, id: 8, sampleRate: 48000},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.outputDevices, 1)
+	assert.Equal(t, vs.PlaybackName, m.outputDevices[0].Name)
+	assert.True(t, m.outputDevices[0].IsVirtual)
+	assert.Contains(t, formatDeviceInfo(m.outputDevices[0]), "adaptive")
+}
+
+func TestTruncatedMonitorOfPlaybackAliasAllowsTrackedModuleEvidence(t *testing.T) {
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_single", "Single")
+	m.trackVirtualSink("42", vs, true)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Monitor of Playback", id: 9, isInput: true},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.inputDevices, 1)
+	assert.Equal(t, vs.CaptureName, m.inputDevices[0].Name)
+	assert.True(t, m.inputDevices[0].IsVirtual)
+}
+
+func TestTruncatedMonitorOfPlaybackAliasRequiresEvidence(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_state", "State Only")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "", vs)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Monitor of Playback", id: 9, isInput: true},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.inputDevices, 1)
+	assert.Equal(t, "Monitor of Playback", m.inputDevices[0].Name)
+	assert.False(t, m.inputDevices[0].IsVirtual)
+}
+
+func TestTruncatedMonitorOfPlaybackAliasUsesPlaybackPair(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	m := newTestSetupModel(config.ModeServer)
+	vs := customVirtualSinkPreset("custom_pair", "Paired")
+	writeCustomVirtualState(t, virtualstate.RoleServer, "", vs)
+	m.DeviceList.SetItems([]list.Item{
+		audioDeviceItem{name: "Monitor of Playback", id: 9, isInput: true},
+		audioDeviceItem{name: vs.PlaybackName, id: 10, isInput: false},
+	})
+
+	m.rebuildDeviceGroups()
+
+	require.Len(t, m.inputDevices, 1)
+	assert.Equal(t, vs.CaptureName, m.inputDevices[0].Name)
+	assert.True(t, m.inputDevices[0].IsVirtual)
+}
+
 func newInputOnlyRestoreModel() SetupModel {
 	m := newTestSetupModel(config.ModeServer).WithUnifiedDeviceList(false)
 	m.multiSelect = make(map[string]DeviceRoleSet)
@@ -509,6 +638,24 @@ type virtualAudioStub struct {
 	createdNames  []string
 	removedIDs    []string
 }
+
+type audioDeviceItem struct {
+	name       string
+	id         uint32
+	isInput    bool
+	channels   uint32
+	sampleRate uint32
+	bitDepth   uint32
+}
+
+func (d audioDeviceItem) Title() string            { return d.name }
+func (d audioDeviceItem) Description() string      { return "" }
+func (d audioDeviceItem) FilterValue() string      { return d.name }
+func (d audioDeviceItem) DeviceID() uint32         { return d.id }
+func (d audioDeviceItem) IsInputDevice() bool      { return d.isInput }
+func (d audioDeviceItem) DeviceChannels() uint32   { return d.channels }
+func (d audioDeviceItem) DeviceSampleRate() uint32 { return d.sampleRate }
+func (d audioDeviceItem) DeviceBitDepth() uint32   { return d.bitDepth }
 
 func stubVirtualAudioFuncs(t *testing.T) *virtualAudioStub {
 	t.Helper()
@@ -560,4 +707,21 @@ func customVirtualSinkPreset(sinkName, baseName string) recent.VirtualSinkPreset
 		PlaybackName: "Playback " + baseName, CaptureName: "Capture " + baseName,
 		OnStop: recent.SinkDelete, OnStart: recent.SinkRecreate,
 	}
+}
+
+func writeCustomVirtualState(
+	t *testing.T,
+	owner string,
+	moduleID string,
+	vs recent.VirtualSinkPreset,
+) {
+	t.Helper()
+	policy := virtualstate.DevicePolicy{OnStop: vs.OnStop, OnStart: vs.OnStart}
+	metadata := virtualstate.DeviceMetadata{
+		ID: vs.ID, BaseName: vs.BaseName, PlaybackName: vs.PlaybackName,
+		CaptureName: vs.CaptureName,
+	}
+	require.NoError(t, virtualstate.UpsertPresentWithMetadata(
+		vs.SinkName, virtualSinkMonitorName(vs), moduleID, owner, policy, metadata,
+	))
 }

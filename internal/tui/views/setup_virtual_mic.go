@@ -40,8 +40,27 @@ func (m SetupModel) openVirtualMicOverlay() (SetupModel, tea.Cmd) {
 	sinkName := m.defaultVirtualOverlaySinkName()
 	m.virtualDeviceOverlay = NewVirtualDeviceOverlay(m.virtualMicManageable, sinkName)
 	m.virtualDeviceOverlay.CaptureName = m.virtualOverlayCaptureName(sinkName)
+	m.virtualDeviceOverlay.SetDevices(m.virtualOverlayDevices())
 	m.overlay = SetupOverlayVirtualDevice
 	return m, nil
+}
+
+func (m SetupModel) virtualOverlayDevices() []VirtualOverlayDevice {
+	devices := make([]VirtualOverlayDevice, 0, len(m.trackedVirtualSinks))
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		tracked := m.trackedVirtualSinks[sinkName]
+		if tracked.Manageable && tracked.ModuleID != "" {
+			devices = append(devices, virtualOverlayDevice(tracked.Preset))
+		}
+	}
+	return devices
+}
+
+func virtualOverlayDevice(vs recent.VirtualSinkPreset) VirtualOverlayDevice {
+	return VirtualOverlayDevice{
+		SinkName: vs.SinkName, PlaybackName: virtualSinkPlaybackName(vs),
+		CaptureName: virtualSinkCaptureName(vs),
+	}
 }
 
 func (m SetupModel) virtualOverlayCaptureName(sinkName string) string {
@@ -64,7 +83,7 @@ func (m SetupModel) virtualDeviceOverlayPreset() recent.VirtualSinkPreset {
 	if m.virtualDeviceOverlay == nil {
 		return *m.defaultVirtualSinkPreset()
 	}
-	if m.virtualDeviceOverlay.Exists {
+	if !m.virtualDeviceOverlay.IsCreateMode() {
 		if tracked, ok := m.trackedVirtualSinks[m.virtualDeviceOverlay.SinkName]; ok {
 			return tracked.Preset
 		}
@@ -205,9 +224,9 @@ func (m *SetupModel) autoSelectVirtualDevice(name string) bool {
 }
 
 func (m *SetupModel) selectVirtualInputMonitor(sinkName string) bool {
-	monitorName := "Monitor of " + sinkName
+	vs := m.virtualSinkPresetBySinkName(sinkName)
 	for _, d := range m.inputDevices {
-		if d.Name == monitorName && d.IsVirtual {
+		if d.IsVirtual && stringSetContains(captureAliases(vs), d.Name) {
 			m.setSelectedRole(d, true)
 			return true
 		}
@@ -216,13 +235,26 @@ func (m *SetupModel) selectVirtualInputMonitor(sinkName string) bool {
 }
 
 func (m *SetupModel) selectVirtualOutputSink(sinkName string) bool {
+	vs := m.virtualSinkPresetBySinkName(sinkName)
 	for _, d := range m.outputDevices {
-		if d.Name == sinkName && d.IsVirtual {
+		if d.IsVirtual && stringSetContains(playbackAliases(vs), d.Name) {
 			m.setSelectedRole(d, false)
 			return true
 		}
 	}
 	return false
+}
+
+func (m *SetupModel) virtualSinkPresetBySinkName(sinkName string) recent.VirtualSinkPreset {
+	if tracked, ok := m.trackedVirtualSinks[sinkName]; ok {
+		return tracked.Preset
+	}
+	for _, vs := range m.managedVirtualSinkPresets() {
+		if vs.SinkName == sinkName {
+			return vs
+		}
+	}
+	return recent.VirtualSinkPreset{SinkName: sinkName}
 }
 
 func (m *SetupModel) setSelectedRole(d deviceRow, capture bool) {
@@ -240,11 +272,12 @@ func (m *SetupModel) syncVirtualMicState() {
 	if !isLinuxRuntime {
 		return
 	}
-	if m.refreshVirtualMicStateFromTrackedSinks() {
-		return
-	}
+	tracked := m.refreshVirtualMicStateFromTrackedSinks()
 	found, err := m.discoverManageableVirtualSink()
 	if found {
+		return
+	}
+	if tracked && (err != nil || m.refreshVirtualMicStateFromTrackedSinks()) {
 		return
 	}
 	if err != nil && m.hasVirtualMicModuleState() {
@@ -262,22 +295,36 @@ func (m *SetupModel) syncVirtualMicState() {
 }
 
 func (m *SetupModel) discoverManageableVirtualSink() (bool, error) {
+	foundAny := false
 	for _, vs := range m.virtualSinkDiscoveryPresets() {
+		if m.hasModuleBackedTrackedVirtualSink(vs.SinkName) {
+			foundAny = true
+			continue
+		}
 		moduleID, found, err := findPulseAudioModuleFn(vs.SinkName)
 		if err != nil {
-			return false, err
+			return foundAny, err
 		}
 		if !found {
 			continue
 		}
-		m.markVirtualSinkFound(moduleID, vs)
-		if err := m.persistFoundVirtualSink(moduleID, vs, virtualSinkEnsureOptions{}); err != nil {
+		if err := m.trackDiscoveredVirtualSink(moduleID, vs); err != nil {
 			m.clearVirtualMicManageState()
 			return false, nil
 		}
-		return true, nil
+		foundAny = true
 	}
-	return false, nil
+	return foundAny, nil
+}
+
+func (m SetupModel) hasModuleBackedTrackedVirtualSink(sinkName string) bool {
+	tracked, ok := m.trackedVirtualSinks[sinkName]
+	return ok && tracked.Manageable && tracked.ModuleID != ""
+}
+
+func (m *SetupModel) trackDiscoveredVirtualSink(moduleID string, vs recent.VirtualSinkPreset) error {
+	m.markVirtualSinkFound(moduleID, vs)
+	return m.persistFoundVirtualSink(moduleID, vs, virtualSinkEnsureOptions{})
 }
 
 func (m SetupModel) hasVirtualMicModuleState() bool {
@@ -430,7 +477,7 @@ func (m *SetupModel) removeManagedVirtualSink(sinkName string) error {
 	if err := removePulseAudioSinkFn(moduleID); err != nil {
 		return err
 	}
-	if err := virtualstate.MarkAbsent(sinkName, virtualstate.RoleUser); err != nil {
+	if err := virtualstate.DeleteDevice(sinkName); err != nil {
 		return fmt.Errorf("persist virtual audio device removal: %w", err)
 	}
 	delete(m.trackedVirtualSinks, sinkName)

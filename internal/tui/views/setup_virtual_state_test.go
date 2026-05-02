@@ -149,7 +149,7 @@ func TestServerCannotExplicitlyRemoveClientOwnedSink(t *testing.T) {
 	assert.Equal(t, recent.SinkKeep, device.Policy.OnStart)
 }
 
-func TestCurrentRoleExplicitRemoveMarksAbsentAndSuppressesLegacyRecreate(t *testing.T) {
+func TestCurrentRoleExplicitRemoveDeletesVirtualStateRecord(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	writeVirtualState(t, virtualstate.RoleClient, "42", recent.SinkKeep, recent.SinkKeep)
 	client := newVirtualStateModel(config.ModeClient)
@@ -158,16 +158,14 @@ func TestCurrentRoleExplicitRemoveMarksAbsentAndSuppressesLegacyRecreate(t *test
 	client.virtualMicManagedModule = "42"
 
 	require.NoError(t, client.removeManagedVirtualMic())
-	device := mustLoadVirtualStateDevice(t)
-	client.autoRestore(legacyVirtualSinkPreset(recent.SinkDelete, recent.SinkRecreate), "normal")
+	_, ok, err := virtualstate.LoadDevice(echowarpSinkName)
 
+	require.NoError(t, err)
+	assert.False(t, ok)
 	assert.Equal(t, []string{"42"}, stub.removedIDs)
-	assert.Equal(t, virtualstate.DesiredAbsent, device.State.Desired)
-	assert.Equal(t, virtualstate.RoleUser, device.Ownership.CreatedBy)
-	assert.Empty(t, stub.createdNames)
 }
 
-func TestImportedExplicitRemoveMarksAbsent(t *testing.T) {
+func TestImportedExplicitRemoveDeletesVirtualStateRecord(t *testing.T) {
 	stub := stubVirtualAudioFuncs(t)
 	writeVirtualState(t, virtualstate.RoleImported, "51", recent.SinkKeep, recent.SinkKeep)
 	server := newVirtualStateModel(config.ModeServer)
@@ -176,11 +174,11 @@ func TestImportedExplicitRemoveMarksAbsent(t *testing.T) {
 	server.virtualMicManagedModule = "51"
 
 	require.NoError(t, server.removeManagedVirtualMic())
-	device := mustLoadVirtualStateDevice(t)
+	_, ok, err := virtualstate.LoadDevice(echowarpSinkName)
 
+	require.NoError(t, err)
+	assert.False(t, ok)
 	assert.Equal(t, []string{"51"}, stub.removedIDs)
-	assert.Equal(t, virtualstate.DesiredAbsent, device.State.Desired)
-	assert.Equal(t, virtualstate.RoleUser, device.Ownership.CreatedBy)
 }
 
 func TestDesiredAbsentSuppressesLegacyPresetRecreate(t *testing.T) {

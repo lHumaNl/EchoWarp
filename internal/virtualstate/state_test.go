@@ -54,6 +54,25 @@ func TestMarkAbsentSuppressesFutureRecreate(t *testing.T) {
 	assert.Empty(t, device.State.ModuleID)
 }
 
+func TestDeleteDeviceOnlyRemovesTargetRecord(t *testing.T) {
+	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
+	records := []string{"studio-a", "studio-b"}
+	for _, sinkName := range records {
+		require.NoError(t, UpsertPresent(sinkName, sinkName+".monitor", "42", RoleServer, safePolicy()))
+	}
+
+	require.NoError(t, DeleteDevice("studio-a"))
+	removed, ok, err := LoadDevice("studio-a")
+	kept, keptOK, keptErr := LoadDevice("studio-b")
+
+	require.NoError(t, err)
+	require.False(t, ok)
+	assert.Empty(t, removed.SinkName)
+	require.NoError(t, keptErr)
+	require.True(t, keptOK)
+	assert.Equal(t, DesiredPresent, kept.State.Desired)
+}
+
 func TestSaveAtomicFailureKeepsExistingYAML(t *testing.T) {
 	t.Setenv("ECHOWARP_CONFIG_DIR", t.TempDir())
 	initial := State{Devices: []Device{presentDevice("existing", "monitor", "1", RoleServer, safePolicy(), DeviceMetadata{})}}

@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lHumaNl/echowarp/internal/recent"
+	"github.com/lHumaNl/echowarp/internal/virtualstate"
 )
 
 // DeviceRoleSet tracks assigned roles for a device in multi-select mode.
@@ -62,6 +63,7 @@ func IsLoopbackDevice(name string) bool {
 func (m *SetupModel) rebuildDeviceGroups() {
 	m.inputDevices = nil
 	m.outputDevices = nil
+	aliasContext := m.managedVirtualAliasContext()
 	for _, item := range m.DeviceList.Items() {
 		type deviceInfo interface {
 			FilterValue() string
@@ -95,11 +97,12 @@ func (m *SetupModel) rebuildDeviceGroups() {
 		if bi, ok := item.(bitDepthInfo); ok {
 			bd = bi.DeviceBitDepth()
 		}
+		displayName, managedVirtual := m.normalizeManagedVirtualDevice(name, isInput, aliasContext)
 		row := deviceRow{
-			Name:       name,
+			Name:       displayName,
 			ID:         id,
 			IsInput:    isInput,
-			IsVirtual:  IsVirtualDevice(name),
+			IsVirtual:  managedVirtual || IsVirtualDevice(name),
 			IsLoopback: IsLoopbackDevice(name),
 			Channels:   ch,
 			SampleRate: sr,
@@ -124,6 +127,127 @@ func (m *SetupModel) rebuildDeviceGroups() {
 	sortDevices(m.inputDevices)
 	sortDevices(m.outputDevices)
 	m.syncVirtualMicState()
+}
+
+func (m SetupModel) normalizeManagedVirtualDevice(
+	name string,
+	isInput bool,
+	context managedVirtualAliasContext,
+) (string, bool) {
+	for _, vs := range context.presets {
+		if virtualSinkAliasMatches(name, isInput, vs, context) {
+			return managedVirtualDisplayName(isInput, vs), true
+		}
+	}
+	return name, false
+}
+
+func (m SetupModel) managedVirtualSinkPresets() []recent.VirtualSinkPreset {
+	seen := make(map[string]bool)
+	presets := make([]recent.VirtualSinkPreset, 0, len(m.trackedVirtualSinks))
+	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
+		presets = appendUniqueVirtualPreset(presets, seen, m.trackedVirtualSinks[sinkName].Preset)
+	}
+	return appendStateVirtualPresets(presets, seen)
+}
+
+func appendStateVirtualPresets(
+	presets []recent.VirtualSinkPreset,
+	seen map[string]bool,
+) []recent.VirtualSinkPreset {
+	state, err := virtualstate.Load()
+	if err != nil {
+		return presets
+	}
+	for _, device := range state.Devices {
+		if stateDeviceClassifiesVirtual(device) {
+			presets = appendUniqueVirtualPreset(presets, seen, virtualSinkPresetFromStateDevice(device))
+		}
+	}
+	return presets
+}
+
+func appendUniqueVirtualPreset(
+	presets []recent.VirtualSinkPreset,
+	seen map[string]bool,
+	vs recent.VirtualSinkPreset,
+) []recent.VirtualSinkPreset {
+	if vs.SinkName == "" || seen[vs.SinkName] {
+		return presets
+	}
+	seen[vs.SinkName] = true
+	return append(presets, vs)
+}
+
+func stateDeviceClassifiesVirtual(device virtualstate.Device) bool {
+	if device.State.Desired == virtualstate.DesiredAbsent {
+		return false
+	}
+	return device.ModuleType == "" || device.ModuleType == virtualstate.ModuleNullSink
+}
+
+func virtualSinkAliasMatches(
+	name string,
+	isInput bool,
+	vs recent.VirtualSinkPreset,
+	context managedVirtualAliasContext,
+) bool {
+	if isInput {
+		return captureAliasMatches(name, vs, context)
+	}
+	return stringSetContains(playbackAliases(vs), name)
+}
+
+func managedVirtualDisplayName(isInput bool, vs recent.VirtualSinkPreset) string {
+	if isInput {
+		return virtualSinkCaptureName(vs)
+	}
+	return virtualSinkPlaybackName(vs)
+}
+
+func playbackAliases(vs recent.VirtualSinkPreset) []string {
+	return uniqueStrings(virtualSinkPlaybackName(vs), vs.SinkName)
+}
+
+func captureAliasMatches(name string, vs recent.VirtualSinkPreset, context managedVirtualAliasContext) bool {
+	return stringSetContains(captureAliases(vs), name) ||
+		truncatedCaptureAliasMatches(name, vs, context)
+}
+
+func truncatedCaptureAliasMatches(
+	name string,
+	vs recent.VirtualSinkPreset,
+	context managedVirtualAliasContext,
+) bool {
+	if name != "Monitor of Playback" {
+		return false
+	}
+	return context.moduleBackedSinks[vs.SinkName] || playbackAliasInDeviceList(vs, context.deviceNames)
+}
+
+func playbackAliasInDeviceList(vs recent.VirtualSinkPreset, deviceNames map[string]bool) bool {
+	for _, alias := range playbackAliases(vs) {
+		if deviceNames[alias] {
+			return true
+		}
+	}
+	return false
+}
+
+func captureAliases(vs recent.VirtualSinkPreset) []string {
+	return uniqueStrings(
+		virtualSinkCaptureName(vs), virtualSinkMonitorName(vs),
+		"Monitor of "+virtualSinkPlaybackName(vs), "Monitor of "+vs.SinkName,
+	)
+}
+
+func stringSetContains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // handleMultiSelectToggle cycles the selected device through roles:

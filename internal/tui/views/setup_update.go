@@ -662,7 +662,7 @@ func (m SetupModel) handleOverlayKey(msg tea.KeyMsg) (SetupModel, tea.Cmd) {
 				}
 				m.overlay = SetupOverlayNone
 				m.virtualDeviceOverlay = nil
-				m.updateVirtualMicField(false)
+				m.updateVirtualMicField(m.virtualMicManageable)
 				// Re-enumerate devices from OS after sink removal
 				time.Sleep(200 * time.Millisecond)
 				m.refreshDevicesFromOS()

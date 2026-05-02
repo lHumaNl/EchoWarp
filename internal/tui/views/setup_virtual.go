@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,20 @@ const (
 	VirtualActionCancel               // user pressed Cancel or Esc
 )
 
+type virtualOverlayMode int
+
+const (
+	virtualOverlayModeCreate virtualOverlayMode = iota
+	virtualOverlayModeManage
+)
+
+// VirtualOverlayDevice is an existing virtual audio device shown in manage mode.
+type VirtualOverlayDevice struct {
+	SinkName     string
+	CaptureName  string
+	PlaybackName string
+}
+
 // VirtualDeviceOverlay shows a confirmation screen for creating/removing
 // a Linux virtual audio device.
 type VirtualDeviceOverlay struct {
@@ -27,15 +42,33 @@ type VirtualDeviceOverlay struct {
 	CaptureName string // user-facing capture device name for existing sinks
 	NameInput   string // user-provided base name for new virtual devices
 	ButtonIdx   int    // 0=Create/Remove, 1=Cancel
+	RowIdx      int    // selected existing device or create-new row in manage mode
 	Error       string // error from pactl (if any)
+	Devices     []VirtualOverlayDevice
+	mode        virtualOverlayMode
 }
 
 // NewVirtualDeviceOverlay creates the overlay.
 func NewVirtualDeviceOverlay(exists bool, sinkName string) *VirtualDeviceOverlay {
-	return &VirtualDeviceOverlay{
+	overlay := &VirtualDeviceOverlay{
 		Exists:    exists,
 		SinkName:  sinkName,
 		NameInput: defaultVirtualBaseName,
+	}
+	if exists {
+		overlay.mode = virtualOverlayModeManage
+		overlay.SetDevices([]VirtualOverlayDevice{{SinkName: sinkName}})
+	}
+	return overlay
+}
+
+func (v *VirtualDeviceOverlay) SetDevices(devices []VirtualOverlayDevice) {
+	v.Devices = devices
+	if len(v.Devices) == 0 && v.Exists && v.SinkName != "" {
+		v.Devices = []VirtualOverlayDevice{{SinkName: v.SinkName}}
+	}
+	if v.RowIdx > len(v.Devices) {
+		v.RowIdx = len(v.Devices)
 	}
 }
 
@@ -44,10 +77,17 @@ func (v *VirtualDeviceOverlay) BaseName() string {
 }
 
 func (v *VirtualDeviceOverlay) ExistingCaptureName() string {
+	if selected, ok := v.selectedDevice(); ok && selected.CaptureName != "" {
+		return selected.CaptureName
+	}
 	if v.CaptureName != "" {
 		return v.CaptureName
 	}
 	return "Monitor of " + v.SinkName
+}
+
+func (v *VirtualDeviceOverlay) IsCreateMode() bool {
+	return v.mode == virtualOverlayModeCreate
 }
 
 // Update handles key events and returns the resulting action.
@@ -74,20 +114,42 @@ func (v *VirtualDeviceOverlay) Update(msg tea.KeyMsg) VirtualAction {
 		if v.ButtonIdx == 1 {
 			return VirtualActionCancel
 		}
-		if v.Exists {
-			return VirtualActionRemove
+		if v.mode == virtualOverlayModeManage {
+			return v.updateManageEnter()
 		}
 		return VirtualActionCreate
+	case tea.KeyUp:
+		if v.mode == virtualOverlayModeManage && v.RowIdx > 0 {
+			v.RowIdx--
+		}
+	case tea.KeyDown:
+		if v.mode == virtualOverlayModeManage && v.RowIdx < len(v.Devices) {
+			v.RowIdx++
+		}
 	case tea.KeyBackspace:
-		if !v.Exists && v.NameInput != "" {
+		if v.mode == virtualOverlayModeCreate && v.NameInput != "" {
 			v.NameInput = v.NameInput[:len(v.NameInput)-1]
 		}
 	case tea.KeyRunes:
-		if !v.Exists {
+		if v.mode == virtualOverlayModeCreate {
 			v.NameInput += string(msg.Runes)
 		}
 	}
 
+	return VirtualActionNone
+}
+
+func (v *VirtualDeviceOverlay) updateManageEnter() VirtualAction {
+	if v.RowIdx == len(v.Devices) {
+		v.mode = virtualOverlayModeCreate
+		v.ButtonIdx = 0
+		return VirtualActionNone
+	}
+	if selected, ok := v.selectedDevice(); ok {
+		v.SinkName = selected.SinkName
+		v.CaptureName = selected.CaptureName
+		return VirtualActionRemove
+	}
 	return VirtualActionNone
 }
 
@@ -101,14 +163,14 @@ func (v *VirtualDeviceOverlay) View(width int) string {
 		overlayW = 35
 	}
 
-	title := styles.SetupColumnTitle.Render("Create Virtual Audio Device")
+	title := styles.SetupColumnTitle.Render(v.title())
 	contentW := overlayW - 4
 
 	var body string
 	if v.Error != "" {
 		body = v.viewError(contentW)
-	} else if v.Exists {
-		body = v.viewExists(contentW)
+	} else if v.mode == virtualOverlayModeManage {
+		body = v.viewManage(contentW)
 	} else {
 		body = v.viewCreate(contentW)
 	}
@@ -122,6 +184,13 @@ func (v *VirtualDeviceOverlay) View(width int) string {
 		Width(overlayW)
 
 	return border.Render(content)
+}
+
+func (v *VirtualDeviceOverlay) title() string {
+	if v.mode == virtualOverlayModeManage {
+		return "Manage Virtual Audio Devices"
+	}
+	return "Create Virtual Audio Device"
 }
 
 func (v *VirtualDeviceOverlay) viewCreate(contentW int) string {
@@ -147,21 +216,60 @@ func (v *VirtualDeviceOverlay) viewCreate(contentW int) string {
 	return sb.String()
 }
 
-func (v *VirtualDeviceOverlay) viewExists(contentW int) string {
+func (v *VirtualDeviceOverlay) viewManage(contentW int) string {
 	var sb strings.Builder
-
-	sb.WriteString(styles.SetupReadyHint.Render("✓ Virtual audio device active — " + v.SinkName))
+	sb.WriteString(styles.SetupDimValue.Render("Existing virtual audio devices:"))
 	sb.WriteString("\n\n")
-	sb.WriteString(styles.SetupDimValue.Render("In Discord / Zoom / OBS select:"))
-	sb.WriteString("\n")
-	sb.WriteString(styles.ConnParamValue.Render("  \"" + v.ExistingCaptureName() + "\" as microphone"))
+	for i, device := range v.Devices {
+		sb.WriteString(v.renderDeviceRow(i, device))
+		sb.WriteString("\n")
+	}
+	sb.WriteString(v.renderCreateRow())
 	sb.WriteString("\n\n")
-
-	sb.WriteString(v.renderButtons("[Remove]", "[OK]", contentW))
+	sb.WriteString(v.renderManageButtons(contentW))
 	sb.WriteString("\n\n")
 	sb.WriteString(v.renderFooter(contentW))
-
 	return sb.String()
+}
+
+func (v *VirtualDeviceOverlay) renderDeviceRow(index int, device VirtualOverlayDevice) string {
+	label := fmt.Sprintf("Remove %s", deviceDisplayName(device))
+	if v.RowIdx == index {
+		return styles.SetupReadyHint.Render("› " + label)
+	}
+	return styles.SetupDimValue.Render("  " + label)
+}
+
+func (v *VirtualDeviceOverlay) renderCreateRow() string {
+	label := "Create new virtual device"
+	if v.RowIdx == len(v.Devices) {
+		return styles.SetupReadyHint.Render("› " + label)
+	}
+	return styles.SetupDimValue.Render("  " + label)
+}
+
+func (v *VirtualDeviceOverlay) renderManageButtons(contentW int) string {
+	if v.RowIdx == len(v.Devices) {
+		return v.renderButtons("[Create]", "[Cancel]", contentW)
+	}
+	return v.renderButtons("[Remove]", "[Cancel]", contentW)
+}
+
+func (v *VirtualDeviceOverlay) selectedDevice() (VirtualOverlayDevice, bool) {
+	if v.RowIdx < 0 || v.RowIdx >= len(v.Devices) {
+		return VirtualOverlayDevice{}, false
+	}
+	return v.Devices[v.RowIdx], true
+}
+
+func deviceDisplayName(device VirtualOverlayDevice) string {
+	if device.PlaybackName != "" && device.CaptureName != "" {
+		return device.PlaybackName + " / " + device.CaptureName
+	}
+	if device.PlaybackName != "" {
+		return device.PlaybackName
+	}
+	return device.SinkName
 }
 
 func (v *VirtualDeviceOverlay) viewError(contentW int) string {

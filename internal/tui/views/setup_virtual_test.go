@@ -38,10 +38,11 @@ func TestVirtualOverlay_CreateCompositeNotClippedAtSmallHeight(t *testing.T) {
 func TestVirtualOverlay_ExistsState(t *testing.T) {
 	overlay := NewVirtualDeviceOverlay(true, "EchoWarp")
 	view := overlay.View(80)
-	assert.Contains(t, view, "Virtual audio device active")
+	assert.Contains(t, view, "Manage Virtual Audio Devices")
+	assert.Contains(t, view, "Remove EchoWarp")
+	assert.Contains(t, view, "Create new virtual device")
 	assert.Contains(t, view, "[Remove]")
-	assert.Contains(t, view, "[OK]")
-	assert.Contains(t, view, "Monitor of EchoWarp")
+	assert.Contains(t, view, "[Cancel]")
 }
 
 func TestVirtualOverlay_Create_Enter(t *testing.T) {
@@ -57,6 +58,32 @@ func TestVirtualOverlay_Remove_Enter(t *testing.T) {
 	// Default button is Remove (index 0)
 	action := overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	assert.Equal(t, VirtualActionRemove, action)
+}
+
+func TestVirtualOverlay_CreateNewWhenDevicesExist(t *testing.T) {
+	overlay := NewVirtualDeviceOverlay(true, "EchoWarp")
+	overlay.SetDevices([]VirtualOverlayDevice{{SinkName: "EchoWarp"}})
+
+	action := overlay.Update(tea.KeyMsg{Type: tea.KeyDown})
+	assert.Equal(t, VirtualActionNone, action)
+	action = overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Equal(t, VirtualActionNone, action)
+	assert.True(t, overlay.IsCreateMode())
+	assert.Contains(t, overlay.View(80), "Playback EchoWarp")
+
+	action = overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	assert.Equal(t, VirtualActionCreate, action)
+}
+
+func TestVirtualOverlay_RemoveTargetsSelectedSink(t *testing.T) {
+	overlay := NewVirtualDeviceOverlay(true, "studio-a")
+	overlay.SetDevices([]VirtualOverlayDevice{{SinkName: "studio-a"}, {SinkName: "studio-b"}})
+
+	overlay.Update(tea.KeyMsg{Type: tea.KeyDown})
+	action := overlay.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	assert.Equal(t, VirtualActionRemove, action)
+	assert.Equal(t, "studio-b", overlay.SinkName)
 }
 
 func TestVirtualOverlay_Cancel(t *testing.T) {
