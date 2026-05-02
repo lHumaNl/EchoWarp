@@ -97,6 +97,10 @@ func isEchoWarpMonitorDevice(d deviceRow) bool {
 }
 
 func (m SetupModel) virtualSinkPresetForDevice(d deviceRow) *recent.VirtualSinkPreset {
+	if d.VirtualSinkName != "" {
+		vs := m.virtualSinkPresetBySinkName(d.VirtualSinkName)
+		return &vs
+	}
 	for _, sinkName := range m.sortedTrackedVirtualSinkNames() {
 		vs := m.trackedVirtualSinks[sinkName].Preset
 		if d.IsInput && d.Name == virtualSinkCaptureName(vs) {

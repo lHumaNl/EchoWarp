@@ -322,7 +322,7 @@ func (m *SetupModel) autoSelectVirtualDevice(name string) bool {
 func (m *SetupModel) selectVirtualInputMonitor(sinkName string) bool {
 	vs := m.virtualSinkPresetBySinkName(sinkName)
 	for _, d := range m.inputDevices {
-		if d.IsVirtual && stringSetContains(captureAliases(vs), d.Name) {
+		if d.IsVirtual && virtualInputMatchesSink(d, vs) {
 			m.setSelectedRole(d, true)
 			return true
 		}
@@ -333,7 +333,7 @@ func (m *SetupModel) selectVirtualInputMonitor(sinkName string) bool {
 func (m *SetupModel) selectVirtualOutputSink(sinkName string) bool {
 	vs := m.virtualSinkPresetBySinkName(sinkName)
 	for _, d := range m.outputDevices {
-		if d.IsVirtual && stringSetContains(playbackAliases(vs), d.Name) {
+		if d.IsVirtual && virtualOutputMatchesSink(d, vs) {
 			m.setSelectedRole(d, false)
 			return true
 		}
@@ -434,11 +434,19 @@ func (m SetupModel) hasVirtualMicModuleState() bool {
 func (m SetupModel) hasKnownVirtualOutput() bool {
 	knownNames := m.virtualSinkOutputNames()
 	for _, d := range m.outputDevices {
-		if knownNames[d.Name] {
+		if d.VirtualSinkName != "" || knownNames[d.Name] {
 			return true
 		}
 	}
 	return false
+}
+
+func virtualInputMatchesSink(d deviceRow, vs recent.VirtualSinkPreset) bool {
+	return d.VirtualSinkName == vs.SinkName || stringSetContains(captureAliases(vs), d.Name)
+}
+
+func virtualOutputMatchesSink(d deviceRow, vs recent.VirtualSinkPreset) bool {
+	return d.VirtualSinkName == vs.SinkName || stringSetContains(playbackAliases(vs), d.Name)
 }
 
 func (m SetupModel) virtualSinkOutputNames() map[string]bool {

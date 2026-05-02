@@ -295,6 +295,10 @@ func (d deviceItem) DeviceID() uint32 {
 	return d.device.ID
 }
 
+func (d deviceItem) DeviceBackendID() string {
+	return d.device.BackendID
+}
+
 func (d deviceItem) IsInputDevice() bool {
 	return d.device.IsInput
 }

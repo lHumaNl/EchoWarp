@@ -12,7 +12,10 @@ import (
 	"github.com/lHumaNl/echowarp/internal/virtualstate"
 )
 
-const genericPlaybackMonitorName = "Monitor of Playback"
+const (
+	genericPlaybackName        = "Playback"
+	genericPlaybackMonitorName = "Monitor of Playback"
+)
 
 // DeviceRoleSet tracks assigned roles for a device in multi-select mode.
 type DeviceRoleSet struct {
@@ -20,18 +23,25 @@ type DeviceRoleSet struct {
 	Playback bool
 }
 
+type presetDeviceKey struct {
+	name    string
+	isInput bool
+}
+
 // deviceRow holds display info for a device in the sectioned device list.
 type deviceRow struct {
-	Name       string
-	ID         uint32
-	IsInput    bool
-	IsVirtual  bool
-	IsLoopback bool
-	Channels   uint32
-	SampleRate uint32
-	BitDepth   uint32
-	Volume     float64
-	AGC        bool
+	Name            string
+	BackendID       string
+	VirtualSinkName string
+	ID              uint32
+	IsInput         bool
+	IsVirtual       bool
+	IsLoopback      bool
+	Channels        uint32
+	SampleRate      uint32
+	BitDepth        uint32
+	Volume          float64
+	AGC             bool
 }
 
 // selectKey returns a unique key for this device in the multiSelect map,
@@ -81,6 +91,9 @@ func (m *SetupModel) rebuildDeviceGroups() {
 		type bitDepthInfo interface {
 			DeviceBitDepth() uint32
 		}
+		type backendInfo interface {
+			DeviceBackendID() string
+		}
 		di, ok := item.(deviceInfo)
 		if !ok {
 			continue
@@ -99,17 +112,23 @@ func (m *SetupModel) rebuildDeviceGroups() {
 		if bi, ok := item.(bitDepthInfo); ok {
 			bd = bi.DeviceBitDepth()
 		}
-		displayName, managedVirtual := m.normalizeManagedVirtualDevice(name, isInput, aliasContext)
+		backendID := ""
+		if bi, ok := item.(backendInfo); ok {
+			backendID = bi.DeviceBackendID()
+		}
+		virtual := m.resolveManagedVirtualDevice(name, backendID, isInput, aliasContext)
 		row := deviceRow{
-			Name:       displayName,
-			ID:         id,
-			IsInput:    isInput,
-			IsVirtual:  managedVirtual || IsVirtualDevice(name),
-			IsLoopback: IsLoopbackDevice(name),
-			Channels:   ch,
-			SampleRate: sr,
-			BitDepth:   bd,
-			Volume:     1.0,
+			Name:            virtual.displayName(name),
+			BackendID:       backendID,
+			VirtualSinkName: virtual.sinkName(),
+			ID:              id,
+			IsInput:         isInput,
+			IsVirtual:       virtual.matched || IsVirtualDevice(name),
+			IsLoopback:      IsLoopbackDevice(name),
+			Channels:        ch,
+			SampleRate:      sr,
+			BitDepth:        bd,
+			Volume:          1.0,
 		}
 		if isInput {
 			m.inputDevices = append(m.inputDevices, row)
@@ -128,20 +147,48 @@ func (m *SetupModel) rebuildDeviceGroups() {
 	}
 	sortDevices(m.inputDevices)
 	sortDevices(m.outputDevices)
-	disambiguateDuplicateGenericMonitors(m.inputDevices)
+	disambiguateDuplicateGenericRows(m.outputDevices, genericPlaybackName)
+	disambiguateDuplicateGenericRows(m.inputDevices, genericPlaybackMonitorName)
 	m.syncVirtualMicState()
 }
 
-func (m SetupModel) normalizeManagedVirtualDevice(
+type managedVirtualDeviceMatch struct {
+	isInput bool
+	preset  recent.VirtualSinkPreset
+	matched bool
+}
+
+func (m managedVirtualDeviceMatch) displayName(fallback string) string {
+	if !m.matched {
+		return fallback
+	}
+	return managedVirtualDisplayName(m.isInput, m.preset)
+}
+
+func (m managedVirtualDeviceMatch) sinkName() string {
+	if !m.matched {
+		return ""
+	}
+	return m.preset.SinkName
+}
+
+func (m SetupModel) resolveManagedVirtualDevice(
 	name string,
+	backendID string,
 	isInput bool,
 	context managedVirtualAliasContext,
-) (string, bool) {
+) managedVirtualDeviceMatch {
+	if match, ok := matchingManagedVirtualBackendPreset(backendID, isInput, context); ok {
+		return managedVirtualDeviceMatch{isInput: isInput, preset: match, matched: true}
+	}
+	if backendID != "" && isGenericManagedVirtualName(name, isInput) {
+		return managedVirtualDeviceMatch{}
+	}
 	matches := matchingManagedVirtualPresets(name, isInput, context)
 	if len(matches) == 1 {
-		return managedVirtualDisplayName(isInput, matches[0]), true
+		return managedVirtualDeviceMatch{isInput: isInput, preset: matches[0], matched: true}
 	}
-	return name, false
+	return managedVirtualDeviceMatch{}
 }
 
 func matchingManagedVirtualPresets(
@@ -156,6 +203,39 @@ func matchingManagedVirtualPresets(
 		}
 	}
 	return matches
+}
+
+func matchingManagedVirtualBackendPreset(
+	backendID string,
+	isInput bool,
+	context managedVirtualAliasContext,
+) (recent.VirtualSinkPreset, bool) {
+	if backendID == "" {
+		return recent.VirtualSinkPreset{}, false
+	}
+	for _, vs := range context.presets {
+		if virtualSinkBackendIDMatches(backendID, isInput, vs) {
+			return vs, true
+		}
+	}
+	return recent.VirtualSinkPreset{}, false
+}
+
+func virtualSinkBackendIDMatches(backendID string, isInput bool, vs recent.VirtualSinkPreset) bool {
+	if backendID == "" || vs.SinkName == "" {
+		return false
+	}
+	if isInput {
+		return backendID == virtualSinkMonitorName(vs) || backendID == vs.SinkName+".monitor"
+	}
+	return backendID == vs.SinkName
+}
+
+func isGenericManagedVirtualName(name string, isInput bool) bool {
+	if isInput {
+		return name == genericPlaybackMonitorName
+	}
+	return name == genericPlaybackName
 }
 
 func (m SetupModel) managedVirtualSinkPresets() []recent.VirtualSinkPreset {
@@ -235,7 +315,10 @@ func truncatedPlaybackAliasMatches(
 	vs recent.VirtualSinkPreset,
 	context managedVirtualAliasContext,
 ) bool {
-	if name != "Playback" || virtualSinkPlaybackName(vs) == name {
+	if name != genericPlaybackName || virtualSinkPlaybackName(vs) == name {
+		return false
+	}
+	if context.deviceNameCounts[genericPlaybackName] > 1 {
 		return false
 	}
 	return context.moduleBackedSinks[vs.SinkName] || captureAliasInDeviceList(vs, context.deviceNames)
@@ -260,23 +343,23 @@ func truncatedCaptureAliasMatches(
 	return context.moduleBackedSinks[vs.SinkName] || playbackAliasInDeviceList(vs, context.deviceNames)
 }
 
-func disambiguateDuplicateGenericMonitors(devices []deviceRow) {
-	if countGenericMonitorRows(devices) < 2 {
+func disambiguateDuplicateGenericRows(devices []deviceRow, genericName string) {
+	if countGenericRows(devices, genericName) < 2 {
 		return
 	}
 	index := 1
 	for i := range devices {
-		if devices[i].Name == genericPlaybackMonitorName && !devices[i].IsVirtual {
-			devices[i].Name = fmt.Sprintf("%s #%d", genericPlaybackMonitorName, index)
+		if devices[i].Name == genericName && !devices[i].IsVirtual {
+			devices[i].Name = fmt.Sprintf("%s #%d", genericName, index)
 			index++
 		}
 	}
 }
 
-func countGenericMonitorRows(devices []deviceRow) int {
+func countGenericRows(devices []deviceRow, genericName string) int {
 	count := 0
 	for _, device := range devices {
-		if device.Name == genericPlaybackMonitorName && !device.IsVirtual {
+		if device.Name == genericName && !device.IsVirtual {
 			count++
 		}
 	}
@@ -494,20 +577,16 @@ func (m SetupModel) handleAGCToggle() (SetupModel, tea.Cmd) {
 // to the matching deviceRow entries in inputDevices/outputDevices.
 func (m *SetupModel) restoreVolumeAGCFromPreset(preset recent.DevicePreset, matched []deviceRow) {
 	// Build map from matched device name+isInput → preset device for fast lookup
-	type devKey struct {
-		name    string
-		isInput bool
-	}
-	presetByKey := make(map[devKey]recent.PresetDevice, len(preset.Devices))
+	presetByKey := make(map[presetDeviceKey]recent.PresetDevice, len(preset.Devices))
 	for _, pd := range preset.Devices {
-		presetByKey[devKey{pd.Name, pd.IsInput}] = pd
+		presetByKey[presetDeviceKey{pd.Name, pd.IsInput}] = pd
 	}
 
 	applyToSlice := func(devices []deviceRow) {
 		for i := range devices {
 			for _, md := range matched {
 				if devices[i].selectKey() == md.selectKey() {
-					if pd, ok := presetByKey[devKey{md.Name, md.IsInput}]; ok {
+					if pd, ok := presetDeviceForMatchedRow(preset, presetByKey, md); ok {
 						if pd.Volume > 0 {
 							devices[i].Volume = pd.Volume
 						}
@@ -520,4 +599,29 @@ func (m *SetupModel) restoreVolumeAGCFromPreset(preset recent.DevicePreset, matc
 	}
 	applyToSlice(m.inputDevices)
 	applyToSlice(m.outputDevices)
+}
+
+func presetDeviceForMatchedRow(
+	preset recent.DevicePreset,
+	byKey map[presetDeviceKey]recent.PresetDevice,
+	row deviceRow,
+) (recent.PresetDevice, bool) {
+	// Virtual device runtime IDs and generic names can collide, so prefer
+	// persisted virtual sink identity before the legacy name fallback.
+	for _, pd := range preset.Devices {
+		if presetDeviceMatchesVirtualIdentity(pd, row) {
+			return pd, true
+		}
+	}
+	if pd, ok := byKey[presetDeviceKey{row.Name, row.IsInput}]; ok {
+		return pd, true
+	}
+	return recent.PresetDevice{}, false
+}
+
+func presetDeviceMatchesVirtualIdentity(pd recent.PresetDevice, row deviceRow) bool {
+	if pd.IsInput != row.IsInput || (!pd.Virtual && pd.VirtualSink == nil) {
+		return false
+	}
+	return virtualPresetIdentityMatches(pd, row)
 }

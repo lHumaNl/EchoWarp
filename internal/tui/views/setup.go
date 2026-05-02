@@ -573,12 +573,8 @@ func (m SetupModel) SelectedVirtualSinkPresets() []recent.VirtualSinkPreset {
 		if !d.IsVirtual {
 			continue
 		}
-		// Collect from the current device preset.
-		devPreset := m.CollectPresetDevices()
-		for _, pd := range devPreset.Devices {
-			if pd.VirtualSink != nil && pd.Name == d.Name {
-				result = append(result, *pd.VirtualSink)
-			}
+		if vs := m.virtualSinkPresetForDevice(d); vs != nil {
+			result = append(result, *vs)
 		}
 	}
 	return result

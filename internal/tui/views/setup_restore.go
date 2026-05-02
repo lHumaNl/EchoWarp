@@ -291,13 +291,9 @@ func matchPresetDevices(preset recent.DevicePreset, inputDevices, outputDevices 
 
 		// Virtual sink: match by sink name (ID is unstable across reboots).
 		if pd.VirtualSink != nil {
-			targetNames := virtualPresetDeviceNames(pd)
-			for _, d := range allDevices {
-				if d.IsInput == pd.IsInput && containsString(targetNames, d.Name) {
-					matched = append(matched, d)
-					found = true
-					break
-				}
+			if d, ok := matchVirtualPresetDevice(pd, allDevices); ok {
+				matched = append(matched, d)
+				found = true
 			}
 			if !found {
 				unmatched = append(unmatched, pd.Name)
@@ -333,6 +329,32 @@ func matchPresetDevices(preset recent.DevicePreset, inputDevices, outputDevices 
 		unmatched = append(unmatched, pd.Name)
 	}
 	return matched, unmatched
+}
+
+func matchVirtualPresetDevice(pd recent.PresetDevice, devices []deviceRow) (deviceRow, bool) {
+	for _, d := range devices {
+		if d.IsInput == pd.IsInput && virtualPresetIdentityMatches(pd, d) {
+			return d, true
+		}
+	}
+	targetNames := virtualPresetDeviceNames(pd)
+	for _, d := range devices {
+		if d.IsInput == pd.IsInput && containsString(targetNames, d.Name) {
+			return d, true
+		}
+	}
+	return deviceRow{}, false
+}
+
+func virtualPresetIdentityMatches(pd recent.PresetDevice, d deviceRow) bool {
+	if pd.VirtualSink == nil {
+		return false
+	}
+	vs := *pd.VirtualSink
+	if vs.SinkName != "" && d.VirtualSinkName == vs.SinkName {
+		return true
+	}
+	return virtualSinkBackendIDMatches(d.BackendID, pd.IsInput, vs)
 }
 
 func virtualPresetDeviceNames(pd recent.PresetDevice) []string {
