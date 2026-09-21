@@ -367,7 +367,7 @@ func (s *ServerApp) sendAuthResultWithSession(protocol *transport.ServerSignalin
 
 func (s *ServerApp) createWebRTCPeer() (transport.PeerManager, transport.MediaDirection, error) {
 	direction := transport.DirectionSend
-	if s.cfg.Duplex {
+	if s.cfg.Duplex || s.cfg.Conference {
 		direction = transport.DirectionDuplex
 	} else if s.cfg.Reverse {
 		direction = transport.DirectionReceive

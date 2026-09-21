@@ -422,7 +422,7 @@ cli_flag_no_pool_warmup: "Tắt làm nóng pool buffer âm thanh khi khởi đ�
 cli_flag_audio_buffer_frames: "Kích thước buffer kênh âm thanh tính theo frame (1 frame=20 ms). Nhỏ=độ trễ thấp, lớn=ổn định hơn"
 cli_flag_dry_run: "Kiểm tra cấu hình và thiết bị, sau đó thoát mà không khởi động"
 cli_flag_loopback: "Bật thu loopback âm thanh hệ thống (macOS, cần BlackHole)"
-cli_flag_no_interactive: "Tắt TUI: cần --device, log vào stdout/tệp"
+cli_flag_no_interactive: "Tắt TUI: phải cấu hình các thiết bị âm thanh bắt buộc, log vào stdout/tệp"
 cli_flag_aec: "Bật triệt tiếng vọng âm (song công)"
 cli_flag_conference: "Alias cho --mode=conference"
 cli_flag_server_muted: "Máy chủ không gửi âm thanh trong chế độ hội nghị"

@@ -422,7 +422,7 @@ cli_flag_no_pool_warmup: "Desactivar precalentado de pools de buffers al arranca
 cli_flag_audio_buffer_frames: "Tamaño de buffer del canal de audio en frames (1 frame=20 ms). Menor=menos latencia, mayor=más estable"
 cli_flag_dry_run: "Validar config y dispositivo, y salir sin iniciar"
 cli_flag_loopback: "Habilitar captura loopback del audio del sistema (macOS, requiere BlackHole)"
-cli_flag_no_interactive: "Desactivar TUI: requiere --device, logs a stdout/archivo"
+cli_flag_no_interactive: "Desactivar TUI: requiere configurar los dispositivos de audio necesarios, logs a stdout/archivo"
 cli_flag_aec: "Habilitar cancelación de eco acústico (dúplex)"
 cli_flag_conference: "Alias de --mode=conference"
 cli_flag_server_muted: "El servidor no envía audio en modo conferencia"

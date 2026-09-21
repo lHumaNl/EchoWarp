@@ -129,8 +129,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
 	if noInteractive {
-		if cfg.DeviceID == nil {
-			return fmt.Errorf("--no-interactive requires --device to be specified")
+		if prepErr := prepareNonInteractiveAudioConfig(&cfg); prepErr != nil {
+			return prepErr
 		}
 		err = executeServerApp(cmd, &cfg)
 	} else {
