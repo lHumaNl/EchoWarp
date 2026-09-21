@@ -112,6 +112,40 @@ func TestClientApp_createPeer_SendMode(t *testing.T) {
 	defer peer.Close()
 }
 
+func TestClientApp_createPeer_ConferenceMode(t *testing.T) {
+	t.Parallel()
+	cfg := defaultClientConfig()
+	cfg.StreamMode = config.AudioModeConference
+	cfg.SyncFromStreamMode()
+	factory := &inlinePeerFactory{peer: &mockPeerManager{}}
+	app := NewClientApp(cfg, testClientLogger(), nil)
+	app.peerFactory = factory
+
+	peer, err := app.createPeer()
+
+	require.NoError(t, err)
+	require.NotNil(t, peer)
+	assert.Equal(t, transport.DirectionDuplex, factory.direction)
+}
+
+func TestClientApp_setupAudioPipeline_ConferenceStartsCapture(t *testing.T) {
+	t.Parallel()
+	cfg := defaultClientConfig()
+	cfg.StreamMode = config.AudioModeConference
+	cfg.SyncFromStreamMode()
+	app := NewClientApp(cfg, testClientLogger(), nil)
+	wantErr := errors.New("capture track sentinel")
+	peer := &mockPeerManager{
+		addAudioTrackFunc: func(sampleRate, channels uint32) (chan<- []byte, error) {
+			return nil, wantErr
+		},
+	}
+
+	err := app.setupAudioPipeline(context.Background(), peer, make(chan error, 2))
+
+	require.ErrorIs(t, err, wantErr)
+}
+
 func TestClientApp_createPeer_WithSTUNServers(t *testing.T) {
 	t.Parallel()
 	cfg := defaultClientConfig()
@@ -1281,11 +1315,13 @@ func (f *inlineSignalerFactory) CreateClientSignaler(address string, tlsConfig *
 
 // inlinePeerFactory is a simple mock factory for tests in this file.
 type inlinePeerFactory struct {
-	peer transport.PeerManager
-	err  error
+	peer      transport.PeerManager
+	err       error
+	direction transport.MediaDirection
 }
 
 func (f *inlinePeerFactory) CreatePeer(direction transport.MediaDirection, iceConfig transport.ICEConfig) (transport.PeerManager, error) {
+	f.direction = direction
 	return f.peer, f.err
 }
 

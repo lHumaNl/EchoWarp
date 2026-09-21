@@ -707,7 +707,7 @@ func (c *ClientApp) createSignaler(serverAddr string) transport.Signaler {
 
 func (c *ClientApp) createPeer() (transport.PeerManager, error) {
 	direction := transport.DirectionReceive
-	if c.cfg.Duplex {
+	if c.cfg.Duplex || c.cfg.Conference {
 		direction = transport.DirectionDuplex
 	} else if c.cfg.Reverse {
 		direction = transport.DirectionSend
@@ -723,7 +723,7 @@ func (c *ClientApp) createPeer() (transport.PeerManager, error) {
 }
 
 func (c *ClientApp) setupAudioPipeline(ctx context.Context, peer transport.PeerManager, audioDone chan error) error {
-	if c.cfg.Duplex {
+	if c.cfg.Duplex || c.cfg.Conference {
 		return c.setupDuplexAudioPipeline(ctx, peer, audioDone)
 	}
 	if c.cfg.Reverse {
@@ -800,10 +800,10 @@ func (c *ClientApp) setupReceiveAudioPipeline(ctx context.Context, peer transpor
 	if len(playbackDevs) == 1 {
 		playbackAGC = agcMap[playbackDevs[0].ID]
 	}
-	// Start device command handler only if not already running (duplex mode
-	// starts it in runCapturePipeline). In normal (receive-only) mode, this
-	// is the only place it gets wired.
-	if !c.cfg.Duplex && !c.cfg.Reverse {
+	// Start the device command handler only if a capture pipeline is not also
+	// running. Duplex and conference start it from runCapturePipeline; in
+	// normal receive-only mode this is the only place it gets wired.
+	if !c.cfg.Duplex && !c.cfg.Conference && !c.cfg.Reverse {
 		go HandleDeviceCommands(ctx, c.deviceCmdCh, gainCtl, agcMap, c.logger)
 	}
 	startJitteredPlayback(ctx, c.logger, c.cfg, peer, c.spectrum, c.levelMeter, audioDone, &c.incomingMuted, tap, gainCtl, playbackAGC)

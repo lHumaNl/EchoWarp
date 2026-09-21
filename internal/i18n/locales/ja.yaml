@@ -422,7 +422,7 @@ cli_flag_no_pool_warmup: "起動時のオーディオバッファプールのウ
 cli_flag_audio_buffer_frames: "オーディオチャンネルバッファサイズ（フレーム単位）。1 フレーム=20 ms。小さい=低レイテンシ、大きい=安定"
 cli_flag_dry_run: "設定とデバイスを検証し、起動せずに終了"
 cli_flag_loopback: "システムオーディオのループバックキャプチャを有効化（macOS、BlackHole が必要）"
-cli_flag_no_interactive: "TUI を無効化：--device が必要、ログは stdout/ファイルへ"
+cli_flag_no_interactive: "TUI を無効化：必要なオーディオデバイスの設定が必要、ログは stdout/ファイルへ"
 cli_flag_aec: "音響エコーキャンセラを有効化（双方向モード）"
 cli_flag_conference: "--mode=conference のエイリアス"
 cli_flag_server_muted: "サーバーはカンファレンスモードでオーディオを送信しない"

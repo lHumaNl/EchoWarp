@@ -313,8 +313,15 @@ jobs:
 
       - name: Create archive (zip, Windows)
         if: matrix.archive == 'zip' && matrix.goos == 'windows'
-        shell: bash
-        run: tar -acf EchoWarp_${{ matrix.suffix }}.zip EchoWarp.exe
+        shell: pwsh
+        run: |
+          $archive = "EchoWarp_${{ matrix.suffix }}.zip"
+          $verifyDir = Join-Path $env:RUNNER_TEMP "echowarp-zip-${{ matrix.suffix }}"
+          Compress-Archive -Path EchoWarp.exe -DestinationPath $archive -Force
+          Expand-Archive -Path $archive -DestinationPath $verifyDir -Force
+          if (-not (Test-Path (Join-Path $verifyDir "EchoWarp.exe"))) {
+            throw "EchoWarp.exe is missing from $archive"
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

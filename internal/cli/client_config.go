@@ -128,18 +128,7 @@ func getServerAddress(s *discovery.ServiceInfo) string {
 	return ""
 }
 
-func runClientDirect(cfg *config.Config) error {
-	if cfg.NoSIMDOptimization {
-		audio.DisableSIMD()
-	}
-
-	if !cfg.NoPoolWarmup {
-		audio.WarmupPools()
-	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-
+func runClientDirect(cmd *cobra.Command, cfg *config.Config) error {
 	// Use client-specific log file if not explicitly set
 	logFile := cfg.LogFile
 	if logFile == "" {
@@ -157,15 +146,28 @@ func runClientDirect(cfg *config.Config) error {
 	_, _ = fmt.Fprintf(os.Stderr, "Logging to: %s\n", logFile)
 	logger.Info("Client logger initialized", "log_file", logFile)
 
-	// Probe server to get authoritative config (mode, sample_rate, channels, etc.)
+	// Probe server before full validation because the server is authoritative
+	// for the streaming mode and audio parameters.
 	probeResult, probeErr := probe.ProbeServer(cfg.Address, cfg.Port)
 	if probeErr != nil {
 		logger.Error("Server not reachable", "address", cfg.Address, "port", cfg.Port, "error", probeErr)
 		return fmt.Errorf("server not reachable at %s:%d: %w", cfg.Address, cfg.Port, probeErr)
 	}
-	if err := probe.ApplyProbeToConfig(cfg, probeResult); err != nil {
+	if err := prepareProbedClientConfig(cmd, cfg, probeResult); err != nil {
 		return err
 	}
+
+	if cfg.NoSIMDOptimization {
+		audio.DisableSIMD()
+	}
+
+	if !cfg.NoPoolWarmup {
+		audio.WarmupPools()
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	logger.Info("Server config applied",
 		"mode", probeResult.Mode,
 		"sample_rate", probeResult.SampleRate,
@@ -212,6 +214,25 @@ func runClientDirect(cfg *config.Config) error {
 	default:
 		return runErr
 	}
+}
+
+func prepareProbedClientConfig(cmd *cobra.Command, cfg *config.Config, probeResult *probe.ProbeServerResult) error {
+	if err := probe.ApplyProbeToConfig(cfg, probeResult); err != nil {
+		return err
+	}
+
+	if deviceName, _ := cmd.Flags().GetString("device-name"); deviceName != "" {
+		deviceID, err := resolveDeviceByName(deviceName, cfg.Reverse)
+		if err != nil {
+			return err
+		}
+		cfg.DeviceID = deviceID
+	}
+
+	if err := prepareNonInteractiveAudioConfig(cfg); err != nil {
+		return err
+	}
+	return validateAndSaveConfig(cmd, cfg)
 }
 
 // runClientAutoReconnectLoop implements CLI auto-reconnect after server graceful shutdown.

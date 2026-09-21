@@ -422,7 +422,7 @@ cli_flag_no_pool_warmup: "시작 시 오디오 버퍼 풀 워밍업 비활성화
 cli_flag_audio_buffer_frames: "오디오 채널 버퍼 크기 (프레임). 1프레임=20 ms. 작을수록 지연 감소, 클수록 안정적"
 cli_flag_dry_run: "구성 및 장치 검증 후 시작 없이 종료"
 cli_flag_loopback: "시스템 오디오 루프백 캡처 활성화 (macOS, BlackHole 필요)"
-cli_flag_no_interactive: "TUI 비활성화: --device 필요, 로그는 stdout/파일로"
+cli_flag_no_interactive: "TUI 비활성화: 필요한 오디오 장치를 구성해야 하며 로그는 stdout/파일로 출력"
 cli_flag_aec: "음향 에코 제거 활성화 (듀플렉스 모드)"
 cli_flag_conference: "--mode=conference의 별칭"
 cli_flag_server_muted: "서버는 회의 모드에서 오디오를 전송하지 않음"

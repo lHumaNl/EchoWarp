@@ -60,6 +60,7 @@ Capture audio on one machine, play it on another — in real time over the netwo
   - [Diagnostics](#diagnostics)
   - [FAQ](#faq)
 - [CLI Mode](#cli-mode)
+  - [Non-interactive startup](#non-interactive-startup)
   - [Modes](#modes)
   - [Common Flags](#common-flags)
   - [Configuration](#configuration)
@@ -425,6 +426,30 @@ EchoWarp client -a 192.168.1.10 -d 2 -P mypassword
 EchoWarp devices
 ```
 
+### Non-interactive startup
+
+Use `--no-interactive` to skip the setup TUI and start immediately. Supply the required devices through flags or a config file:
+
+```bash
+# Normal mode: server captures, client plays back
+EchoWarp server --no-interactive --device 1 --password mypassword
+EchoWarp client --no-interactive --address 192.168.1.10 --device 2 --password mypassword
+
+# Duplex or conference client: assign devices by role
+EchoWarp client --no-interactive --address 192.168.1.10 \
+  --capture-device 1 --playback-device 2 --password mypassword
+
+# Conference hub with no local audio devices
+EchoWarp server --no-interactive --conference --server-muted --max-clients 8
+
+# Preconfigured files
+EchoWarp server --no-interactive --config server.yml
+EchoWarp client --no-interactive --config client.yml
+```
+
+When a client omits `--address`, non-interactive LAN discovery succeeds only if exactly one server is found. With multiple servers, specify `--address` explicitly.
+The client probes the server before validating device roles, so capture/playback requirements follow the server's authoritative Normal, Reverse, Duplex, or Conference mode.
+
 ### Modes
 
 See [Streaming Modes](#streaming-modes) for detailed descriptions of each mode.
@@ -441,6 +466,8 @@ See [Streaming Modes](#streaming-modes) for detailed descriptions of each mode.
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--device` | `-d` | Audio device ID |
+| `--capture-device` | | Capture device ID; repeat or pass a comma-separated list for multiple devices |
+| `--playback-device` | | Playback device ID; repeat or pass a comma-separated list for multiple devices |
 | `--device-name` | `-D` | Select device by name (substring match) |
 | `--password` | `-P` | Authentication password |
 | `--port` | `-p` | TCP port (default: 4415) |
@@ -457,6 +484,7 @@ See [Streaming Modes](#streaming-modes) for detailed descriptions of each mode.
 | `--aec` | | Acoustic echo cancellation (duplex) |
 | `--loopback` | | Capture system audio (macOS, requires BlackHole) |
 | `--dry-run` | | Validate config and exit |
+| `--no-interactive` | | Skip the setup TUI and start immediately; required devices must be configured |
 
 ### Configuration
 

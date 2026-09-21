@@ -247,6 +247,21 @@ func TestServerApp_CreateWebRTCPeer_ReceiveMode(t *testing.T) {
 	peer.Close()
 }
 
+func TestServerApp_CreateWebRTCPeer_ConferenceMode(t *testing.T) {
+	t.Parallel()
+	cfg := testServerConfig()
+	cfg.StreamMode = config.AudioModeConference
+	cfg.SyncFromStreamMode()
+	app := NewServerApp(cfg, testAppLogger(), nil, nil, nil)
+
+	peer, direction, err := app.createWebRTCPeer()
+
+	require.NoError(t, err)
+	require.NotNil(t, peer)
+	assert.Equal(t, transport.DirectionDuplex, direction)
+	peer.Close()
+}
+
 func TestServerApp_SetupAudioPipeline_SendMode(t *testing.T) {
 	t.Parallel()
 	cfg := testServerConfig()

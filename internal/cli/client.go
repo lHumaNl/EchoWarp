@@ -95,7 +95,10 @@ func runClient(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if deviceName, _ := cmd.Flags().GetString("device-name"); deviceName != "" {
+	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	deviceName, _ := cmd.Flags().GetString("device-name")
+	if deviceName != "" && (!noInteractive || dryRun) {
 		// Client in normal mode receives audio → output device; in reverse → input device
 		var id *uint32
 		id, err = resolveDeviceByName(deviceName, cfg.Reverse)
@@ -109,16 +112,19 @@ func runClient(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
-	// In TUI mode, address can be empty — user fills it interactively.
-	// Only validate config fully for non-interactive mode.
-	if noInteractive {
+	// A direct client learns its authoritative mode and audio parameters from
+	// the server, so full validation happens after the server probe. Dry-run
+	// has no probe and validates the locally selected mode instead.
+	if noInteractive && dryRun {
+		if err = prepareNonInteractiveAudioConfig(cfg); err != nil { //nolint:gocritic // avoiding shadow
+			return err
+		}
 		if err = validateAndSaveConfig(cmd, cfg); err != nil { //nolint:gocritic // avoiding shadow
 			return err
 		}
 	}
 
-	if dryRun, _ := cmd.Flags().GetBool("dry-run"); dryRun {
+	if dryRun {
 		return runDryRun(cfg)
 	}
 
@@ -157,10 +163,7 @@ func executeClientMode(cmd *cobra.Command, cfg *config.Config) error {
 		if cfg.Address == "" {
 			return fmt.Errorf("--no-interactive requires --address to be specified (or use interactive mode with --discover for LAN server discovery)")
 		}
-		if cfg.DeviceID == nil {
-			return fmt.Errorf("--no-interactive requires --device to be specified")
-		}
-		return runClientDirect(cfg)
+		return runClientDirect(cmd, cfg)
 	}
 	return runClientStreamingTUI(cmd, *cfg)
 }

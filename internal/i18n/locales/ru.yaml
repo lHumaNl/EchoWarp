@@ -422,7 +422,7 @@ cli_flag_no_pool_warmup: "Отключить прогрев пулов ауди�
 cli_flag_audio_buffer_frames: "Размер буфера аудиоканала в фреймах (1 фрейм=20 мс). Меньше=ниже задержка, больше=стабильнее"
 cli_flag_dry_run: "Проверить конфиг и устройство, затем выйти без старта"
 cli_flag_loopback: "Включить loopback-захват системного звука (macOS, требует BlackHole)"
-cli_flag_no_interactive: "Отключить TUI: требует --device, логи в stdout/файл"
+cli_flag_no_interactive: "Отключить TUI: требуемые аудиоустройства должны быть настроены, логи в stdout/файл"
 cli_flag_aec: "Включить акустическое эхоподавление (дуплекс)"
 cli_flag_conference: "Псевдоним для --mode=conference"
 cli_flag_server_muted: "Сервер не передаёт аудио в режиме конференции"
