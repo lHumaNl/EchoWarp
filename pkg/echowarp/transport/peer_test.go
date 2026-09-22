@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -322,6 +323,85 @@ func TestWebRTCPeer_Close_MultipleCalls(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestWebRTCPeer_HandleDataChannelMessage_AfterClose(t *testing.T) {
+	peer := NewWebRTCPeer(DirectionReceive)
+	msgCh := make(chan []byte, 1)
+	peer.dataChannels[msgCh] = struct{}{}
+
+	require.NoError(t, peer.Close())
+	require.NotPanics(t, func() {
+		peer.handleDataChannelMessage("test-dc", msgCh, webrtc.DataChannelMessage{
+			Data: []byte("late message"),
+		})
+	})
+
+	_, open := <-msgCh
+	assert.False(t, open, "the application channel must remain closed after shutdown")
+}
+
+func TestWebRTCPeer_CloseWaitsForDataChannelDeliveryGuard(t *testing.T) {
+	peer := NewWebRTCPeer(DirectionReceive)
+	msgCh := make(chan []byte, 1)
+	peer.dataChannels[msgCh] = struct{}{}
+
+	deliveryStarted := make(chan struct{})
+	releaseDelivery := make(chan struct{})
+	deliveryDone := make(chan struct{})
+	go func() {
+		peer.withOpenDataChannels(func() {
+			close(deliveryStarted)
+			<-releaseDelivery
+		})
+		close(deliveryDone)
+	}()
+	<-deliveryStarted
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- peer.Close()
+	}()
+
+	require.Eventually(t, func() bool {
+		if peer.mu.TryRLock() {
+			peer.mu.RUnlock()
+			return false
+		}
+		return true
+	}, time.Second, time.Millisecond, "Close never attempted to acquire the delivery guard")
+	require.Empty(t, closeDone, "Close returned while delivery still held the guard")
+
+	close(releaseDelivery)
+	select {
+	case <-deliveryDone:
+	case <-time.After(time.Second):
+		t.Fatal("active delivery did not finish")
+	}
+	select {
+	case err := <-closeDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Close did not finish after active delivery completed")
+	}
+
+	_, open := <-msgCh
+	assert.False(t, open, "Close must close the channel after active delivery completes")
+}
+
+func TestWebRTCPeer_CloseClosesEveryTrackedDataChannel(t *testing.T) {
+	peer := NewWebRTCPeer(DirectionReceive)
+	first := make(chan []byte, 1)
+	second := make(chan []byte, 1)
+	peer.dataChannels[first] = struct{}{}
+	peer.dataChannels[second] = struct{}{}
+
+	require.NoError(t, peer.Close())
+
+	_, firstOpen := <-first
+	_, secondOpen := <-second
+	assert.False(t, firstOpen)
+	assert.False(t, secondOpen)
+}
+
 func TestWebRTCPeer_FullHandshake_WithICECandidates(t *testing.T) {
 	sender := NewWebRTCPeer(DirectionSend)
 	err := sender.CreatePeerConnection(defaultICEConfig())
@@ -529,5 +609,26 @@ func TestWebRTCPeer_ControlDataChannel_Bidirectional(t *testing.T) {
 	}
 
 	err = sender.SendControl("test_action", map[string]string{"key": "value"})
-	assert.NoError(t, err)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return receiver.ControlMessages() != nil
+	}, time.Second, time.Millisecond, "receiver control channel was not registered")
+	controlMessages := receiver.ControlMessages()
+	select {
+	case raw := <-controlMessages:
+		var msg struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Action string            `json:"action"`
+				Data   map[string]string `json:"data"`
+			} `json:"payload"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &msg))
+		assert.Equal(t, TypeControl, msg.Type)
+		assert.Equal(t, "test_action", msg.Payload.Action)
+		assert.Equal(t, "value", msg.Payload.Data["key"])
+	case <-time.After(5 * time.Second):
+		t.Fatal("receiver did not get control message")
+	}
 }

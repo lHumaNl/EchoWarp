@@ -30,16 +30,18 @@ type WebRTCPeer struct {
 	connStateHandler      func(state webrtc.PeerConnectionState)
 	onICECandidateHandler func(candidate *webrtc.ICECandidate)
 	dataChannelHandler    func(label string, msgCh <-chan []byte, sendFn func([]byte) error)
-	dataChannels          map[string]chan []byte
+	dataChannels          map[chan []byte]struct{}
 	bufferedCandidates    []webrtc.ICECandidateInit
 	remoteDescSet         bool
 	controlDC             *webrtc.DataChannel
 	controlSendFn         func([]byte) error
+	controlMsgCh          chan []byte
 	chatDC                *webrtc.DataChannel
 	chatSendFn            func([]byte) error
 	chatMsgCh             chan []byte
 	dcReadyCh             chan struct{}
 	dcReadyOnce           sync.Once
+	closed                bool
 	mu                    sync.RWMutex
 }
 
@@ -48,7 +50,7 @@ type WebRTCPeer struct {
 func NewWebRTCPeer(direction MediaDirection) *WebRTCPeer {
 	return &WebRTCPeer{
 		direction:    direction,
-		dataChannels: make(map[string]chan []byte),
+		dataChannels: make(map[chan []byte]struct{}),
 		dcReadyCh:    make(chan struct{}),
 	}
 }
@@ -134,13 +136,19 @@ func (p *WebRTCPeer) setupDataChannelHandler(pc *webrtc.PeerConnection) {
 
 func (p *WebRTCPeer) handleDataChannelOpen(dc *webrtc.DataChannel, ch chan []byte, handler func(string, <-chan []byte, func([]byte) error)) {
 	p.mu.Lock()
-	p.dataChannels[dc.Label()] = ch
+	if p.closed {
+		close(ch)
+		p.mu.Unlock()
+		return
+	}
+	p.dataChannels[ch] = struct{}{}
 
 	if dc.Label() == LabelControl {
 		p.controlDC = dc
 		p.controlSendFn = func(data []byte) error {
 			return dc.Send(data)
 		}
+		p.controlMsgCh = ch
 	}
 	if dc.Label() == LabelChat {
 		p.chatDC = dc
@@ -167,25 +175,36 @@ func (p *WebRTCPeer) handleDataChannelOpen(dc *webrtc.DataChannel, ch chan []byt
 }
 
 func (p *WebRTCPeer) handleDataChannelMessage(label string, ch chan<- []byte, msg webrtc.DataChannelMessage) {
-	if label == LabelControl {
-		var ctrlMsg struct {
-			Type    string `json:"type"`
-			Payload struct {
-				Action string `json:"action"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal(msg.Data, &ctrlMsg); err == nil {
-			if ctrlMsg.Type == TypeControl && ctrlMsg.Payload.Action == ActionDCReady {
-				p.markDCReady()
-				return
+	p.withOpenDataChannels(func() {
+		if label == LabelControl {
+			var ctrlMsg struct {
+				Type    string `json:"type"`
+				Payload struct {
+					Action string `json:"action"`
+				} `json:"payload"`
+			}
+			if err := json.Unmarshal(msg.Data, &ctrlMsg); err == nil {
+				if ctrlMsg.Type == TypeControl && ctrlMsg.Payload.Action == ActionDCReady {
+					p.markDCReady()
+					return
+				}
 			}
 		}
+		select {
+		case ch <- msg.Data:
+		default:
+			metrics.FramesDroppedTotal.WithLabelValues("datachannel").Inc()
+		}
+	})
+}
+
+func (p *WebRTCPeer) withOpenDataChannels(deliver func()) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.closed {
+		return
 	}
-	select {
-	case ch <- msg.Data:
-	default:
-		metrics.FramesDroppedTotal.WithLabelValues("datachannel").Inc()
-	}
+	deliver()
 }
 
 func (p *WebRTCPeer) setupConnectionStateHandler(pc *webrtc.PeerConnection) {
@@ -477,34 +496,11 @@ func (p *WebRTCPeer) CreateControlDataChannel() error {
 	// sent by the remote side immediately after its own OnOpen fires.
 	ch := make(chan []byte, 64)
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		var ctrlMsg struct {
-			Type    string `json:"type"`
-			Payload struct {
-				Action string `json:"action"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal(msg.Data, &ctrlMsg); err == nil {
-			if ctrlMsg.Type == TypeControl && ctrlMsg.Payload.Action == ActionDCReady {
-				p.markDCReady()
-				return
-			}
-		}
-		select {
-		case ch <- msg.Data:
-		default:
-		}
+		p.handleDataChannelMessage(LabelControl, ch, msg)
 	})
 
 	dc.OnOpen(func() {
-		p.mu.Lock()
-		p.dataChannels[LabelControl] = ch
-		p.controlDC = dc
-		p.controlSendFn = func(data []byte) error {
-			return dc.Send(data)
-		}
-		p.mu.Unlock()
-
-		p.sendDCReady()
+		p.handleDataChannelOpen(dc, ch, nil)
 	})
 
 	return nil
@@ -591,7 +587,7 @@ func (p *WebRTCPeer) SendControl(action string, payload interface{}) error {
 // via the WebRTC data channel. Returns nil if the control channel hasn't been set up yet.
 func (p *WebRTCPeer) ControlMessages() <-chan []byte {
 	p.mu.RLock()
-	ch := p.dataChannels[LabelControl]
+	ch := p.controlMsgCh
 	p.mu.RUnlock()
 	return ch
 }
@@ -612,22 +608,11 @@ func (p *WebRTCPeer) CreateChatDataChannel() error {
 	// sent by the remote side immediately after its own OnOpen fires.
 	ch := make(chan []byte, 64)
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		select {
-		case ch <- msg.Data:
-		default:
-			metrics.FramesDroppedTotal.WithLabelValues("datachannel").Inc()
-		}
+		p.handleDataChannelMessage(LabelChat, ch, msg)
 	})
 
 	dc.OnOpen(func() {
-		p.mu.Lock()
-		p.dataChannels[LabelChat] = ch
-		p.chatDC = dc
-		p.chatSendFn = func(data []byte) error {
-			return dc.Send(data)
-		}
-		p.chatMsgCh = ch
-		p.mu.Unlock()
+		p.handleDataChannelOpen(dc, ch, nil)
 	})
 
 	return nil
@@ -659,6 +644,11 @@ func (p *WebRTCPeer) ChatMessages() <-chan []byte {
 // Close terminates the peer connection and releases all resources.
 func (p *WebRTCPeer) Close() error {
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	p.closed = true
 
 	done := p.audioTrackDone
 	dataCh := p.audioTrackChan
@@ -667,16 +657,18 @@ func (p *WebRTCPeer) Close() error {
 
 	p.audioTrackDone = nil
 	p.audioTrackChan = nil
+	p.controlDC = nil
+	p.controlSendFn = nil
+	p.controlMsgCh = nil
 	p.chatDC = nil
 	p.chatSendFn = nil
 	p.chatMsgCh = nil
 	p.pc = nil
 
-	for k, ch := range p.dataChannels {
+	for ch := range p.dataChannels {
 		close(ch)
-		delete(p.dataChannels, k)
 	}
-	p.dataChannels = make(map[string]chan []byte)
+	p.dataChannels = make(map[chan []byte]struct{})
 
 	p.mu.Unlock()
 
