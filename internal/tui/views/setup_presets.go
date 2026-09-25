@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/preset"
 	"github.com/lHumaNl/echowarp/internal/recent"
 	"github.com/lHumaNl/echowarp/internal/virtualstate"
@@ -213,32 +214,14 @@ func virtualSinkCaptureName(vs recent.VirtualSinkPreset) string {
 // including both device selection and server-side settings (port, password,
 // max_clients, tls*). The mode parameter documents the target mode; default-
 // omission happens later at Save time via preset.DefaultsFor(mode).
-func (m *SetupModel) CollectModePreset(mode string) preset.ModePreset {
-	_ = mode // mode is part of the API surface; default-omission happens in preset.Save.
-	devices := m.CollectPresetDevices().Devices
-	mp := preset.ModePreset{Devices: devices, VirtualSinks: m.CollectVirtualSinkPresets()}
-
-	for _, f := range m.Fields {
-		switch f.Key {
-		case "port":
-			mp.Port = f.IntValue()
-		case "password":
-			mp.Password = f.Value
-		case "max_clients":
-			mp.MaxClients = f.IntValue()
-		}
+func (m *SetupModel) CollectModePreset(mode string, configs ...config.Config) preset.ModePreset {
+	cfg := m.BuildConfig()
+	if len(configs) > 0 {
+		cfg = configs[0]
 	}
-	for _, f := range m.AdvancedFields {
-		switch f.Key {
-		case "tls":
-			mp.TLS = f.Value == "on"
-		case "tls_cert":
-			mp.TLSCert = f.Value
-		case "tls_key":
-			mp.TLSKey = f.Value
-		case "log_level":
-			mp.LogLevel = f.Value
-		}
-	}
-	return mp
+	cfg.StreamMode = config.AudioMode(mode)
+	cfg.SyncFromStreamMode()
+	devices := m.CollectPresetDevices()
+	devices.VirtualSinks = m.CollectVirtualSinkPresets()
+	return preset.FromConfig(cfg, devices)
 }

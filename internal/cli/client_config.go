@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -16,8 +17,10 @@ import (
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/logging"
 	"github.com/lHumaNl/echowarp/internal/probe"
+	"github.com/lHumaNl/echowarp/internal/startup"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
+	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
 )
 
 func loadClientConfig(cmd *cobra.Command) (*config.Config, error) {
@@ -128,7 +131,7 @@ func getServerAddress(s *discovery.ServiceInfo) string {
 	return ""
 }
 
-func runClientDirect(cmd *cobra.Command, cfg *config.Config) error {
+func runClientDirect(cmd *cobra.Command, cfg *config.Config, intents ...startup.Intent) error {
 	// Use client-specific log file if not explicitly set
 	logFile := cfg.LogFile
 	if logFile == "" {
@@ -153,7 +156,20 @@ func runClientDirect(cmd *cobra.Command, cfg *config.Config) error {
 		logger.Error("Server not reachable", "address", cfg.Address, "port", cfg.Port, "error", probeErr)
 		return fmt.Errorf("server not reachable at %s:%d: %w", cfg.Address, cfg.Port, probeErr)
 	}
-	if err := prepareProbedClientConfig(cmd, cfg, probeResult); err != nil {
+	if len(intents) > 0 && intents[0].Recent != nil {
+		dm, err := audio.NewDeviceManager()
+		if err != nil {
+			return err
+		}
+		devices, listErr := listAllDevices(dm)
+		_ = dm.Close()
+		if listErr != nil {
+			return listErr
+		}
+		if err := prepareRecentClientConfig(cmd, cfg, devices, probeResult, intents[0]); err != nil {
+			return err
+		}
+	} else if err := prepareProbedClientConfig(cmd, cfg, probeResult); err != nil {
 		return err
 	}
 
@@ -193,7 +209,8 @@ func runClientDirect(cmd *cobra.Command, cfg *config.Config) error {
 
 	serverStoppedCh := make(chan struct{})
 	clientApp := app.NewClientApp(*cfg, logger, tlsConfig).
-		WithServerStoppedChannel(serverStoppedCh)
+		WithServerStoppedChannel(serverStoppedCh).
+		WithStatsHook(successfulClientHistoryHook(*cfg, probeResult, logger))
 
 	runErr := app.RunWithReconnect(
 		ctx, logger,
@@ -286,7 +303,9 @@ func runClientAutoReconnectLoop(ctx context.Context, logger *slog.Logger, cfg *c
 		}
 
 		// Apply non-critical changes.
+		insecure := cfg.TLSInsecure // Keep the established certificate-verification policy.
 		_ = probe.ApplyProbeToConfig(cfg, probeResult)
+		cfg.TLSInsecure = insecure
 
 		// Rebuild TLS config in case probe changed it.
 		var tlsConfig *tls.Config
@@ -301,7 +320,8 @@ func runClientAutoReconnectLoop(ctx context.Context, logger *slog.Logger, cfg *c
 		logger.Info("Server available, reconnecting...", "attempt", attempt)
 		serverStoppedCh := make(chan struct{})
 		clientApp := app.NewClientApp(*cfg, logger, tlsConfig).
-			WithServerStoppedChannel(serverStoppedCh)
+			WithServerStoppedChannel(serverStoppedCh).
+			WithStatsHook(successfulClientHistoryHook(*cfg, probeResult, logger))
 
 		runErr := app.RunWithReconnect(ctx, logger,
 			cfg.MaxReconnectAttempts,
@@ -317,5 +337,38 @@ func runClientAutoReconnectLoop(ctx context.Context, logger *slog.Logger, cfg *c
 		default:
 			return runErr
 		}
+	}
+}
+
+func successfulClientHistoryHook(cfg config.Config, info *probe.ProbeServerResult, logger *slog.Logger) func(transport.ConnectionStats) {
+	var connected atomic.Bool
+	return func(stats transport.ConnectionStats) {
+		if stats.State != "connected" {
+			connected.Store(false)
+			return
+		}
+		if !connected.CompareAndSwap(false, true) {
+			return
+		}
+		func() {
+			dm, err := audio.NewDeviceManager()
+			if err != nil {
+				logger.Warn("Cannot snapshot connected audio devices", "error", err)
+				return
+			}
+			defer dm.Close() //nolint:errcheck
+			devices, err := listAllDevices(dm)
+			if err != nil {
+				logger.Warn("Cannot enumerate connected audio devices", "error", err)
+				return
+			}
+			prepared, err := startup.Prepare(cfg, devices, nil, info)
+			if err == nil {
+				err = startup.SaveSuccessful(prepared, info)
+			}
+			if err != nil {
+				logger.Warn("Cannot save successful connection", "error", err)
+			}
+		}()
 	}
 }

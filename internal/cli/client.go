@@ -17,6 +17,7 @@ import (
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/logging"
+	"github.com/lHumaNl/echowarp/internal/startup"
 	"github.com/lHumaNl/echowarp/internal/tui"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
@@ -46,6 +47,7 @@ func newClientCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringP("address", "a", "", i18n.T("cli_flag_address"))
+	cmd.Flags().Bool("recent", false, "Connect to the most recent successful server using saved audio devices")
 	cmd.Flags().IntP("port", "p", 4415, i18n.T("cli_flag_port_client"))
 	cmd.Flags().UintP("device", "d", 0, i18n.T("cli_flag_device"))
 	cmd.Flags().UintSlice("capture-device", nil, i18n.T("cli_flag_capture_device"))
@@ -77,7 +79,7 @@ func newClientCmd() *cobra.Command {
 
 	applyGroupedUsage(cmd, []flagGroup{
 		{"Audio", []string{"device", "device-name", "capture-device", "playback-device", "virtual-mic", "loopback", "aec"}},
-		{"Network", []string{"address", "port", "stun-server", "tls-insecure", "discover", "discover-timeout"}},
+		{"Network", []string{"address", "recent", "port", "stun-server", "tls-insecure", "discover", "discover-timeout"}},
 		{"Security", []string{"password"}},
 		{"Chat", []string{"nickname"}},
 		{"Recording", []string{"record-dir"}},
@@ -94,11 +96,15 @@ func runClient(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	intent, err := prepareStartupIntent(cmd, cfg)
+	if err != nil {
+		return err
+	}
 
 	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	deviceName, _ := cmd.Flags().GetString("device-name")
-	if deviceName != "" && (!noInteractive || dryRun) {
+	if deviceName != "" && dryRun {
 		// Client in normal mode receives audio → output device; in reverse → input device
 		var id *uint32
 		id, err = resolveDeviceByName(deviceName, cfg.Reverse)
@@ -108,8 +114,13 @@ func runClient(cmd *cobra.Command, args []string) error {
 		cfg.DeviceID = id
 	}
 
-	if err = handleClientDiscovery(cmd, cfg); err != nil { //nolint:gocritic // avoiding shadow
-		return err
+	if noInteractive && intent.Problem != "" {
+		return fmt.Errorf("%s", intent.Problem)
+	}
+	if intent.Problem == "" && !dryRun {
+		if err = handleClientDiscovery(cmd, cfg); err != nil { //nolint:gocritic // avoiding shadow
+			return err
+		}
 	}
 
 	// A direct client learns its authoritative mode and audio parameters from
@@ -128,7 +139,7 @@ func runClient(cmd *cobra.Command, args []string) error {
 		return runDryRun(cfg)
 	}
 
-	err = executeClientMode(cmd, cfg)
+	err = executeClientMode(cmd, cfg, intent)
 
 	if err == nil {
 		suggestSaveConfig(cmd, cfg)
@@ -157,15 +168,19 @@ func validateAndSaveConfig(cmd *cobra.Command, cfg *config.Config) error {
 	return nil
 }
 
-func executeClientMode(cmd *cobra.Command, cfg *config.Config) error {
+func executeClientMode(cmd *cobra.Command, cfg *config.Config, intents ...startup.Intent) error {
+	var intent startup.Intent
+	if len(intents) > 0 {
+		intent = intents[0]
+	}
 	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
 	if noInteractive {
 		if cfg.Address == "" {
 			return fmt.Errorf("--no-interactive requires --address to be specified (or use interactive mode with --discover for LAN server discovery)")
 		}
-		return runClientDirect(cmd, cfg)
+		return runClientDirect(cmd, cfg, intent)
 	}
-	return runClientStreamingTUI(cmd, *cfg)
+	return runClientStreamingTUI(cmd, *cfg, intent)
 }
 
 func runClientInteractive(_ *cobra.Command, cfg *config.Config) error {
@@ -207,7 +222,7 @@ func runClientInteractive(_ *cobra.Command, cfg *config.Config) error {
 
 // runClientStreamingTUI launches the client with a full TUI using an already-parsed config.
 // Used when the user runs `echowarp client` without --no-interactive.
-func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
+func runClientStreamingTUI(_ *cobra.Command, cfg config.Config, intents ...startup.Intent) error {
 	if cfg.NoSIMDOptimization {
 		audio.DisableSIMD()
 	}
@@ -399,7 +414,7 @@ func runClientStreamingTUI(_ *cobra.Command, cfg config.Config) error {
 	if cliLogFile == "" {
 		cliLogFile = logging.GetDefaultLogFile("client")
 	}
-	tuiModel := tui.NewModelWithOutputDevices(cfg, devices, nil).
+	tuiModel := tui.NewModelWithOutputDevices(cfg, devices, nil, intents...).
 		WithDeviceEnumerator(dm).
 		WithStartFunc(startFunc).
 		WithLogChannel(logCh).

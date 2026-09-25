@@ -32,13 +32,13 @@ func TestModel_Init_StartsOnCorrectScreen(t *testing.T) {
 		assert.NotNil(t, cmd)
 	})
 
-	t.Run("non-nil DeviceID starts on ScreenConnection", func(t *testing.T) {
+	t.Run("configured DeviceID without launch intent stays in setup", func(t *testing.T) {
 		deviceID := uint32(1)
 		cfg := config.Config{DeviceID: &deviceID}
 		m := NewModel(cfg, devices)
 		cmd := m.Init()
 
-		assert.Equal(t, ScreenConnection, m.screen)
+		assert.Equal(t, ScreenDeviceSelect, m.screen)
 		assert.NotNil(t, cmd)
 	})
 }
@@ -86,6 +86,7 @@ func TestModel_Connection_ShowsConnectionInfo(t *testing.T) {
 	devices := []audio.AudioDevice{}
 
 	m := NewModel(cfg, devices)
+	m.screen = ScreenConnection
 	_ = m.Init()
 
 	output := m.View()
@@ -165,6 +166,7 @@ func TestModel_Error_ShowsErrorMessage(t *testing.T) {
 	devices := []audio.AudioDevice{}
 
 	m := NewModel(cfg, devices)
+	m.screen = ScreenConnection
 	_ = m.Init()
 
 	testErr := errors.New("connection failed")
@@ -194,6 +196,7 @@ func TestModel_Connection_ConnectedMsg_MovesToStreaming(t *testing.T) {
 	devices := []audio.AudioDevice{}
 
 	m := NewModel(cfg, devices)
+	m.screen = ScreenConnection
 	_ = m.Init()
 	require.Equal(t, ScreenConnection, m.screen)
 

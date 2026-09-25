@@ -31,6 +31,7 @@ func (s *ServerApp) runMulti(ctx context.Context) error {
 		return ewerrors.Wrap(err, ewerrors.ErrNetworkConnection, "start TCP listener")
 	}
 	defer func() { _ = listener.Close() }() //nolint:errcheck
+	s.notifyListening()
 
 	go s.closeListenerOnContextDone(ctx, listener)
 	go s.processCommands(ctx)

@@ -29,6 +29,8 @@ type remoteAddrConn struct {
 
 type remoteAddrAddr string
 
+var errServerListenerStartup = errors.New("server listener startup failed")
+
 func (a remoteAddrAddr) Network() string { return "tcp" }
 func (a remoteAddrAddr) String() string  { return string(a) }
 
@@ -58,6 +60,9 @@ func (s *ServerApp) runSingle(ctx context.Context) error {
 		}
 
 		if err := s.handleOneClient(ctx, listenAddr); err != nil {
+			if errors.Is(err, errServerListenerStartup) {
+				return err
+			}
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
@@ -229,24 +234,38 @@ func (s *ServerApp) createAndStartSignaler(ctx context.Context, listenAddr strin
 	signaler := s.signalerFactory.CreateServerSignaler(listenAddr, s.tlsConfig)
 
 	sigCtx, sigCancel := context.WithCancel(ctx)
-
+	startErr := make(chan error, 1)
 	go func() {
-		if err := signaler.Start(sigCtx); err != nil && sigCtx.Err() == nil {
-			s.logger.Error("Signaling error", "error", err)
+		if err := signaler.Start(sigCtx); err != nil {
+			startErr <- err
 		}
 	}()
 
 	s.logger.Info("Waiting for client connection...")
 
-	select {
-	case <-signaler.Ready():
-		s.logger.Info("Client connected", "addr", signaler.RemoteAddr())
-	case <-sigCtx.Done():
-		sigCancel()
-		return nil, nil, nil, sigCtx.Err()
+	var listenerReady <-chan struct{}
+	if listener, ok := signaler.(interface{ ListenerReady() <-chan struct{} }); ok {
+		listenerReady = listener.ListenerReady()
 	}
-
-	return signaler, sigCtx, sigCancel, nil
+	for {
+		select {
+		case <-listenerReady:
+			s.notifyListening()
+			listenerReady = nil
+		case <-signaler.Ready():
+			s.notifyListening()
+			s.logger.Info("Client connected", "addr", signaler.RemoteAddr())
+			return signaler, sigCtx, sigCancel, nil
+		case err := <-startErr:
+			sigCancel()
+			_ = signaler.Close()
+			return nil, nil, nil, fmt.Errorf("%w: %w", errServerListenerStartup, err)
+		case <-sigCtx.Done():
+			sigCancel()
+			_ = signaler.Close()
+			return nil, nil, nil, sigCtx.Err()
+		}
+	}
 }
 
 func (s *ServerApp) checkClientAccess(signaler transport.Signaler) (string, error) {

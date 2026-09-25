@@ -254,6 +254,9 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 				break
 			}
 		}
+		for i := range devicePreset.Devices {
+			devicePreset.Devices[i].VolumeSet = devicePreset.Devices[i].Volume == 0
+		}
 		existingPresets[mode] = devicePreset
 
 		servers = recent.Add(servers, recent.Server{
@@ -261,6 +264,7 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 			Port:          cfg.Port,
 			Hostname:      hostname,
 			ServerID:      serverID,
+			LastMode:      mode,
 			LastConnected: time.Now(),
 			Presets:       existingPresets,
 			LogLevel:      cfg.LogLevel,
@@ -275,10 +279,9 @@ func saveRecentServerCmd(cfg config.Config, probeRes *views.ProbeServerResult, s
 // last_mode is also updated to `mode` so the next startup resumes in this mode.
 func saveServerPresetCmd(mp preset.ModePreset, mode string) tea.Cmd {
 	return func() tea.Msg {
-		sp := preset.Load()
-		sp.Set(mode, mp)
-		sp.LastMode = mode
-		_ = preset.Save(sp) //nolint:errcheck
+		if err := preset.SaveModeSnapshot(mode, mp); err != nil {
+			return ErrorMsg{Err: err}
+		}
 		return nil
 	}
 }

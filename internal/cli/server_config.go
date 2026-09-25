@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/startup"
 	"github.com/lHumaNl/echowarp/internal/version"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
@@ -127,6 +128,7 @@ func applyFlagOverrides(cmd *cobra.Command, cfg *config.Config) {
 		overrideIntFlag(cmd, "max-failed", &cfg.MaxFailedAttempts)
 	}
 	overrideIntFlag(cmd, "max-reconnect", &cfg.MaxReconnectAttempts)
+	overrideIntFlag(cmd, "rate-limit", &cfg.RateLimit)
 	overrideBoolFlag(cmd, "virtual-mic", &cfg.VirtualMic)
 	overrideStringSliceFlag(cmd, "stun-server", &cfg.STUNServers)
 	overrideStringFlag(cmd, "tls-cert", &cfg.TLSCert)
@@ -186,6 +188,8 @@ func overrideDeviceFlag(cmd *cobra.Command, cfg *config.Config) {
 		val, _ := cmd.Flags().GetUint("device")
 		id := uint32(val)
 		cfg.DeviceID = &id
+		cfg.Devices = nil
+		cfg.InputDeviceID, cfg.OutputDeviceID = nil, nil
 	}
 	overrideMultiDeviceFlags(cmd, cfg)
 }
@@ -197,6 +201,23 @@ func overrideMultiDeviceFlags(cmd *cobra.Command, cfg *config.Config) {
 	if !captureChanged && !playbackChanged {
 		return
 	}
+	// CLI selections replace the configured role, not append conflicting devices.
+	kept := make([]config.DeviceEntry, 0, len(cfg.Devices))
+	for _, device := range cfg.Devices {
+		if (captureChanged && (device.Role == config.RoleCapture || device.Type == config.DeviceInput)) ||
+			(playbackChanged && (device.Role == config.RolePlayback || device.Type == config.DeviceOutput)) {
+			continue
+		}
+		kept = append(kept, device)
+	}
+	cfg.Devices = kept
+	if captureChanged {
+		cfg.InputDeviceID = nil
+	}
+	if playbackChanged {
+		cfg.OutputDeviceID = nil
+	}
+	cfg.DeviceID = nil
 
 	if captureChanged {
 		ids, _ := cmd.Flags().GetUintSlice("capture-device")
@@ -299,6 +320,11 @@ func setupBanManager(cfg *config.Config, logger *slog.Logger) (ban.BanManager, e
 }
 
 func setupTLSConfig(cfg *config.Config) (*tls.Config, error) {
+	check := *cfg
+	check.Mode = config.ModeServer
+	if err := startup.ValidateServerTLS(check); err != nil {
+		return nil, err
+	}
 	if cfg.TLSCert == "" || cfg.TLSKey == "" {
 		return nil, nil
 	}
@@ -307,6 +333,7 @@ func setupTLSConfig(cfg *config.Config) (*tls.Config, error) {
 		return nil, fmt.Errorf("load TLS cert: %w", err)
 	}
 	cfg.TLSSelfSigned = isCertSelfSigned(cfg.TLSCert)
+	cfg.TLS = true
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
@@ -335,6 +362,13 @@ func setupRateLimiter(cmd *cobra.Command) *auth.IPRateLimiter {
 	rateLimit, _ := cmd.Flags().GetInt("rate-limit")
 	if rateLimit > 0 {
 		return auth.NewIPRateLimiter(rateLimit)
+	}
+	return nil
+}
+
+func serverRateLimiter(cfg config.Config) *auth.IPRateLimiter {
+	if cfg.RateLimit > 0 {
+		return auth.NewIPRateLimiter(cfg.RateLimit)
 	}
 	return nil
 }

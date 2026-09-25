@@ -208,7 +208,7 @@ func (m Model) updateStreaming(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 			// Terminal bell on disconnect
 			fmt.Print("\a")
 		}
-		return m, waitForStats(m.statsCh, m.errCh)
+		return m, tea.Batch(append(cmds, waitForStats(m.statsCh, m.errCh))...)
 
 	case ErrorMsg:
 		m.stats.State = "disconnected"

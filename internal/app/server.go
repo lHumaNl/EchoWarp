@@ -116,6 +116,8 @@ type ServerApp struct {
 
 	// Callback invoked when client count changes (for probe/session info).
 	onClientCount func(int)
+	onListening   func()
+	listeningOnce sync.Once
 
 	// Graceful stop: closed when TUI requests shutdown (before context cancellation).
 	stopCh <-chan struct{}
@@ -247,6 +249,21 @@ func NewServerApp(cfg config.Config, logger *slog.Logger, banMgr ban.BanManager,
 		s.conference.AttachRoom(s.conferenceRoom, cfg.Channels)
 	}
 	return s
+}
+
+// WithListeningHook observes successful listener startup, not an attempted Run.
+// Install before Run. The hook must return promptly and is called once per app.
+func (s *ServerApp) WithListeningHook(fn func()) *ServerApp {
+	s.onListening = fn
+	return s
+}
+
+func (s *ServerApp) notifyListening() {
+	s.listeningOnce.Do(func() {
+		if s.onListening != nil {
+			s.onListening()
+		}
+	})
 }
 
 // ParticipantCommandChannel returns the internal participant command channel

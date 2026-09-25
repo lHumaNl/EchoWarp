@@ -147,7 +147,7 @@ func TestServerApp_CreateAndStartSignaler_WithTLS(t *testing.T) {
 
 	signaler, _, sigCancel, err := app.createAndStartSignaler(ctxTimeout, ":0")
 	if err != nil {
-		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.ErrorIs(t, err, errServerListenerStartup)
 		return
 	}
 	defer sigCancel()

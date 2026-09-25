@@ -18,9 +18,9 @@ import (
 	"github.com/lHumaNl/echowarp/internal/config"
 	"github.com/lHumaNl/echowarp/internal/i18n"
 	"github.com/lHumaNl/echowarp/internal/logging"
+	"github.com/lHumaNl/echowarp/internal/startup"
 	"github.com/lHumaNl/echowarp/internal/tui"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
-	"github.com/lHumaNl/echowarp/pkg/echowarp/auth"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/ban"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/transport"
@@ -51,6 +51,7 @@ func newServerCmd() *cobra.Command {
 	cmd.Flags().UintSlice("playback-device", nil, i18n.T("cli_flag_playback_device"))
 	cmd.Flags().StringP("password", "P", "", i18n.T("cli_flag_password"))
 	cmd.Flags().StringP("mode", "m", "normal", i18n.T("cli_flag_mode"))
+	cmd.Flags().Bool("recent", false, "Restore the complete saved server profile for the selected or last mode")
 	cmd.Flags().BoolP("reverse", "r", false, i18n.T("cli_flag_reverse"))
 	cmd.Flags().BoolP("duplex", "X", false, i18n.T("cli_flag_duplex"))
 	cmd.Flags().Int("sample-rate", 48000, i18n.T("cli_flag_sample_rate"))
@@ -73,7 +74,7 @@ func newServerCmd() *cobra.Command {
 	cmd.Flags().Bool("no-discovery", false, i18n.T("cli_flag_no_discovery"))
 	cmd.Flags().StringP("device-name", "D", "", i18n.T("cli_flag_device_name"))
 	cmd.Flags().String("server-name", "", i18n.T("cli_flag_server_name"))
-	cmd.Flags().Int("rate-limit", 5, i18n.T("cli_flag_rate_limit"))
+	cmd.Flags().Int("rate-limit", config.DefaultServerRateLimit, i18n.T("cli_flag_rate_limit"))
 	cmd.Flags().Bool("no-simd-optimization", false, i18n.T("cli_flag_no_simd"))
 	cmd.Flags().Bool("no-pool-warmup", false, i18n.T("cli_flag_no_pool_warmup"))
 	cmd.Flags().Int("audio-buffer-frames", 5, i18n.T("cli_flag_audio_buffer_frames"))
@@ -96,7 +97,7 @@ func newServerCmd() *cobra.Command {
 		{"Network", []string{"port", "stun-server", "tls-cert", "tls-key", "no-discovery", "server-name", "rate-limit"}},
 		{"Security", []string{"password", "max-auth-failures", "ban-file", "hwid-required"}},
 		{"Conference", []string{"conference", "max-clients", "server-muted", "record", "record-dir"}},
-		{"Mode", []string{"reverse", "duplex"}},
+		{"Mode", []string{"mode", "recent", "reverse", "duplex"}},
 		{"Config", []string{"config", "save-config"}},
 		{"Logging & debug", []string{"log-level", "log-file", "dry-run", "no-interactive", "max-reconnect"}},
 	})
@@ -105,16 +106,22 @@ func newServerCmd() *cobra.Command {
 }
 
 func runServer(cmd *cobra.Command, args []string) error {
-	cfg, err := loadConfig(cmd, config.ModeServer)
+	cfg, intent, err := loadServerStartup(cmd)
 	if err != nil {
 		return err
 	}
 
-	if err = validateAndSaveConfig(cmd, &cfg); err != nil { //nolint:gocritic // avoiding shadow
-		return err
+	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if intent.Problem != "" && (noInteractive || dryRun) {
+		return fmt.Errorf("%s", intent.Problem)
 	}
-
-	if deviceName, _ := cmd.Flags().GetString("device-name"); deviceName != "" {
+	if intent.Problem == "" && intent.Recent == nil {
+		if validationErr := validateAndSaveConfig(cmd, &cfg); validationErr != nil {
+			return validationErr
+		}
+	}
+	if deviceName, _ := cmd.Flags().GetString("device-name"); deviceName != "" && (noInteractive || dryRun) {
 		var id *uint32
 		id, err = resolveDeviceByName(deviceName, !cfg.Reverse)
 		if err != nil {
@@ -124,17 +131,25 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	if dryRun, _ := cmd.Flags().GetBool("dry-run"); dryRun {
+		if intent.Recent != nil {
+			if prepErr := prepareRecentServerHeadless(cmd, &cfg, intent); prepErr != nil {
+				return prepErr
+			}
+		}
 		return runDryRun(&cfg)
 	}
 
-	noInteractive, _ := cmd.Flags().GetBool("no-interactive")
 	if noInteractive {
-		if prepErr := prepareNonInteractiveAudioConfig(&cfg); prepErr != nil {
+		if intent.Recent != nil {
+			if prepErr := prepareRecentServerHeadless(cmd, &cfg, intent); prepErr != nil {
+				return prepErr
+			}
+		} else if prepErr := prepareNonInteractiveAudioConfig(&cfg); prepErr != nil {
 			return prepErr
 		}
 		err = executeServerApp(cmd, &cfg)
 	} else {
-		err = runServerStreamingTUI(cmd, cfg)
+		err = runServerStreamingTUI(cmd, cfg, intent)
 	}
 
 	if err == nil {
@@ -224,17 +239,18 @@ func executeServerApp(cmd *cobra.Command, cfg *config.Config) error {
 		return err
 	}
 
-	rateLimiter := setupRateLimiter(cmd)
+	rateLimiter := serverRateLimiter(*cfg)
 	setupDiscovery(ctx, cmd, cfg, logger)
 	startSessionInfoServer(ctx, *cfg, logger)
 
-	serverApp := app.NewServerApp(*cfg, logger, banMgr, tlsConfig, rateLimiter)
+	serverApp := app.NewServerApp(*cfg, logger, banMgr, tlsConfig, rateLimiter).
+		WithListeningHook(func() { saveHeadlessServerSnapshot(*cfg, logger) })
 	return serverApp.Run(ctx)
 }
 
 // runServerStreamingTUI launches the server with a full TUI using an already-parsed config.
 // Used when the user runs `echowarp server` without --no-interactive.
-func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
+func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config, intents ...startup.Intent) error {
 	if cfg.NoSIMDOptimization {
 		audio.DisableSIMD()
 	}
@@ -276,6 +292,7 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 	appRecordingCmdCh := make(chan app.RecordingCommand, 4)
 	chatMsgCh := make(chan app.ChatMessage, 32)
 	serverPauseCh := make(chan bool, 4)
+	serverReadyCh := make(chan tui.ServerReadyMsg, 4)
 	deviceCmdCh := make(chan tui.DeviceCommand, 16)
 	var chatServerApp *app.ServerApp
 
@@ -351,11 +368,12 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 				banMgrRef = banMgr
 			}
 
-			tlsConfig, _ := setupTLSConfig(&selectedCfg)
-			var rateLimiter *auth.IPRateLimiter
-			if selectedCfg.RateLimit > 0 {
-				rateLimiter = auth.NewIPRateLimiter(selectedCfg.RateLimit)
+			tlsConfig, tlsErr := setupTLSConfig(&selectedCfg)
+			if tlsErr != nil {
+				sendError(errCh, tlsErr, logger)
+				return
 			}
+			rateLimiter := serverRateLimiter(selectedCfg)
 			setupDiscovery(ctx, cmd, &selectedCfg, logger)
 			startSessionInfoServer(ctx, selectedCfg, logger, func() int { return int(clientCount.Load()) })
 
@@ -370,6 +388,12 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 			}
 
 			serverApp := app.NewServerApp(selectedCfg, logger, banMgr, tlsConfig, rateLimiter).
+				WithListeningHook(func() {
+					select {
+					case serverReadyCh <- tui.ServerReadyMsg{Stop: stopCh}:
+					case <-ctx.Done():
+					}
+				}).
 				WithStatsChannels(statsCh, errCh).
 				WithStopChannel(stopCh).
 				WithSpectrum(spectrum).
@@ -413,7 +437,18 @@ func runServerStreamingTUI(cmd *cobra.Command, cfg config.Config) error {
 	if srvLogFile == "" {
 		srvLogFile = logging.GetDefaultLogFile("server")
 	}
-	tuiModel := tui.NewModelWithOutputDevices(cfg, devices, nil).
+	var intent startup.Intent
+	if len(intents) > 0 {
+		intent = intents[0]
+	} else {
+		var intentErr error
+		intent, intentErr = prepareStartupIntent(cmd, &cfg)
+		if intentErr != nil {
+			return intentErr
+		}
+	}
+	tuiModel := tui.NewModelWithOutputDevices(cfg, devices, nil, intent).
+		WithServerReadyChannel(serverReadyCh).
 		WithDeviceEnumerator(dm).
 		WithStartFunc(startFunc).
 		WithLogChannel(logCh).

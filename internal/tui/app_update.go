@@ -23,6 +23,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case ServerReadyMsg:
+		return m.handleServerReady(msg)
+	case startupBeginMsg:
+		return m.beginStartup()
+	case startupPreparedMsg:
+		return m.finishStartup(msg)
 	case tickMsg:
 		return m, doTick()
 
@@ -58,6 +64,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		m.startupAttempted = true // User input wins over a queued automatic attempt.
+		if m.startupPending {
+			m.cancelStartup()
+			cmds = append(cmds, m.setupModel.InitCmd())
+		}
 		if km, kc, handled := m.handleKeyMsg(msg); handled {
 			return km, kc
 		}
@@ -198,9 +209,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.screen == ScreenStreaming && !m.spectrumTickActive {
 			m.spectrumTickActive = true
-			return m, tea.Batch(nextCmd, doSpectrumTick())
+			return m, tea.Batch(append(cmds, nextCmd, doSpectrumTick())...)
 		}
-		return m, nextCmd
+		return m, tea.Batch(append(cmds, nextCmd)...)
 
 	case ParticipantsUpdateMsg:
 		m.participants = msg.Participants
@@ -316,6 +327,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 
 	case streamingStartedMsg:
+		m.recentSaved = false
 		m.statsCh = msg.statsCh
 		m.errCh = msg.errCh
 		m.peerMutedByServer = false
@@ -327,25 +339,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		batchCmds := []tea.Cmd{waitForStats(m.statsCh, m.errCh)}
 
-		// Save recent server (client mode, non-blocking)
-		if m.config.Mode == config.ModeClient {
-			cfg := m.config
-			probeRes := m.setupModel.ProbeResult()
-			selServer := m.setupModel.SelectedServer()
-			devicePreset := m.setupModel.CollectPresetDevices()
-			mode := cfg.AudioMode()
-			batchCmds = append(batchCmds, saveRecentServerCmd(cfg, probeRes, selServer, devicePreset, mode))
-		}
-		// Save server-side preset and generate server UUID (server mode, non-blocking)
-		if m.config.Mode == config.ModeServer {
-			mode := m.config.AudioMode()
-			modePreset := m.setupModel.CollectModePreset(mode)
-			port := m.config.Port
-			batchCmds = append(batchCmds, saveServerPresetCmd(modePreset, mode), func() tea.Msg {
-				_ = config.ServerID(port) // generate & persist UUID for this port
-				return nil
-			})
-		}
 		if m.logCh != nil {
 			batchCmds = append(batchCmds, waitForLog(m.logCh))
 		}
@@ -465,6 +458,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.startReconnection()
 	}
 
+	if stats, ok := msg.(StatsUpdateMsg); ok && isDisconnectedState(stats.Stats.State) {
+		m.recentSaved = false
+	}
+	if stats, ok := msg.(StatsUpdateMsg); ok && stats.Stats.State == "connected" &&
+		m.config.Mode == config.ModeClient && !m.recentSaved && (m.screen == ScreenConnection || m.screen == ScreenStreaming) {
+		m.recentSaved = true
+		cmds = append(cmds, saveRecentServerCmd(m.config, m.setupModel.ProbeResult(), m.setupModel.SelectedServer(), m.setupModel.CollectPresetDevices(), m.config.AudioMode()))
+	}
 	switch m.screen {
 	case ScreenDeviceSelect:
 		return m.updateDeviceSelect(msg, cmds)
@@ -714,6 +715,9 @@ func (m Model) proceedWithStart(cmds []tea.Cmd) (tea.Model, tea.Cmd) {
 	// Extract device info from config (populated by tryStart from multiSelect)
 	if len(m.config.Devices) > 0 {
 		firstID := m.config.Devices[0].ID
+		if m.config.DeviceID != nil {
+			firstID = *m.config.DeviceID
+		}
 		m.config.DeviceID = &firstID
 		m.deviceName = m.setupModel.SelectedDeviceName()
 		for _, item := range m.setupModel.DeviceList.Items() {
@@ -837,9 +841,9 @@ func (m Model) updateConnection(msg tea.Msg, cmds []tea.Cmd) (tea.Model, tea.Cmd
 		nextCmd := waitForStats(m.statsCh, m.errCh)
 		if m.screen == ScreenStreaming && !m.spectrumTickActive {
 			m.spectrumTickActive = true
-			return m, tea.Batch(nextCmd, doSpectrumTick())
+			return m, tea.Batch(append(cmds, nextCmd, doSpectrumTick())...)
 		}
-		return m, nextCmd
+		return m, tea.Batch(append(cmds, nextCmd)...)
 
 	case ErrorMsg:
 		// Check for kicked/banned errors — transition to dedicated screens.

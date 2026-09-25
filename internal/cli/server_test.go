@@ -376,8 +376,8 @@ func TestSetupTLSConfig_OnlyCert(t *testing.T) {
 		TLSKey:  "",
 	}
 	tlsConfig, err := setupTLSConfig(cfg)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	if err == nil {
+		t.Error("partial TLS configuration must not downgrade to plaintext")
 	}
 	if tlsConfig != nil {
 		t.Error("expected nil tls config when only cert is set")
@@ -390,8 +390,8 @@ func TestSetupTLSConfig_OnlyKey(t *testing.T) {
 		TLSKey:  "/path/key.pem",
 	}
 	tlsConfig, err := setupTLSConfig(cfg)
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
+	if err == nil {
+		t.Error("partial TLS configuration must not downgrade to plaintext")
 	}
 	if tlsConfig != nil {
 		t.Error("expected nil tls config when only key is set")

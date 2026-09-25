@@ -3,6 +3,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/lHumaNl/echowarp/internal/app"
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/internal/startup"
 	"github.com/lHumaNl/echowarp/internal/tui/styles"
 	"github.com/lHumaNl/echowarp/internal/tui/views"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
@@ -40,26 +42,34 @@ const spectrumTickInterval = 100 * time.Millisecond
 
 // Model represents the TUI application state.
 type Model struct {
-	screen         Screen
-	config         config.Config
-	devices        []audio.AudioDevice
-	selectedDevice *audio.AudioDevice
-	deviceList     list.Model
-	spinner        spinner.Model
-	stats          transport.ConnectionStats
-	err            error
-	quitting       bool
-	width          int
-	height         int
-	startTime      time.Time
-	paused         bool
-	aecActive      bool               // AEC enabled at runtime (toggled via Ctrl+E)
-	aecToggleFn    func(enabled bool) // callback to toggle AEC in the audio pipeline
-	startFunc      StartFunc
-	statsCh        <-chan transport.ConnectionStats
-	errCh          <-chan error
-	logCh          <-chan LogEntry
-	logs           []string // pre-formatted lines, capped at maxLogs
+	startupIntent                    startup.Intent
+	startupNetwork                   startup.Network
+	startupAttempted, startupPending bool
+	startupID                        uint64
+	startupCancel                    context.CancelFunc
+	recentSaved                      bool
+	serverReadyCh                    <-chan ServerReadyMsg
+	serverReadySaved                 <-chan struct{}
+	screen                           Screen
+	config                           config.Config
+	devices                          []audio.AudioDevice
+	selectedDevice                   *audio.AudioDevice
+	deviceList                       list.Model
+	spinner                          spinner.Model
+	stats                            transport.ConnectionStats
+	err                              error
+	quitting                         bool
+	width                            int
+	height                           int
+	startTime                        time.Time
+	paused                           bool
+	aecActive                        bool               // AEC enabled at runtime (toggled via Ctrl+E)
+	aecToggleFn                      func(enabled bool) // callback to toggle AEC in the audio pipeline
+	startFunc                        StartFunc
+	statsCh                          <-chan transport.ConnectionStats
+	errCh                            <-chan error
+	logCh                            <-chan LogEntry
+	logs                             []string // pre-formatted lines, capped at maxLogs
 
 	// Layout & display
 	logsVisible     bool
@@ -547,7 +557,11 @@ func NewModel(cfg config.Config, devices []audio.AudioDevice) Model {
 }
 
 // NewModelWithOutputDevices creates a TUI model with separate input and output device lists (for duplex).
-func NewModelWithOutputDevices(cfg config.Config, devices []audio.AudioDevice, _ []audio.AudioDevice) Model {
+func NewModelWithOutputDevices(cfg config.Config, devices []audio.AudioDevice, _ []audio.AudioDevice, intents ...startup.Intent) Model {
+	var intent startup.Intent
+	if len(intents) > 0 {
+		intent = intents[0]
+	}
 	items := make([]list.Item, len(devices))
 	for i, dev := range devices {
 		items[i] = deviceItem{device: dev}
@@ -567,15 +581,12 @@ func NewModelWithOutputDevices(cfg config.Config, devices []audio.AudioDevice, _
 	sp.Spinner = spinner.Dot
 	sp.Style = styles.ActiveSpinner
 
-	initialScreen := ScreenConnection
-	if cfg.DeviceID == nil {
-		initialScreen = ScreenDeviceSelect
-	}
+	initialScreen := ScreenDeviceSelect
 
 	// Determine if input device based on mode (used as fallback hint).
 	isInput := cfg.Duplex || (cfg.Mode == config.ModeServer && !cfg.Reverse) || (cfg.Mode != config.ModeServer && cfg.Reverse)
 
-	setupModel := views.NewSetupModel(cfg, deviceList, isInput, 80, 24)
+	setupModel := views.NewSetupModel(cfg, deviceList, isInput, 80, 24, intent.Requested)
 
 	// Always use unified multi-select device list — all devices (input + output) shown regardless of mode.
 	// In duplex: Space cycles [C]/[P]/[C+P]. In normal/reverse: Space toggles [✓].
@@ -588,16 +599,17 @@ func NewModelWithOutputDevices(cfg config.Config, devices []audio.AudioDevice, _
 	}
 
 	m := Model{
-		screen:      initialScreen,
-		config:      cfg,
-		devices:     devices,
-		deviceList:  deviceList,
-		spinner:     sp,
-		setupModel:  setupModel,
-		chatPanel:   views.NewChatPanel(chatNick),
-		width:       80,
-		height:      24,
-		logsVisible: true,
+		startupIntent: intent,
+		screen:        initialScreen,
+		config:        cfg,
+		devices:       devices,
+		deviceList:    deviceList,
+		spinner:       sp,
+		setupModel:    setupModel,
+		chatPanel:     views.NewChatPanel(chatNick),
+		width:         80,
+		height:        24,
+		logsVisible:   true,
 	}
 	// Chat is visible by default; Ctrl+T toggles it.
 	m.chatPanel.ToggleVisible()
@@ -606,29 +618,17 @@ func NewModelWithOutputDevices(cfg config.Config, devices []audio.AudioDevice, _
 
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{doTick(), doSpectrumTick()}
+	if m.serverReadyCh != nil {
+		cmds = append(cmds, waitServerReady(m.serverReadyCh))
+	}
+	if m.startupIntent.Requested {
+		return tea.Batch(append(cmds, func() tea.Msg { return startupBeginMsg{} })...)
+	}
 
 	// Start mDNS discovery for client mode setup
 	if m.screen == ScreenDeviceSelect {
 		if initCmd := m.setupModel.InitCmd(); initCmd != nil {
 			cmds = append(cmds, initCmd)
-		}
-	}
-
-	if m.screen == ScreenConnection {
-		cmds = append(cmds, m.spinner.Tick)
-		if m.startFunc != nil && m.config.DeviceID != nil {
-			cfg := m.config
-			startFunc := m.startFunc
-			m.stopCh = make(chan struct{})
-			m.stopOnce = &sync.Once{} //nolint:govet,staticcheck // stopOnce is used in other methods
-			stopCh := m.stopCh
-			cmds = append(cmds, func() tea.Msg {
-				statsCh, errCh, srvStoppedCh := startFunc(cfg, stopCh)
-				return streamingStartedMsg{statsCh: statsCh, errCh: errCh, serverStoppedCh: srvStoppedCh}
-			})
-			if m.logCh != nil {
-				cmds = append(cmds, waitForLog(m.logCh))
-			}
 		}
 	}
 

@@ -157,7 +157,8 @@ type SetupModel struct {
 	flashTimer time.Time
 
 	// Pending command from auto-restore at init time (returned by InitCmd)
-	pendingRestoreCmd tea.Cmd
+	pendingRestoreCmd     tea.Cmd
+	deferLifecycleRestore bool // Automatic readiness must not create/remove devices.
 
 	// Virtual mic state (Linux only)
 	virtualMicCreated       bool   // true when pactl sink was created this session
@@ -201,7 +202,7 @@ const (
 )
 
 // NewSetupModel creates a setup screen model pre-filled from the given config.
-func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width, height int) SetupModel {
+func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width, height int, deferRestore ...bool) SetupModel {
 	fields := buildMainFields(cfg)
 	advFields := buildAdvancedFields(cfg)
 
@@ -219,6 +220,7 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 		virtualSessionID:    virtualstate.NewSessionID(),
 		trackedVirtualSinks: make(map[string]trackedVirtualSink),
 	}
+	m.deferLifecycleRestore = len(deferRestore) > 0 && deferRestore[0]
 
 	// Load recent servers (client mode only) before mDNS discovery
 	if cfg.Mode == config.ModeClient {
@@ -286,7 +288,7 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 
 	// Load server presets (server mode); overlay is shown later in WithUnifiedDeviceList
 	// after devices are populated, so matchPresetDevices can verify device availability.
-	if cfg.Mode == config.ModeServer {
+	if cfg.Mode == config.ModeServer && !m.deferLifecycleRestore {
 		sp := preset.Load()
 		m.serverPresets = &sp
 		// Apply top-level last_mode first (so the current mode is known before restoring
@@ -306,6 +308,10 @@ func NewSetupModel(cfg config.Config, deviceList list.Model, isInput bool, width
 		if mp := sp.Get(currentMode); mp != nil {
 			m.restoreModePreset(*mp)
 		}
+	}
+	if cfg.Mode == config.ModeServer && m.deferLifecycleRestore {
+		sp := preset.Load()
+		m.serverPresets = &sp // Keep manual restoration available, but do not run it.
 	}
 
 	// Apply field dependencies on init
@@ -360,6 +366,9 @@ func (m SetupModel) WithUnifiedDeviceList(isDuplex bool) SetupModel {
 	}
 	m.deviceCursor = 0
 	m.rebuildDeviceGroups()
+	if m.deferLifecycleRestore {
+		return m
+	}
 
 	// For server mode, auto-restore devices now that devices are populated
 	if m.cfg.Mode == config.ModeServer && m.serverPresets != nil {

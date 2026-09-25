@@ -1488,6 +1488,13 @@ func TestLoadWithViperClientModeDefaults(t *testing.T) {
 	// Isolate from any ambient env vars.
 	t.Setenv("ECHOWARP_AUTO_RECONNECT", "")
 	t.Setenv("ECHOWARP_AUTO_RECONNECT_ATTEMPTS", "")
+	// Empty values are now real overrides; remove variables to test absence.
+	if err := os.Unsetenv("ECHOWARP_AUTO_RECONNECT"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Unsetenv("ECHOWARP_AUTO_RECONNECT_ATTEMPTS"); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg, err := config.LoadWithViper("", config.ModeClient)
 	if err != nil {
@@ -1535,6 +1542,12 @@ func TestLoadWithViperFileOverridesClientDefaults(t *testing.T) {
 	// Isolate from any ambient env vars that could clobber the file values.
 	t.Setenv("ECHOWARP_AUTO_RECONNECT", "")
 	t.Setenv("ECHOWARP_AUTO_RECONNECT_ATTEMPTS", "")
+	if err := os.Unsetenv("ECHOWARP_AUTO_RECONNECT"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Unsetenv("ECHOWARP_AUTO_RECONNECT_ATTEMPTS"); err != nil {
+		t.Fatal(err)
+	}
 
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "daemon.yaml")

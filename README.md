@@ -426,9 +426,65 @@ EchoWarp client -a 192.168.1.10 -d 2 -P mypassword
 EchoWarp devices
 ```
 
+### Start immediately and keep the TUI
+
+Explicit device, address, or config arguments request an automatic start when
+the configuration is ready. The full TUI stays available: audio graphs, levels,
+logs, and controls. There is no separate `--start` or `--auto-start` flag.
+
+```bash
+EchoWarp server --capture-device 1
+EchoWarp client --address 192.168.1.10 --playback-device 0
+
+# Reuse the latest successful server connection and its mode-specific devices
+EchoWarp client --recent
+EchoWarp client --recent --playback-device 2
+```
+
+Starting `EchoWarp server` or `EchoWarp client` without explicit launch arguments
+opens setup as usual. Automatic startup pauses in setup if devices/passwords are
+missing, the server cannot be reached, discovery finds zero or multiple servers,
+or a saved device/server cannot be restored safely. Editing setup cancels the
+pending automatic attempt. Device ID `0` is valid.
+
+For clients, `--recent` cannot be combined with `--address` or `--port`.
+It restores the saved address and port; configured device roles take precedence
+over saved roles. Saved devices are matched by unique name and direction, not
+by an old numeric ID. A changed server identity/mode or destructive virtual-device
+lifecycle requires manual review. Passwords are not stored in recent history.
+Failed connection attempts do not replace the latest successful connection.
+
+For servers, `--recent` restores the complete saved profile of the last mode,
+or the mode explicitly selected with `--mode`:
+
+```bash
+EchoWarp server --recent
+EchoWarp server --recent --mode duplex
+EchoWarp server --recent --port 5000 --capture-device 2
+EchoWarp server --recent --mode conference --no-interactive
+```
+
+Server profiles include devices, audio/Opus settings, the conference hub flag,
+port, password, TLS certificate/key paths, client limits, and captured security,
+logging, and performance settings. Server `--recent` allows port overrides.
+Priority is **CLI > environment > explicit `--config` > selected profile >
+base `config.yaml` > defaults**. Explicit empty strings, false and zero are not
+treated as missing; for example `--password ""` clears a saved password.
+Device selection from a profile is always revalidated by name and direction.
+
+Profiles remain in the existing private `server_presets.yaml` file (passwords
+are stored there, not copied into client history). A profile is saved only after
+the server listener starts successfully. Missing/invalid TLS credentials fail
+startup rather than falling back to plaintext; an occupied port is not silently
+replaced. Recording does not automatically resume from a profile: enable it
+using current config or `--record`.
+
 ### Non-interactive startup
 
-Use `--no-interactive` to skip the setup TUI and start immediately. Supply the required devices through flags or a config file:
+Use `--no-interactive` for a headless session: it disables the entire TUI, not
+just setup, and prints logs instead of graphs. Supply the required devices
+through flags/config or restore them with `client --recent`. Missing or unsafe
+settings produce an error rather than an interactive prompt:
 
 ```bash
 # Normal mode: server captures, client plays back
@@ -469,6 +525,8 @@ See [Streaming Modes](#streaming-modes) for detailed descriptions of each mode.
 | `--capture-device` | | Capture device ID; repeat or pass a comma-separated list for multiple devices |
 | `--playback-device` | | Playback device ID; repeat or pass a comma-separated list for multiple devices |
 | `--device-name` | `-D` | Select device by name (substring match) |
+| `--recent` | | Client: last successful connection; server: full saved profile of the selected/last mode |
+| `--mode` | `-m` | Server audio mode: normal, reverse, duplex, conference |
 | `--password` | `-P` | Authentication password |
 | `--port` | `-p` | TCP port (default: 4415) |
 | `--sample-rate` | | Sample rate (default: 48000) |
@@ -484,7 +542,7 @@ See [Streaming Modes](#streaming-modes) for detailed descriptions of each mode.
 | `--aec` | | Acoustic echo cancellation (duplex) |
 | `--loopback` | | Capture system audio (macOS, requires BlackHole) |
 | `--dry-run` | | Validate config and exit |
-| `--no-interactive` | | Skip the setup TUI and start immediately; required devices must be configured |
+| `--no-interactive` | | Disable the entire TUI; start headlessly or return a configuration error |
 
 ### Configuration
 

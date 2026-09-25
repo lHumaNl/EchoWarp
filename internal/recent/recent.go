@@ -58,6 +58,7 @@ type PresetDevice struct {
 	MixInputName string             `json:"mix_input_name,omitempty" yaml:"mix_input_name,omitempty"`
 	VirtualSink  *VirtualSinkPreset `json:"virtual_sink,omitempty" yaml:"virtual_sink,omitempty"`
 	Volume       float64            `json:"volume,omitempty" yaml:"volume,omitempty"`
+	VolumeSet    bool               `json:"volume_set,omitempty" yaml:"volume_set,omitempty"` // Distinguishes explicit silence from legacy missing volume.
 	AGC          bool               `json:"agc,omitempty" yaml:"agc,omitempty"`
 }
 
@@ -67,6 +68,7 @@ type Server struct {
 	Port          int                     `json:"port" yaml:"port"`
 	Hostname      string                  `json:"hostname" yaml:"hostname"`
 	ServerID      string                  `json:"server_id,omitempty" yaml:"server_id,omitempty"` // Stable per-port UUID; empty for old entries.
+	LastMode      string                  `json:"last_mode,omitempty" yaml:"last_mode,omitempty"`
 	LastConnected time.Time               `json:"last_connected" yaml:"last_connected"`
 	Presets       map[string]DevicePreset `json:"presets,omitempty" yaml:"presets,omitempty"`
 	LogLevel      string                  `json:"log_level,omitempty" yaml:"log_level,omitempty"`
@@ -79,6 +81,7 @@ type serverJSON struct {
 	Hostname      string                  `json:"hostname"`
 	Nickname      string                  `json:"nickname"` // deprecated, read-only
 	ServerID      string                  `json:"server_id,omitempty"`
+	LastMode      string                  `json:"last_mode,omitempty"`
 	LastConnected time.Time               `json:"last_connected"`
 	Presets       map[string]DevicePreset `json:"presets,omitempty"`
 	LogLevel      string                  `json:"log_level,omitempty"`
@@ -97,6 +100,7 @@ func (s *Server) UnmarshalJSON(data []byte) error {
 		s.Hostname = raw.Nickname // migrate nickname → hostname
 	}
 	s.ServerID = raw.ServerID
+	s.LastMode = raw.LastMode
 	s.LastConnected = raw.LastConnected
 	s.Presets = raw.Presets
 	s.LogLevel = raw.LogLevel
@@ -163,7 +167,7 @@ func defaultPresetVolumes(servers []Server) {
 	for i := range servers {
 		for k, preset := range servers[i].Presets {
 			for j := range preset.Devices {
-				if preset.Devices[j].Volume == 0 {
+				if preset.Devices[j].Volume == 0 && !preset.Devices[j].VolumeSet {
 					preset.Devices[j].Volume = 1.0
 				}
 			}
