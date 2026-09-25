@@ -33,10 +33,12 @@ import (
 //	app := NewClientApp(cfg, logger, tlsConfig)
 //	err := app.Run(ctx) // Blocks until context cancellation or fatal error
 type ClientApp struct {
-	cfg       config.Config
-	logger    *slog.Logger
-	auth      transport.AuthHandler
-	tlsConfig *tls.Config
+	conferenceMu      sync.RWMutex
+	conferenceSession *conferenceClientSession
+	cfg               config.Config
+	logger            *slog.Logger
+	auth              transport.AuthHandler
+	tlsConfig         *tls.Config
 
 	// Factories for creating signalers and peers (enables testing and decoupling)
 	signalerFactory SignalerFactory
@@ -537,6 +539,11 @@ func (c *ClientApp) Run(ctx context.Context) error {
 		return err
 	}
 	defer cleanup()
+	defer func() {
+		if session := c.currentConference(); session != nil {
+			session.Close()
+		}
+	}()
 
 	audioDone, err := c.initializeAudioPipeline(sigCtx, peer, signaler)
 	if err != nil {
@@ -632,8 +639,8 @@ func (c *ClientApp) initializePeer(signaler transport.Signaler) (transport.PeerM
 // initializeAudioPipeline sets up the audio pipeline and returns the audio done channel.
 func (c *ClientApp) initializeAudioPipeline(ctx context.Context, peer transport.PeerManager, signaler transport.Signaler) (<-chan error, error) {
 	bufSize := 1
-	if c.cfg.Duplex {
-		bufSize = 2
+	if c.cfg.Duplex || c.cfg.Conference {
+		bufSize = 3
 	}
 	audioDone := make(chan error, bufSize)
 	if err := c.setupAudioPipeline(ctx, peer, audioDone); err != nil {
@@ -723,7 +730,10 @@ func (c *ClientApp) createPeer() (transport.PeerManager, error) {
 }
 
 func (c *ClientApp) setupAudioPipeline(ctx context.Context, peer transport.PeerManager, audioDone chan error) error {
-	if c.cfg.Duplex || c.cfg.Conference {
+	if c.cfg.Conference {
+		return c.setupConferenceClientPipeline(ctx, peer, audioDone)
+	}
+	if c.cfg.Duplex {
 		return c.setupDuplexAudioPipeline(ctx, peer, audioDone)
 	}
 	if c.cfg.Reverse {
@@ -811,9 +821,11 @@ func (c *ClientApp) setupReceiveAudioPipeline(ctx context.Context, peer transpor
 }
 
 func (c *ClientApp) runMessageLoop(ctx context.Context, signaler transport.Signaler, peer transport.PeerManager, audioDone <-chan error, connStart time.Time) error {
+	ctx, cancelLoop := context.WithCancel(ctx)
 	var tcpClosed bool
 	var statsWg sync.WaitGroup
 	defer func() {
+		cancelLoop() // A media/session error need not cancel the caller's context.
 		if !tcpClosed && signaler != nil {
 			_ = signaler.Close() //nolint:errcheck
 		}
@@ -925,6 +937,9 @@ func (c *ClientApp) runMessageLoop(ctx context.Context, signaler transport.Signa
 			c.logger.Info("DataChannel ready, closing TCP signaling")
 			_ = signaler.Close() //nolint:errcheck
 			tcpClosed = true
+			if session := c.currentConference(); session != nil {
+				session.Ready()
+			}
 		case paused := <-c.pauseCh:
 			c.capturePaused.Store(paused)
 			action := transport.ActionPauseAll
@@ -950,7 +965,10 @@ func (c *ClientApp) runMessageLoop(ctx context.Context, signaler transport.Signa
 			if c.chatClient != nil {
 				c.chatClient.HandleIncoming(raw)
 			}
-		case raw := <-controlCh:
+		case raw, ok := <-controlCh:
+			if !ok {
+				return fmt.Errorf("control channel closed")
+			}
 			if c.handleDCControl(raw) {
 				c.recordMetrics(connStart)
 				_ = peer.Close() //nolint:errcheck
@@ -1019,6 +1037,14 @@ func (c *ClientApp) handleDCControl(raw []byte) bool {
 	}
 	if err := json.Unmarshal(msg.Payload, &ctrl); err != nil {
 		return false
+	}
+	if session := c.currentConference(); session != nil {
+		if handled, err := session.HandleControl(ctrl.Action, ctrl.Data); handled {
+			if err != nil {
+				c.logger.Warn("Conference control failed", "error", err)
+			}
+			return false // Session.Run reports the failure through audioDone.
+		}
 	}
 
 	switch ctrl.Action {

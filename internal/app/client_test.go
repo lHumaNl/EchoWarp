@@ -135,15 +135,20 @@ func TestClientApp_setupAudioPipeline_ConferenceStartsCapture(t *testing.T) {
 	cfg.SyncFromStreamMode()
 	app := NewClientApp(cfg, testClientLogger(), nil)
 	wantErr := errors.New("capture track sentinel")
-	peer := &mockPeerManager{
-		addAudioTrackFunc: func(sampleRate, channels uint32) (chan<- []byte, error) {
-			return nil, wantErr
-		},
-	}
+	peer := &conferenceCaptureFailurePeer{WebRTCPeer: transport.NewWebRTCPeer(transport.DirectionDuplex), err: wantErr}
 
 	err := app.setupAudioPipeline(context.Background(), peer, make(chan error, 2))
 
 	require.ErrorIs(t, err, wantErr)
+}
+
+type conferenceCaptureFailurePeer struct {
+	*transport.WebRTCPeer
+	err error
+}
+
+func (p *conferenceCaptureFailurePeer) AddAudioTrack(uint32, uint32) (chan<- []byte, error) {
+	return nil, p.err
 }
 
 func TestClientApp_createPeer_WithSTUNServers(t *testing.T) {

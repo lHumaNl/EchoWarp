@@ -455,47 +455,10 @@ func TestWebRTCPeer_FullHandshake_WithICECandidates(t *testing.T) {
 }
 
 func TestWebRTCPeer_FullHandshake_WithDataChannels(t *testing.T) {
-	sender := NewWebRTCPeer(DirectionSend)
-	err := sender.CreatePeerConnection(defaultICEConfig())
+	sender, receiver := newMediaPeer(t), newMediaPeer(t)
+	_, err := sender.AddAudioTrack(48000, 2)
 	require.NoError(t, err)
-	defer sender.Close()
-
-	_, err = sender.AddAudioTrack(48000, 2)
-	require.NoError(t, err)
-
-	receiver := NewWebRTCPeer(DirectionReceive)
-	err = receiver.CreatePeerConnection(defaultICEConfig())
-	require.NoError(t, err)
-	defer receiver.Close()
-
-	err = receiver.AddAudioTransceiver()
-	require.NoError(t, err)
-
-	senderConnected := make(chan struct{})
-	receiverConnected := make(chan struct{})
-
-	sender.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateConnected {
-			close(senderConnected)
-		}
-	})
-	receiver.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateConnected {
-			close(receiverConnected)
-		}
-	})
-
-	sender.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c != nil {
-			_ = receiver.AddICECandidate(c.ToJSON())
-		}
-	})
-	receiver.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c != nil {
-			_ = sender.AddICECandidate(c.ToJSON())
-		}
-	})
-
+	require.NoError(t, receiver.AddAudioTransceiver())
 	dataChannelReceived := make(chan struct{})
 	receiver.OnDataChannel(func(label string, msgCh <-chan []byte, sendFn func([]byte) error) {
 		if label == "test-dc" {
@@ -503,131 +466,32 @@ func TestWebRTCPeer_FullHandshake_WithDataChannels(t *testing.T) {
 		}
 	})
 
-	err = sender.CreateDataChannel("test-dc")
-	require.NoError(t, err)
-
-	offer, err := sender.CreateOffer()
-	require.NoError(t, err)
-
-	answer, err := receiver.CreateAnswer(offer)
-	require.NoError(t, err)
-
-	err = sender.SetRemoteDescription(answer)
-	require.NoError(t, err)
-
-	select {
-	case <-senderConnected:
-	case <-time.After(10 * time.Second):
-		t.Fatal("sender connection timeout")
-	}
-	select {
-	case <-receiverConnected:
-	case <-time.After(10 * time.Second):
-		t.Fatal("receiver connection timeout")
-	}
-
-	select {
-	case <-dataChannelReceived:
-	case <-time.After(5 * time.Second):
-		t.Fatal("data channel not received")
-	}
+	require.NoError(t, sender.CreateDataChannel("test-dc"))
+	negotiateMedia(t, sender, receiver)
+	waitCh(t, dataChannelReceived, "data channel")
 }
 
 func TestWebRTCPeer_ControlDataChannel_Bidirectional(t *testing.T) {
-	sender := NewWebRTCPeer(DirectionSend)
-	err := sender.CreatePeerConnection(defaultICEConfig())
+	sender, receiver := newMediaPeer(t), newMediaPeer(t)
+	_, err := sender.AddAudioTrack(48000, 2)
 	require.NoError(t, err)
-	defer sender.Close()
-
-	_, err = sender.AddAudioTrack(48000, 2)
-	require.NoError(t, err)
-
-	err = sender.CreateControlDataChannel()
-	require.NoError(t, err)
-
-	receiver := NewWebRTCPeer(DirectionReceive)
-	err = receiver.CreatePeerConnection(defaultICEConfig())
-	require.NoError(t, err)
-	defer receiver.Close()
-
-	err = receiver.AddAudioTransceiver()
-	require.NoError(t, err)
-
-	senderConnected := make(chan struct{})
-	receiverConnected := make(chan struct{})
-
-	sender.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateConnected {
-			close(senderConnected)
-		}
-	})
-	receiver.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateConnected {
-			close(receiverConnected)
-		}
-	})
-
-	sender.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c != nil {
-			_ = receiver.AddICECandidate(c.ToJSON())
-		}
-	})
-	receiver.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c != nil {
-			_ = sender.AddICECandidate(c.ToJSON())
-		}
-	})
-
-	offer, err := sender.CreateOffer()
-	require.NoError(t, err)
-
-	answer, err := receiver.CreateAnswer(offer)
-	require.NoError(t, err)
-
-	err = sender.SetRemoteDescription(answer)
-	require.NoError(t, err)
-
-	// Wait for all four events with a single shared deadline.
-	// Connection and DC ready happen concurrently; sequential selects with
-	// independent timeouts can expire prematurely under CPU load.
-	deadline := time.After(15 * time.Second)
-
-	for _, ev := range []struct {
-		ch   <-chan struct{}
-		name string
-	}{
-		{senderConnected, "sender connection"},
-		{receiverConnected, "receiver connection"},
-		{sender.DCReady(), "sender DC ready"},
-		{receiver.DCReady(), "receiver DC ready"},
-	} {
-		select {
-		case <-ev.ch:
-		case <-deadline:
-			t.Fatalf("timeout waiting for %s", ev.name)
-		}
-	}
-
+	require.NoError(t, receiver.AddAudioTransceiver())
+	require.NoError(t, sender.CreateControlDataChannel())
+	negotiateMedia(t, sender, receiver)
+	waitDCReady(t, sender, receiver)
 	err = sender.SendControl("test_action", map[string]string{"key": "value"})
 	require.NoError(t, err)
-
 	require.Eventually(t, func() bool {
 		return receiver.ControlMessages() != nil
 	}, time.Second, time.Millisecond, "receiver control channel was not registered")
 	controlMessages := receiver.ControlMessages()
 	select {
 	case raw := <-controlMessages:
-		var msg struct {
-			Type    string `json:"type"`
-			Payload struct {
-				Action string            `json:"action"`
-				Data   map[string]string `json:"data"`
-			} `json:"payload"`
-		}
+		var msg peerControlMessage
 		require.NoError(t, json.Unmarshal(raw, &msg))
 		assert.Equal(t, TypeControl, msg.Type)
 		assert.Equal(t, "test_action", msg.Payload.Action)
-		assert.Equal(t, "value", msg.Payload.Data["key"])
+		assert.Equal(t, map[string]interface{}{"key": "value"}, msg.Payload.Data)
 	case <-time.After(5 * time.Second):
 		t.Fatal("receiver did not get control message")
 	}

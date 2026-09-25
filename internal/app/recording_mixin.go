@@ -2,6 +2,7 @@ package app
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
@@ -16,9 +17,10 @@ import (
 // embedded fields directly. This keeps the mutex-protected invariants intact
 // regardless of caller (TUI bridge, daemon API adapter, etc.).
 type RecordingMixin struct {
-	recorder   *audio.ConferenceRecorder
-	recorderMu sync.Mutex
-	recState   recordingAdapterState
+	recorder       *audio.ConferenceRecorder
+	recorderMu     sync.Mutex
+	recState       recordingAdapterState
+	asyncRecording atomic.Pointer[conferenceClientRecording]
 }
 
 // startRecordingInternal starts non-conference recording unconditionally.
@@ -63,6 +65,10 @@ func (r *RecordingMixin) startRecordingSession(mode audio.RecordingMode, sampleR
 func (r *RecordingMixin) stopRecordingInternal() (time.Duration, uint64, int, error) {
 	r.recorderMu.Lock()
 	defer r.recorderMu.Unlock()
+	if recording := r.asyncRecording.Swap(nil); recording != nil {
+		close(recording.stop)
+		<-recording.done
+	}
 	if r.recorder == nil {
 		return 0, 0, 0, nil
 	}

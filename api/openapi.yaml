@@ -407,6 +407,100 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /api/v1/audio/routes:
+    get:
+      summary: Read conference audio routing restrictions
+      description: |
+        Returns the current room's routing state with the authenticated runtime
+        self_id and separate receive/send/admin restrictions. An empty rules
+        collection is []; this is not a flattened effective delivery matrix.
+        Requires a running Node with AudioRouteController support. Uses the
+        standard bearer-token or tokenless localhost-only access policy.
+      operationId: getAudioRoutes
+      tags: [streaming]
+      responses:
+        '200':
+          description: Current room-scoped routing state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioRouteState'
+        '400':
+          $ref: '#/components/responses/AudioRouteInvalid'
+        '401':
+          $ref: '#/components/responses/AudioRouteUnauthorized'
+        '403':
+          $ref: '#/components/responses/AudioRouteForbidden'
+        '408':
+          $ref: '#/components/responses/AudioRouteCanceled'
+        '409':
+          $ref: '#/components/responses/AudioRouteNotRunning'
+        '429':
+          $ref: '#/components/responses/AudioRouteRateLimited'
+        '500':
+          $ref: '#/components/responses/AudioRouteFailed'
+        '504':
+          $ref: '#/components/responses/AudioRouteTimeout'
+    put:
+      summary: Apply one conference audio routing restriction
+      description: |
+        Idempotently adds (muted=true) or removes (muted=false) exactly one
+        scope/source/recipient rule. Removal never clears wildcard rules or
+        restrictions in other scopes. Denial in any layer wins; self audio is
+        never played back. Rules are room-scoped and are not persisted.
+        Receive requires recipient=self; send requires source=self. The runtime
+        binds self to the authenticated connection. Clients cannot issue admin
+        rules or spoof ownership. Admin rules accept arbitrary room pairs,
+        including '*' and the reserved server identity. Unknown room IDs are
+        rejected by the runtime. Transport encryption is not end-to-end
+        encryption and does not prevent server-side recording.
+        Success waits for server application/acknowledgment, not queueing, and
+        echoes the applied request without resolving self in the response.
+        The body must contain exactly one JSON object, no unknown fields or
+        trailing JSON, and an explicit boolean muted. Limit is 1 MiB.
+      operationId: setAudioRoute
+      tags: [streaming]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AudioRouteRule'
+            example:
+              scope: receive
+              source: '*'
+              recipient: self
+              muted: true
+      responses:
+        '200':
+          description: Acknowledged rule (not a full state snapshot)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioRouteRule'
+        '400':
+          $ref: '#/components/responses/AudioRouteInvalid'
+        '401':
+          $ref: '#/components/responses/AudioRouteUnauthorized'
+        '403':
+          $ref: '#/components/responses/AudioRouteForbidden'
+        '408':
+          $ref: '#/components/responses/AudioRouteCanceled'
+        '409':
+          $ref: '#/components/responses/AudioRouteNotRunning'
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/AudioRouteRateLimited'
+        '500':
+          $ref: '#/components/responses/AudioRouteFailed'
+        '504':
+          $ref: '#/components/responses/AudioRouteTimeout'
+
   /api/v1/shutdown:
     post:
       summary: Graceful shutdown
@@ -489,7 +583,97 @@ components:
       bearerFormat: token
       description: Bearer token authentication (if configured)
 
+  responses:
+    AudioRouteInvalid:
+      description: Invalid JSON, missing fields, invalid scope/identity syntax, or unknown room ID
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    AudioRouteUnauthorized:
+      description: Missing/invalid bearer token or non-local request without a configured token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    AudioRouteForbidden:
+      description: Client admin command, spoofed ownership, or runtime authorization failure (ErrAuthFailed)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    AudioRouteCanceled:
+      description: Request context canceled; a disconnected caller may not receive a response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    AudioRouteNotRunning:
+      description: Node or conference runtime is not running (ErrNotRunning)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    AudioRouteRateLimited:
+      description: API request rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    AudioRouteFailed:
+      description: Runner lacks AudioRouteController (ErrInternalState), or another runtime failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    AudioRouteTimeout:
+      description: Request deadline or server acknowledgment timeout exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
   schemas:
+    AudioRouteIdentity:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: '^(\*|[A-Za-z0-9_.:-]+)$'
+      description: Room runtime ID, self marker, reserved server identity, or standalone '*' wildcard
+    AudioRouteRule:
+      type: object
+      additionalProperties: false
+      required: [scope, source, recipient, muted]
+      description: |
+        One independent restriction. PUT requires recipient=self for receive
+        and source=self for send; readback may contain resolved runtime IDs.
+        Only a server Node may change admin rules. Runtime authorization is
+        authoritative and IDs in requests do not grant privileges.
+      properties:
+        scope:
+          type: string
+          enum: [receive, send, admin]
+        source:
+          $ref: '#/components/schemas/AudioRouteIdentity'
+        recipient:
+          $ref: '#/components/schemas/AudioRouteIdentity'
+        muted:
+          type: boolean
+          description: True adds a denial; false removes only this exact rule in its own scope
+    AudioRouteState:
+      type: object
+      required: [self_id, rules]
+      properties:
+        self_id:
+          type: string
+          description: Identity assigned by the conference runtime, not supplied by the caller
+          example: client-1
+        rules:
+          type: array
+          description: Separate scoped restrictions; empty array when no rules are present
+          items:
+            $ref: '#/components/schemas/AudioRouteRule'
+
     StatusResponse:
       type: object
       required:

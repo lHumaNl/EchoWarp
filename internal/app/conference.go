@@ -3,8 +3,9 @@ package app
 import (
 	"context"
 	"log/slog"
+	"math"
 	"sync"
-	"time"
+	"sync/atomic"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp/audio"
 )
@@ -29,8 +30,14 @@ type ConferenceHandler struct {
 	// participantCmdCh receives mute/volume commands from TUI.
 	participantCmdCh <-chan ParticipantCommand
 
-	// Recording support.
-	recorder *audio.ConferenceRecorder
+	// AttachRoom is initialization-only; room and channels then remain immutable.
+	room             *ConferenceRoom
+	channels         uint32
+	recordingMu      sync.Mutex
+	recorder         *audio.ConferenceRecorder
+	recording        atomic.Pointer[conferenceRecording]
+	recordingRunning atomic.Bool
+	sourceRoster     atomic.Pointer[conferenceRecordingSources]
 }
 
 // NewConferenceHandler creates a handler with the given frame size and sample rate.
@@ -59,7 +66,7 @@ func (ch *ConferenceHandler) AddParticipant(id string) {
 	muted := ch.persistentMutes[id]
 	ch.mu.RUnlock()
 	if muted {
-		ch.mixer.SetParticipantMuted(id, true)
+		ch.SetParticipantMuted(id, true)
 		ch.logger.Info("Conference participant added (auto-muted)", "id", id)
 	} else {
 		ch.logger.Info("Conference participant added", "id", id)
@@ -79,11 +86,14 @@ func (ch *ConferenceHandler) RemoveParticipant(id string) {
 // SetParticipantPaused sets the paused state of a participant.
 func (ch *ConferenceHandler) SetParticipantPaused(id string, paused bool) {
 	ch.mu.Lock()
-	defer ch.mu.Unlock()
 	if paused {
 		ch.pausedParticipants[id] = true
 	} else {
 		delete(ch.pausedParticipants, id)
+	}
+	ch.mu.Unlock()
+	if ch.room != nil {
+		ch.room.SetSourcePaused(id, paused)
 	}
 }
 
@@ -108,68 +118,22 @@ func (ch *ConferenceHandler) ParticipantIDs() []string {
 	return ids
 }
 
-// StartRecording begins conference recording in the given mode.
-// baseDir is the root directory for recordings (e.g. from Config.EffectiveRecordDir).
-func (ch *ConferenceHandler) StartRecording(mode audio.RecordingMode, sampleRate uint32, baseDir string) error {
-	ch.mu.Lock()
-	defer ch.mu.Unlock()
-	ch.recorder = audio.NewConferenceRecorder(mode, sampleRate, 1) // mono
-	return ch.recorder.Start(baseDir)
-}
-
-// StopRecording stops recording and returns summary info.
-func (ch *ConferenceHandler) StopRecording() (duration time.Duration, totalSize uint64, fileCount int, err error) {
-	ch.mu.Lock()
-	defer ch.mu.Unlock()
-	if ch.recorder == nil {
-		return 0, 0, 0, nil
-	}
-	dur, size, files, err := ch.recorder.Stop()
-	ch.recorder = nil
-	return dur, size, files, err
-}
-
-// RecordingDir returns the output directory of the active recording,
-// or empty string when nothing is being recorded. Used by the daemon
-// API adapter to enumerate the produced files after Stop.
-func (ch *ConferenceHandler) RecordingDir() string {
-	ch.mu.RLock()
-	defer ch.mu.RUnlock()
-	if ch.recorder == nil {
-		return ""
-	}
-	return ch.recorder.Dir()
-}
-
-// IsRecording returns whether recording is active.
-func (ch *ConferenceHandler) IsRecording() bool {
-	ch.mu.RLock()
-	defer ch.mu.RUnlock()
-	return ch.recorder != nil && ch.recorder.IsActive()
-}
-
-// FlushHeaders flushes WAV headers on all active recording writers for crash safety.
-func (ch *ConferenceHandler) FlushHeaders() {
-	ch.mu.RLock()
-	rec := ch.recorder
-	ch.mu.RUnlock()
-	if rec != nil && rec.IsActive() {
-		rec.FlushHeaders()
-	}
-}
-
 // SubmitAudio submits a decoded audio frame from a participant.
 func (ch *ConferenceHandler) SubmitAudio(participantID string, samples []float32) {
+	// An attached handler is metadata-only; recording decodes the opaque RTP tap.
+	if ch.room != nil {
+		return
+	}
 	ch.mixer.SubmitAudio(participantID, samples)
 
 	// Write to recording if active and participant is still known (avoid orphaned tracks).
 	if ch.mixer.HasParticipant(participantID) {
-		ch.mu.RLock()
+		ch.recordingMu.Lock()
 		rec := ch.recorder
-		ch.mu.RUnlock()
 		if rec != nil && rec.IsActive() {
 			_ = rec.WriteTrack(participantID, samples) //nolint:errcheck
 		}
+		ch.recordingMu.Unlock()
 	}
 
 	// Update stream priorities every 5 frames (~100ms at 20ms/frame).
@@ -196,10 +160,10 @@ func (ch *ConferenceHandler) GetTotalMix() []float32 {
 
 // WriteMix writes the total mix frame to the recorder (if active and mode includes mix).
 func (ch *ConferenceHandler) WriteMix(samples []float32) error {
-	ch.mu.RLock()
+	ch.recordingMu.Lock()
+	defer ch.recordingMu.Unlock()
 	rec := ch.recorder
-	ch.mu.RUnlock()
-	if rec != nil && rec.IsActive() {
+	if ch.room == nil && rec != nil && rec.IsActive() {
 		return rec.WriteMix(samples)
 	}
 	return nil
@@ -255,46 +219,62 @@ func (ch *ConferenceHandler) ProcessCommands(ctx context.Context) {
 func (ch *ConferenceHandler) handleCommand(cmd ParticipantCommand) {
 	switch cmd.Action {
 	case ParticipantMute:
-		ch.mixer.SetParticipantMuted(cmd.ParticipantID, true)
-		ch.logger.Info("Participant muted", "id", cmd.ParticipantID)
+		ch.SetParticipantMuted(cmd.ParticipantID, true)
 	case ParticipantUnmute:
-		ch.mixer.SetParticipantMuted(cmd.ParticipantID, false)
-		ch.logger.Info("Participant unmuted", "id", cmd.ParticipantID)
-	case ParticipantMutePersist:
-		ch.mixer.SetParticipantMuted(cmd.ParticipantID, true)
-		ch.mu.Lock()
-		ch.persistentMutes[cmd.ParticipantID] = true
-		ch.mu.Unlock()
-		ch.logger.Info("Participant muted (persistent)", "id", cmd.ParticipantID)
-	case ParticipantUnmutePersist:
-		ch.mixer.SetParticipantMuted(cmd.ParticipantID, false)
-		ch.mu.Lock()
-		delete(ch.persistentMutes, cmd.ParticipantID)
-		ch.mu.Unlock()
-		ch.logger.Info("Participant unmuted (persistent removed)", "id", cmd.ParticipantID)
-	case ParticipantVolumeUp:
-		states := ch.mixer.GetParticipantStates()
-		for _, s := range states {
-			if s.ID == cmd.ParticipantID {
-				newVol := s.Volume + 0.1
-				if newVol > 2.0 {
-					newVol = 2.0
-				}
-				ch.mixer.SetParticipantVolume(cmd.ParticipantID, newVol)
-				break
-			}
-		}
-	case ParticipantVolumeDown:
-		states := ch.mixer.GetParticipantStates()
-		for _, s := range states {
-			if s.ID == cmd.ParticipantID {
-				newVol := s.Volume - 0.1
-				if newVol < 0 {
-					newVol = 0
-				}
-				ch.mixer.SetParticipantVolume(cmd.ParticipantID, newVol)
-				break
-			}
+		ch.SetParticipantMuted(cmd.ParticipantID, false)
+	case ParticipantSetMute:
+		ch.SetParticipantMuted(cmd.ParticipantID, cmd.Muted)
+	case ParticipantMutePersist, ParticipantUnmutePersist:
+		ch.setPersistentMute(cmd.ParticipantID, cmd.Action == ParticipantMutePersist)
+	case ParticipantSetVolume:
+		ch.SetParticipantGain(cmd.ParticipantID, float32(cmd.Volume))
+	case ParticipantVolumeUp, ParticipantVolumeDown:
+		ch.adjustParticipantGain(cmd.ParticipantID, cmd.Action == ParticipantVolumeUp)
+	}
+}
+
+const conferenceVolumeStep, conferenceMaxVolume float32 = 0.1, 2
+
+// SetParticipantMuted changes the source gate without modifying route rules.
+func (ch *ConferenceHandler) SetParticipantMuted(id string, muted bool) {
+	ch.mixer.SetParticipantMuted(id, muted)
+	if ch.room != nil {
+		ch.room.SetSourceBlocked(id, muted)
+	}
+}
+
+// SetParticipantGain updates both the legacy snapshot and forwarded source gain.
+func (ch *ConferenceHandler) SetParticipantGain(id string, gain float32) {
+	if gain < 0 || math.IsNaN(float64(gain)) || math.IsInf(float64(gain), 0) {
+		return
+	}
+	gain = min(gain, conferenceMaxVolume)
+	ch.mixer.SetParticipantVolume(id, gain)
+	if ch.room != nil {
+		ch.room.SetSourceGain(id, gain)
+	}
+}
+
+func (ch *ConferenceHandler) setPersistentMute(id string, muted bool) {
+	ch.mu.Lock()
+	if muted {
+		ch.persistentMutes[id] = true
+	} else {
+		delete(ch.persistentMutes, id)
+	}
+	ch.mu.Unlock()
+	ch.SetParticipantMuted(id, muted)
+}
+
+func (ch *ConferenceHandler) adjustParticipantGain(id string, increase bool) {
+	delta := -conferenceVolumeStep
+	if increase {
+		delta = conferenceVolumeStep
+	}
+	for _, state := range ch.mixer.GetParticipantStates() {
+		if state.ID == id {
+			ch.SetParticipantGain(id, max(0, state.Volume+delta))
+			return
 		}
 	}
 }

@@ -551,7 +551,7 @@ func (c Config) EffectiveDevices() []DeviceEntry {
 	}
 	// Migration from legacy single-device fields
 	var entries []DeviceEntry
-	if c.Duplex {
+	if c.Duplex || c.Conference {
 		if c.InputDeviceID != nil {
 			entries = append(entries, DeviceEntry{ID: *c.InputDeviceID, Role: RoleCapture, Volume: 1.0})
 		}

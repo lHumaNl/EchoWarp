@@ -259,6 +259,9 @@ func (s *ServerApp) toggleMuteOutgoing(clientID string) {
 	// Toggle: load current, store opposite.
 	newVal := !mc.mutedOutgoing.Load()
 	mc.mutedOutgoing.Store(newVal)
+	if s.conferenceRoom != nil {
+		s.conferenceRoom.SetRecipientBlocked(clientID, newVal)
+	}
 
 	action := transport.ActionMuteOutgoing
 	if !newVal {
@@ -290,6 +293,9 @@ func (s *ServerApp) toggleMuteIncoming(clientID string) {
 	// Toggle: load current, store opposite.
 	newVal := !mc.mutedIncoming.Load()
 	mc.mutedIncoming.Store(newVal)
+	if s.conferenceRoom != nil {
+		s.conferenceRoom.SetIncomingBlocked(clientID, newVal)
+	}
 
 	action := transport.ActionMuteIncoming
 	if !newVal {
@@ -336,7 +342,7 @@ func (s *ServerApp) adjustClientVolume(clientID string, delta float64) {
 			if newVol < 0 {
 				newVol = 0
 			}
-			s.conference.mixer.SetParticipantVolume(clientID, newVol)
+			s.conference.SetParticipantGain(clientID, newVol)
 			s.logger.Info("Client volume adjusted", "clientID", clientID, "nickname", nick, "volume", roundedLogVolume(float64(newVol)))
 			return
 		}
@@ -464,28 +470,6 @@ func (s *ServerApp) flushRecordingHeaders(ctx context.Context) {
 			if rec != nil && rec.IsActive() {
 				rec.FlushHeaders()
 			}
-		}
-	}
-}
-
-// recordMixLoop writes the total mix to the recorder at 20ms intervals.
-func (s *ServerApp) recordMixLoop(ctx context.Context) {
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if s.conference == nil || !s.conference.IsRecording() {
-				continue
-			}
-			mix := s.conference.GetTotalMix()
-			if mix == nil {
-				continue
-			}
-			_ = s.conference.WriteMix(mix) //nolint:errcheck
-			s.conference.ReturnMixBuffer(mix)
 		}
 	}
 }

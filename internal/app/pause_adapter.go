@@ -73,6 +73,15 @@ func (s *ServerApp) SetPaused(paused bool) error {
 //
 // Idempotent and safe for concurrent use.
 func (c *ClientApp) SetPaused(paused bool) error {
+	if session := c.currentConference(); session != nil {
+		action := transport.ActionPauseAll
+		if !paused {
+			action = transport.ActionResumeAll
+		}
+		if err := session.peer.SendControl(action, nil); err != nil {
+			return err
+		}
+	}
 	c.capturePaused.Store(paused)
 	if c.logger != nil {
 		if paused {

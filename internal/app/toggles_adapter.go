@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/lHumaNl/echowarp/internal/config"
+	"github.com/lHumaNl/echowarp/pkg/echowarp"
 	"github.com/lHumaNl/echowarp/pkg/echowarp/discovery"
 	ewerrors "github.com/lHumaNl/echowarp/pkg/echowarp/errors"
 )
@@ -32,6 +33,13 @@ import (
 // setting the same value twice is a no-op. Safe for concurrent use —
 // the underlying flag is an atomic.Bool.
 func (c *ClientApp) SetMuted(muted bool) error {
+	if c.cfg.Conference {
+		if err := c.SetAudioRoute(context.Background(), echowarp.AudioRouteRule{
+			Scope: conferenceReceive, Source: conferenceWildcard, Recipient: conferenceSelf, Muted: muted,
+		}); err != nil {
+			return err
+		}
+	}
 	c.incomingMuted.Store(muted)
 	if c.logger != nil {
 		c.logger.Info("Incoming audio mute toggled via API", "muted", muted)

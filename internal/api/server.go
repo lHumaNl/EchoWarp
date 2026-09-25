@@ -237,6 +237,8 @@ func (s *APIServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/discover", s.handleDiscover)
 	mux.HandleFunc("POST /api/v1/devices/{id}/mute", s.handleDeviceMute)
 	mux.HandleFunc("POST /api/v1/devices/{id}/volume", s.handleDeviceVolume)
+	mux.HandleFunc("GET /api/v1/audio/routes", s.handleAudioRoutes)
+	mux.HandleFunc("PUT /api/v1/audio/routes", s.handleSetAudioRoute)
 	mux.HandleFunc("GET /api/v1/conference/participants", s.handleConferenceParticipants)
 	mux.HandleFunc("POST /api/v1/conference/participants/{id}/mute", s.handleConferenceParticipantMute)
 	mux.HandleFunc("POST /api/v1/conference/participants/{id}/kick", s.handleConferenceParticipantKick)

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"time"
 
 	"github.com/lHumaNl/echowarp/pkg/echowarp"
@@ -53,6 +54,17 @@ func translateParticipantCommand(cmd echowarp.ParticipantCommand) ParticipantCom
 // valued ServerApp constructed outside NewServerApp) and an ErrBufferOverflow
 // error if the channel remains full longer than participantCommandEnqueueTimeout.
 func (s *ServerApp) HandleParticipantCommand(cmd echowarp.ParticipantCommand) error {
+	if s.cfg.Conference && s.conference != nil {
+		if !s.conference.mixer.HasParticipant(cmd.ID) {
+			return ewerrors.NewError(ewerrors.ErrConfigValidation, "Unknown conference participant")
+		}
+		if cmd.Action == echowarp.ParticipantActionKick {
+			s.KickClient(cmd.ID, "Removed by administrator")
+		} else {
+			s.conference.handleCommand(translateParticipantCommand(cmd))
+		}
+		return nil
+	}
 	if s.participantCmdChAPI == nil {
 		return ewerrors.NewError(ewerrors.ErrNotRunning, "Server participant command channel not initialized").
 			WithSuggestion("Construct ServerApp via NewServerApp")
@@ -110,6 +122,14 @@ func (s *ServerApp) Participants() []echowarp.ParticipantInfo {
 // non-nil (read-only, always empty) channel, matching the phase 4a
 // ClientApp.DeviceCommandChannel shape.
 func (c *ClientApp) HandleParticipantCommand(cmd echowarp.ParticipantCommand) error {
+	if c.cfg.Conference {
+		if cmd.Action != echowarp.ParticipantActionMute {
+			return ewerrors.NewError(ewerrors.ErrAuthFailed, "Clients cannot administer conference participants")
+		}
+		return c.SetAudioRoute(context.Background(), echowarp.AudioRouteRule{
+			Scope: conferenceReceive, Source: cmd.ID, Recipient: conferenceSelf, Muted: cmd.Muted,
+		})
+	}
 	if c.participantCmdChAPI == nil {
 		return ewerrors.NewError(ewerrors.ErrNotRunning, "Client participant command channel not initialized").
 			WithSuggestion("Construct ClientApp via NewClientApp")
@@ -137,5 +157,14 @@ func (c *ClientApp) HandleParticipantCommand(cmd echowarp.ParticipantCommand) er
 // TODO(task-013): cache the latest ConferenceParticipantsMsg snapshot on
 // ClientApp so it can be exposed here.
 func (c *ClientApp) Participants() []echowarp.ParticipantInfo {
+	if session := c.currentConference(); session != nil {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		result := make([]echowarp.ParticipantInfo, 0, len(session.sources))
+		for id, source := range session.sources {
+			result = append(result, echowarp.ParticipantInfo{ID: id, Muted: !source.state.Enabled, Volume: float64(source.state.Gain)})
+		}
+		return result
+	}
 	return []echowarp.ParticipantInfo{}
 }

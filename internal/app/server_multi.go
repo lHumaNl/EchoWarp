@@ -36,20 +36,27 @@ func (s *ServerApp) runMulti(ctx context.Context) error {
 	go s.processCommands(ctx)
 	go s.reportMultiStats(ctx)
 
-	// Initialize conference mix engine if in conference mode.
+	// The conference handler owns metadata/recording; the room forwards RTP only.
 	if s.cfg.Conference {
-		frameSize := int(s.cfg.SampleRate) * 20 / 1000 // 20ms frames
-		s.conference = NewConferenceHandler(frameSize, s.cfg.SampleRate, s.cfg.ServerMuted, s.logger)
 		if s.participantCmdCh != nil {
 			s.conference.WithParticipantCommands(s.participantCmdCh)
 		}
 		go s.conference.ProcessCommands(ctx)
 		go s.reportConferenceStats(ctx)
 
-		// Add server as participant and start server capture → mixer (unless server-muted).
+		conferenceCtx, cancelConference := context.WithCancel(ctx)
+		var workers sync.WaitGroup
+		defer func() {
+			cancelConference()
+			s.conferenceRoom.Close()
+			workers.Wait()
+			_, _, _, _ = s.conference.StopRecording()
+		}()
+		// Capture and encode once; fan out the server source like any other source.
 		if !s.cfg.ServerMuted {
+			s.conferenceRoom.AddServerSource()
 			s.conference.AddParticipant("server")
-			go s.runServerConferenceCapture(ctx)
+			workers.Go(func() { s.runServerConferenceCapture(conferenceCtx) })
 		}
 
 		// Start recording if --record flag was provided.
@@ -73,7 +80,7 @@ func (s *ServerApp) runMulti(ctx context.Context) error {
 		// Handle recording commands from TUI and periodic header flush.
 		go s.processRecordingCommands(ctx)
 		go s.flushRecordingHeaders(ctx)
-		go s.recordMixLoop(ctx)
+		workers.Go(func() { s.conference.RunRecording(conferenceCtx) })
 	}
 
 	// Process server pause toggle.
@@ -299,6 +306,9 @@ func (s *ServerApp) registerMultiClient(conn net.Conn, clientID string) (*multiC
 }
 
 func (s *ServerApp) unregisterMultiClient(mc *multiClient, clientID string, graceful bool) {
+	if s.conferenceRoom != nil {
+		s.conferenceRoom.RemovePeer(clientID)
+	}
 	s.mu.Lock()
 	delete(s.clients, clientID)
 	if graceful {
@@ -639,87 +649,31 @@ func (s *ServerApp) resetCaptureHub(hub *SharedCaptureHub) {
 	s.captureHubAGC = nil
 }
 
-// setupConferenceAudioPipeline creates bidirectional audio for conference mode:
-// - Receive: decode client audio → submit to conference mixer
-// - Send: get personal mix for client → encode → send back
+// setupConferenceAudioPipeline registers an authenticated RTP source. The room
+// negotiates independent outbound tracks after the control channel is ready.
 func (s *ServerApp) setupConferenceAudioPipeline(ctx context.Context, peer transport.PeerManager, clientID string, muteIncomingFlag *atomic.Bool) (<-chan error, error) {
 	audioDone := make(chan error, 2)
 
-	// Send track: personal mix → encode → client
-	sendCh, err := peer.AddAudioTrack(s.cfg.SampleRate, s.cfg.Channels)
-	if err != nil {
-		return nil, ewerrors.Wrap(err, ewerrors.ErrConnectionFailed, "add audio track for conference")
+	if s.conferenceRoom == nil {
+		return nil, fmt.Errorf("conference router is not initialized")
 	}
-
-	// Launch personal mix sender goroutine.
-	go func() {
-		audioDone <- s.runConferenceMixSender(ctx, sendCh, clientID)
-	}()
-
-	// Receive track: decode → conference mixer submit (+ AEC reference).
-	// No local playback — prevents echo/feedback loop on the server.
-	s.setupConferenceReceiver(ctx, peer, audioDone, clientID, muteIncomingFlag)
-
+	if err := s.conferenceRoom.AddPeer(ctx, clientID, peer); err != nil {
+		return nil, err
+	}
+	if muteIncomingFlag != nil {
+		s.conferenceRoom.SetIncomingBlocked(clientID, muteIncomingFlag.Load())
+	}
 	return audioDone, nil
-}
-
-// runConferenceMixSender periodically gets the personal mix for a client,
-// encodes it, and sends it via WebRTC.
-func (s *ServerApp) runConferenceMixSender(ctx context.Context, sendCh chan<- []byte, clientID string) error {
-	enc, err := audio.NewOpusEncoder(int(s.cfg.SampleRate), int(s.cfg.Channels), s.cfg.OpusApplication)
-	if err != nil {
-		return ewerrors.Wrap(err, ewerrors.ErrOpusEncode, "create conference opus encoder")
-	}
-	if err := enc.SetBitrate(s.cfg.OpusBitrate); err != nil {
-		s.logger.Warn("Failed to set opus bitrate", "error", err)
-	}
-
-	frameSize := int(s.cfg.SampleRate) / 50 * int(s.cfg.Channels) // 20ms
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			mix := s.conference.GetPersonalMix(clientID)
-			if mix == nil {
-				continue
-			}
-			// Ensure correct frame size.
-			if len(mix) != frameSize {
-				if len(mix) > frameSize {
-					mix = mix[:frameSize]
-				} else {
-					padded := make([]float32, frameSize)
-					copy(padded, mix)
-					s.conference.ReturnMixBuffer(mix)
-					mix = padded
-				}
-			}
-			encoded, encErr := enc.Encode(mix)
-			s.conference.ReturnMixBuffer(mix)
-			if encErr != nil {
-				s.logger.Warn("Conference opus encode error", "error", encErr, "clientID", clientID)
-				continue
-			}
-			metrics.AudioBytesSent.Add(float64(len(encoded)))
-			select {
-			case sendCh <- encoded:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-		}
-	}
 }
 
 // runMultiClientLoop runs the main event loop for a multi-client connection.
 // Returns true if the disconnect was graceful (client sent stop, or server shutdown).
 func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.Signaler, peer transport.PeerManager, audioDone <-chan error, clientID, nickname string, connStart time.Time, protocol *transport.ServerSignalingProtocol) bool {
+	ctx, cancelLoop := context.WithCancel(ctx)
 	var statsWg sync.WaitGroup
 	chatRegistered := false
 	defer func() {
+		cancelLoop()
 		if chatRegistered && s.chatHub != nil {
 			s.chatHub.Unregister(clientID)
 		}
@@ -810,6 +764,10 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 				}
 			}
 			_ = signaler.Close() //nolint:errcheck
+			if s.conferenceRoom != nil {
+				s.conferenceRoom.Ready(clientID)
+				s.broadcastParticipantsUpdate("")
+			}
 		case raw, ok := <-controlCh:
 			if !ok || len(raw) == 0 {
 				// Channel closed (peer disconnected) — abnormal.
@@ -869,64 +827,6 @@ func (s *ServerApp) runMultiClientLoop(ctx context.Context, signaler transport.S
 
 func (s *ServerApp) handleMultiClientMessage(msg transport.SignalingMessage, peer transport.PeerManager, clientID string, connStart time.Time, protocol *transport.ServerSignalingProtocol) bool {
 	return s.processSignalingMessage(msg, peer, connStart, clientID, protocol)
-}
-
-// runServerConferenceCapture captures audio from the server's microphone
-// and submits it to the conference mixer as the "server" participant.
-func (s *ServerApp) runServerConferenceCapture(ctx context.Context) {
-	capturer, err := audio.NewCapturer(s.cfg.SampleRate, s.cfg.Channels)
-	if err != nil {
-		s.logger.Error("Failed to create server conference capturer", "error", err)
-		return
-	}
-	defer func() { _ = capturer.Close() }() //nolint:errcheck
-
-	deviceID := uint32(0)
-	if s.cfg.DeviceID != nil {
-		deviceID = *s.cfg.DeviceID
-	} else if devs := s.cfg.CaptureDevices(); len(devs) > 0 {
-		deviceID = devs[0].ID
-	}
-
-	bufSize := s.cfg.EffectiveAudioBufferFrames()
-	if bufSize <= 0 {
-		bufSize = 5
-	}
-	pcmCh := make(chan []float32, bufSize)
-
-	go func() {
-		if err := capturer.Start(ctx, deviceID, pcmCh); err != nil && ctx.Err() == nil {
-			s.logger.Error("Server conference capture error", "error", err)
-		}
-	}()
-
-	frameSize := int(s.cfg.SampleRate) / 50 * int(s.cfg.Channels)
-	acc := audio.NewFrameAccumulator(frameSize)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case samples := <-pcmCh:
-			// Apply AEC to server capture if enabled.
-			if s.aec != nil && s.aec.IsEnabled() {
-				processed, aecErr := s.aec.Process(ctx, samples)
-				if aecErr == nil {
-					samples = processed
-				}
-			}
-			if s.spectrum != nil {
-				s.spectrum.Feed(samples)
-			}
-			if s.levelMeter != nil {
-				s.levelMeter.Feed(samples)
-			}
-			frames := acc.Write(samples)
-			for _, frame := range frames {
-				s.conference.SubmitAudio("server", frame)
-			}
-		}
-	}
 }
 
 // assignNickname returns a validated nickname for a client. If the requested nickname
@@ -1035,6 +935,7 @@ func (s *ServerApp) processServerPause(ctx context.Context) {
 				return
 			}
 			if s.conference != nil {
+				s.serverPaused.Store(paused)
 				s.conference.SetParticipantPaused("server", paused)
 				s.broadcastParticipantPause("server", paused)
 				s.logger.Info("Server pause state changed", "paused", paused)
@@ -1088,10 +989,19 @@ func (s *ServerApp) handleDCControlMulti(raw []byte, connStart time.Time, client
 	}
 
 	var ctrl struct {
-		Action string `json:"action"`
+		Action string          `json:"action"`
+		Data   json.RawMessage `json:"data,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &ctrl); err != nil {
 		return false
+	}
+	if s.conferenceRoom != nil {
+		if handled, err := s.conferenceRoom.HandleControl(clientID, ctrl.Action, ctrl.Data); handled {
+			if err != nil {
+				s.logger.Warn("Conference control rejected", "clientID", clientID, "error", err)
+			}
+			return false
+		}
 	}
 
 	// Resolve client info for per-client state.
@@ -1123,12 +1033,14 @@ func (s *ServerApp) handleDCControlMulti(raw []byte, connStart time.Time, client
 		if mc != nil {
 			mc.muted.Store(true)
 		}
+		s.setConferenceServerReceiveMute(clientID, true)
 		s.logger.Info(nickname + " muted server audio")
 		return false
 	case transport.ActionPeerUnmute:
 		if mc != nil {
 			mc.muted.Store(false)
 		}
+		s.setConferenceServerReceiveMute(clientID, false)
 		s.logger.Info(nickname + " unmuted server audio")
 		return false
 	case transport.ActionPause, transport.ActionPauseAll:

@@ -48,6 +48,10 @@ type MalgoPlayer struct {
 	ctx     *malgo.AllocatedContext
 	ownsCtx bool
 	device  *malgo.Device
+	// Cleanup runs only after the device has stopped invoking its callback.
+	releasePlayback func()
+	// A per-player release hook keeps ownership tests independent of sync.Pool/GC.
+	releasePCMBuffer func([]float32)
 
 	// silenceFills counts how many times the malgo callback could not read
 	// a full buffer's worth of samples from inCh and filled the remainder
@@ -134,7 +138,7 @@ func NewPlayer(sampleRate, channels uint32, opts ...PlayerOption) (*MalgoPlayer,
 // to prevent audio glitches.
 //
 // The deviceID is an index from ListOutputDevices(). The player stops automatically
-// when ctx is canceled or the input channel is closed.
+// when ctx is canceled. Closed input produces silence until cancellation or Close.
 func (p *MalgoPlayer) Start(ctx context.Context, deviceID uint32, inCh <-chan []float32) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -153,11 +157,13 @@ func (p *MalgoPlayer) Start(ctx context.Context, deviceID uint32, inCh <-chan []
 
 	device, err := malgo.InitDevice(p.ctx.Context, deviceConfig, malgo.DeviceCallbacks{Data: onSend})
 	if err != nil {
+		p.stopPlayback()
 		return ewerrors.Wrap(err, ewerrors.ErrDeviceInitFailed, "player: init device")
 	}
 
 	if err := device.Start(); err != nil {
 		device.Uninit()
+		p.stopPlayback()
 		return ewerrors.Wrap(err, ewerrors.ErrDeviceStartFailed, "player: start device")
 	}
 
@@ -195,46 +201,69 @@ func (p *MalgoPlayer) createDeviceConfig(deviceInfo *malgo.DeviceInfo) malgo.Dev
 }
 
 func (p *MalgoPlayer) createOnSendCallback(inCh <-chan []float32) func([]byte, []byte, uint32) {
-	var sampleBuf []float32
-	var bufOffset int
-
+	state := &playbackInput{in: inCh, put: p.releasePCMBuffer}
+	if state.put == nil {
+		state.put = putPCMBuffer
+	}
+	p.releasePlayback = state.release
 	return func(pSample, _ []byte, framecount uint32) {
 		samplesToWrite := int(framecount) * int(p.channels)
-		written := 0
 		p.recordCallbackStart(framecount)
-
-		for written < samplesToWrite {
-			if bufOffset >= len(sampleBuf) {
-				if sampleBuf != nil {
-					putPCMBuffer(sampleBuf)
-				}
-				select {
-				case newSamples := <-inCh:
-					sampleBuf = newSamples
-					bufOffset = 0
-				default:
-					zeroBytes(pSample[written*4:])
-					p.recordSilenceFill(samplesToWrite, written)
-					return
-				}
-			}
-
-			remaining := len(sampleBuf) - bufOffset
-			needed := samplesToWrite - written
-			toCopy := remaining
-			if toCopy > needed {
-				toCopy = needed
-			}
-
-			for i := 0; i < toCopy; i++ {
-				bits := math.Float32bits(sampleBuf[bufOffset+i])
-				binary.LittleEndian.PutUint32(pSample[(written+i)*4:], bits)
-			}
-
-			bufOffset += toCopy
-			written += toCopy
+		written := state.write(pSample, samplesToWrite)
+		if written < samplesToWrite {
+			zeroBytes(pSample[written*4:])
+			p.recordSilenceFill(samplesToWrite, written)
 		}
 	}
+}
+
+type playbackInput struct {
+	in     <-chan []float32
+	put    func([]float32)
+	buf    []float32
+	offset int
+}
+
+func (s *playbackInput) release() {
+	buf := s.buf
+	s.buf, s.offset = nil, 0 // Relinquish ownership before returning storage to the pool.
+	if buf != nil {
+		s.put(buf)
+	}
+}
+
+func (s *playbackInput) receive() bool {
+	if s.offset < len(s.buf) {
+		return true
+	}
+	s.release()
+	select {
+	case buf, ok := <-s.in:
+		s.buf = buf
+		if ok && len(buf) > 0 {
+			return true
+		}
+		s.release()
+	default:
+	}
+	return false
+}
+
+func (s *playbackInput) write(out []byte, samples int) int {
+	written := 0
+	for written < samples && s.receive() {
+		count := min(len(s.buf)-s.offset, samples-written)
+		for i := range count {
+			bits := math.Float32bits(s.buf[s.offset+i])
+			binary.LittleEndian.PutUint32(out[(written+i)*4:], bits)
+		}
+		s.offset += count
+		written += count
+		if s.offset == len(s.buf) {
+			s.release()
+		}
+	}
+	return written
 }
 
 func (p *MalgoPlayer) callbackUnixNano() int64 {
@@ -294,12 +323,20 @@ func updateAtomicMax(target *atomic.Uint64, value uint64) {
 func (p *MalgoPlayer) monitorContextCancellation(ctx context.Context) {
 	<-ctx.Done()
 	p.mu.Lock()
+	p.stopPlayback()
+	p.mu.Unlock()
+}
+
+func (p *MalgoPlayer) stopPlayback() {
 	if p.device != nil {
 		_ = p.device.Stop() //nolint:errcheck
 		p.device.Uninit()
 		p.device = nil
 	}
-	p.mu.Unlock()
+	if p.releasePlayback != nil {
+		p.releasePlayback()
+		p.releasePlayback = nil
+	}
 }
 
 // Close stops playback and releases all resources including the malgo context
@@ -308,11 +345,7 @@ func (p *MalgoPlayer) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.device != nil {
-		_ = p.device.Stop() //nolint:errcheck
-		p.device.Uninit()
-		p.device = nil
-	}
+	p.stopPlayback()
 
 	if p.ownsCtx && p.ctx != nil {
 		_ = p.ctx.Uninit() //nolint:errcheck

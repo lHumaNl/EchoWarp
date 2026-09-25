@@ -54,7 +54,8 @@ type ServerApp struct {
 	cmdCh <-chan ClientCommand
 
 	// Conference mode: mix engine handler (nil when not in conference mode).
-	conference *ConferenceHandler
+	conference     *ConferenceHandler
+	conferenceRoom *ConferenceRoom
 
 	// AEC processor shared between capture and playback pipelines in duplex mode.
 	aec *audio.AECProcessor
@@ -225,7 +226,8 @@ type multiClient struct {
 // All parameters except banMgr, tlsConfig, and rateLimiter can be nil.
 // Uses default factories if none provided.
 func NewServerApp(cfg config.Config, logger *slog.Logger, banMgr ban.BanManager, tlsConfig *tls.Config, rateLimiter *auth.IPRateLimiter) *ServerApp {
-	return &ServerApp{
+	cfg.NormalizeConference()
+	s := &ServerApp{
 		cfg:                 cfg,
 		logger:              logger,
 		banMgr:              banMgr,
@@ -239,6 +241,12 @@ func NewServerApp(cfg config.Config, logger *slog.Logger, banMgr ban.BanManager,
 		deviceCmdCh:         make(chan DeviceCommand, 16),
 		participantCmdChAPI: make(chan ParticipantCommand, 16),
 	}
+	if cfg.Conference {
+		s.conferenceRoom = NewConferenceRoom(logger)
+		s.conference = NewConferenceHandler(int(cfg.SampleRate)/50*int(cfg.Channels), cfg.SampleRate, cfg.ServerMuted, logger)
+		s.conference.AttachRoom(s.conferenceRoom, cfg.Channels)
+	}
+	return s
 }
 
 // ParticipantCommandChannel returns the internal participant command channel
@@ -449,7 +457,7 @@ func (s *ServerApp) Run(ctx context.Context) error {
 	defer func() { _ = s.SetDiscoveryPublish(false) }() //nolint:errcheck // adapter never errors on disable
 
 	// Initialize AEC processor for duplex mode.
-	if s.cfg.AEC && (s.cfg.Duplex || s.cfg.Conference) {
+	if s.cfg.AEC && s.cfg.Duplex && !s.cfg.Conference {
 		s.aec = audio.NewAECProcessor(audio.DefaultAECConfig())
 		s.logger.Info("AEC enabled", "filterLen", audio.DefaultAECConfig().FilterLength)
 	}
